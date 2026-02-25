@@ -46,6 +46,12 @@ export interface WorkspaceInitParams {
 
   /** Key workflows or tasks planned for this workspace */
   plannedTasks?: string[];
+
+  /** Whether to include Agent Skills (.github/skills/ and .github/agents/) */
+  includeAgentSkills?: boolean;
+
+  /** User intent for agent skill recommendation tuning */
+  agentSkillsIntent?: string;
 }
 
 /** Result of a single file generation */

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * workspace-init-mcp — MCP Server v2.0.0
+ * workspace-init-mcp — MCP Server v3.0.0
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -26,6 +26,14 @@ import {
   buildQuickStartMessages,
   buildAnalyzeMessages,
 } from "./prompts/index.js";
+import {
+  recommendAgentSkills,
+  searchAgentSkills,
+  listCategories,
+  AGENT_REGISTRY,
+  SKILL_REGISTRY,
+} from "./data/agent-skills-registry.js";
+import { generateSelectedSkills } from "./generators/agent-skills.js";
 
 // ---------------------------------------------------------------------------
 // Schema definitions (Zod)
@@ -86,6 +94,18 @@ const BaseWorkspaceInputSchema = z.object({
     .array(z.string())
     .optional()
     .describe("Key workflows or tasks planned for this workspace"),
+  includeAgentSkills: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether to include Agent Skills (.github/skills/ and .github/agents/). Default: true"
+    ),
+  agentSkillsIntent: z
+    .string()
+    .optional()
+    .describe(
+      "User intent for agent skill recommendation tuning (e.g., 'focus on testing and devops')"
+    ),
 });
 
 const InitializeWorkspaceInputSchema = BaseWorkspaceInputSchema.extend({
@@ -103,7 +123,7 @@ const InitializeWorkspaceInputSchema = BaseWorkspaceInputSchema.extend({
 
 const server = new McpServer({
   name: "workspace-init-mcp",
-  version: "2.0.0",
+  version: "3.0.0",
 });
 
 // ---------------------------------------------------------------------------
@@ -114,17 +134,22 @@ server.registerTool(
   "initialize_workspace",
   {
     title: "Initialize Workspace",
-    description: `Initialize a VS Code workspace with documentation governance, Copilot instructions, and project structure.
+    description: `Initialize a VS Code workspace with documentation governance, Copilot instructions, Agent Skills, and project structure.
 
 This tool creates a complete workspace setup including:
 - .github/copilot-instructions.md (global Copilot instructions)
+- .github/skills/ (Agent Skills — SKILL.md files per the agentskills.io standard)
+- .github/agents/ (Agent definitions — .agent.md files)
 - .vscode/settings.json (Copilot custom instruction references)
 - .vscode/*.instructions.md (code generation, test, review, commit, PR instructions)
 - docs/ (work-logs, troubleshooting, changelog, adr, and project-type-specific directories)
 - Initial changelog and work log entries
 
+Agent Skills are included by default (set includeAgentSkills: false to skip).
+Use agentSkillsIntent to tune which skills/agents are recommended.
+
 Required inputs: workspaceName, purpose, workspacePath
-Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMultiRepo, additionalContext, plannedTasks`,
+Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMultiRepo, additionalContext, plannedTasks, includeAgentSkills, agentSkillsIntent`,
     inputSchema: InitializeWorkspaceInputSchema,
   },
   async (params) => {
@@ -140,6 +165,8 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
         isMultiRepo: params.isMultiRepo,
         additionalContext: params.additionalContext,
         plannedTasks: params.plannedTasks,
+        includeAgentSkills: params.includeAgentSkills,
+        agentSkillsIntent: params.agentSkillsIntent,
       };
 
       // Generate all files
@@ -218,6 +245,8 @@ Useful for reviewing the planned structure before committing to it.`,
         isMultiRepo: params.isMultiRepo,
         additionalContext: params.additionalContext,
         plannedTasks: params.plannedTasks,
+        includeAgentSkills: params.includeAgentSkills,
+        agentSkillsIntent: params.agentSkillsIntent,
       };
 
       const files = collectFiles(initParams);
@@ -386,6 +415,259 @@ Kubernetes, monorepo markers, and many other project indicators.`,
         isError: true,
       };
     }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: recommend_agent_skills
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "recommend_agent_skills",
+  {
+    title: "Recommend Agent Skills",
+    description: `Recommend AI agent skills and agents based on project type, tech stack, and user intent.
+
+Returns a scored list of recommended:
+- **Skills** (.github/skills/): Portable, reusable AI capabilities (SKILL.md format)
+- **Agents** (.github/agents/): Specialized agent configurations (.agent.md format)
+
+The recommendation engine scores each entry based on:
+- Project type relevance
+- Tech stack keyword matching
+- User intent/tag matching
+- Priority level (core → recommended → specialized)
+
+Use this tool to help users discover and select appropriate agent skills
+before installing them with install_agent_skills.
+
+Follows the open Agent Skills standard: https://agentskills.io`,
+    inputSchema: z.object({
+      projectType: z
+        .enum(PROJECT_TYPES)
+        .optional()
+        .describe("Project type for relevance filtering"),
+      techStack: z
+        .array(z.string())
+        .optional()
+        .describe("Tech stack keywords for matching"),
+      userIntent: z
+        .string()
+        .optional()
+        .describe(
+          "Free-text intent for tuning (e.g., 'testing devops automation ci/cd')"
+        ),
+      maxAgents: z.number().optional().describe("Max agents to return (default: 10)"),
+      maxSkills: z.number().optional().describe("Max skills to return (default: 15)"),
+    }),
+  },
+  async (params) => {
+    const result = recommendAgentSkills({
+      projectType: params.projectType,
+      techStack: params.techStack,
+      userIntent: params.userIntent,
+      maxAgents: params.maxAgents,
+      maxSkills: params.maxSkills,
+    });
+    return { content: [{ type: "text" as const, text: result.summary }] };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: search_agent_skills
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "search_agent_skills",
+  {
+    title: "Search Agent Skills",
+    description: `Search the agent skills catalog by free-text query.
+
+Searches across names, descriptions, tags, and categories of all registered
+agents and skills. Use this when you need to find specific capabilities.`,
+    inputSchema: z.object({
+      query: z
+        .string()
+        .describe(
+          "Search query (e.g., 'testing', 'docker', 'react', 'security')"
+        ),
+    }),
+  },
+  async (params) => {
+    const result = searchAgentSkills(params.query);
+    return { content: [{ type: "text" as const, text: result.summary }] };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: install_agent_skills
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "install_agent_skills",
+  {
+    title: "Install Agent Skills",
+    description: `Install selected agent skills and agents into a workspace.
+
+Creates .github/skills/<id>/SKILL.md files and .github/agents/<id>.agent.md files
+for the specified skill and agent IDs. Files follow the open Agent Skills standard.
+
+Use recommend_agent_skills or search_agent_skills first to discover available
+skills and agents, then pass the selected IDs to this tool.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      skillIds: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Skill IDs to install (e.g., ['conventional-commit', 'create-specification'])"
+        ),
+      agentIds: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Agent IDs to install (e.g., ['plan', 'principal-software-engineer'])"
+        ),
+      force: z
+        .boolean()
+        .optional()
+        .describe("If true, overwrite existing files. Default: false"),
+    }),
+  },
+  async (params) => {
+    try {
+      const skillEntries = (params.skillIds ?? [])
+        .map((id) => SKILL_REGISTRY.find((s) => s.id === id))
+        .filter((s): s is NonNullable<typeof s> => s != null);
+
+      const agentEntries = (params.agentIds ?? [])
+        .map((id) => AGENT_REGISTRY.find((a) => a.id === id))
+        .filter((a): a is NonNullable<typeof a> => a != null);
+
+      if (skillEntries.length === 0 && agentEntries.length === 0) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "⚠️ 유효한 스킬/에이전트 ID가 없습니다. recommend_agent_skills 또는 search_agent_skills 로 사용 가능한 ID를 확인하세요.",
+            },
+          ],
+        };
+      }
+
+      // Find unrecognized IDs
+      const unknownSkills = (params.skillIds ?? []).filter(
+        (id) => !SKILL_REGISTRY.some((s) => s.id === id)
+      );
+      const unknownAgents = (params.agentIds ?? []).filter(
+        (id) => !AGENT_REGISTRY.some((a) => a.id === id)
+      );
+
+      const files = generateSelectedSkills(skillEntries, agentEntries);
+      const force = params.force ?? false;
+      const written: string[] = [];
+      const skipped: string[] = [];
+      const errors: string[] = [];
+
+      for (const file of files) {
+        const fullPath = path.join(params.workspacePath, file.relativePath);
+        try {
+          const dir = path.dirname(fullPath);
+          fs.mkdirSync(dir, { recursive: true });
+
+          if (!force && fs.existsSync(fullPath)) {
+            skipped.push(file.relativePath);
+            continue;
+          }
+
+          fs.writeFileSync(fullPath, file.content, "utf-8");
+          written.push(file.relativePath);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`${file.relativePath}: ${msg}`);
+        }
+      }
+
+      let text = `✅ Agent Skills 설치 완료\n\n`;
+      text += `📁 생성된 파일 (${written.length}개):\n${written.map((w) => `  - ${w}`).join("\n")}\n`;
+
+      if (skipped.length > 0) {
+        text += `\n⏭️ 이미 존재하여 건너뛴 파일 (${skipped.length}개):\n${skipped.map((s) => `  - ${s}`).join("\n")}`;
+        text += `\n  → 덮어쓰려면 force: true 로 다시 실행하세요.\n`;
+      }
+      if (unknownSkills.length > 0) {
+        text += `\n⚠️ 알 수 없는 스킬 ID: ${unknownSkills.join(", ")}`;
+      }
+      if (unknownAgents.length > 0) {
+        text += `\n⚠️ 알 수 없는 에이전트 ID: ${unknownAgents.join(", ")}`;
+      }
+      if (errors.length > 0) {
+        text += `\n\n❌ 오류:\n${errors.map((e) => `  - ${e}`).join("\n")}`;
+      }
+
+      return { content: [{ type: "text" as const, text }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          { type: "text" as const, text: `❌ 설치 실패: ${msg}` },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: list_agent_skills_catalog
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "list_agent_skills_catalog",
+  {
+    title: "List Agent Skills Catalog",
+    description: `List the full catalog of available agent skills and agents.
+
+Returns categorized lists of all registered skills and agents with their IDs,
+names, descriptions, and categories. Use this for browsing the full catalog.`,
+    inputSchema: z.object({
+      filter: z
+        .enum(["all", "agents", "skills"])
+        .optional()
+        .describe("Filter: 'all' (default), 'agents', or 'skills'"),
+    }),
+  },
+  async (params) => {
+    const filter = params.filter ?? "all";
+    const cats = listCategories();
+    const parts: string[] = [];
+
+    parts.push(`📚 Agent Skills 카탈로그\n`);
+
+    if (filter !== "skills") {
+      parts.push(`## 에이전트 (${AGENT_REGISTRY.length}개)\n`);
+      parts.push(`카테고리: ${cats.agentCategories.join(", ")}\n`);
+      for (const agent of AGENT_REGISTRY) {
+        parts.push(
+          `- **${agent.name}** (\`${agent.id}\`) [${agent.categories.join(", ")}] — ${agent.description}`
+        );
+      }
+      parts.push("");
+    }
+
+    if (filter !== "agents") {
+      parts.push(`## 스킬 (${SKILL_REGISTRY.length}개)\n`);
+      parts.push(`카테고리: ${cats.skillCategories.join(", ")}\n`);
+      for (const skill of SKILL_REGISTRY) {
+        parts.push(
+          `- **${skill.name}** (\`${skill.id}\`) [${skill.categories.join(", ")}] — ${skill.description}`
+        );
+      }
+    }
+
+    return { content: [{ type: "text" as const, text: parts.join("\n") }] };
   }
 );
 
@@ -559,13 +841,62 @@ server.registerResource(
 );
 
 // ---------------------------------------------------------------------------
+// Resources: Agent Skills catalog
+// ---------------------------------------------------------------------------
+
+server.registerResource(
+  "agent-skills-catalog",
+  "workspace-init://agent-skills",
+  {
+    title: "Agent Skills 카탈로그",
+    description:
+      "사용 가능한 모든 Agent Skills 및 에이전트 목록 (agentskills.io 표준 기반)",
+    mimeType: "application/json",
+  },
+  async (uri) => {
+    const catalog = {
+      standard: "https://agentskills.io",
+      agents: AGENT_REGISTRY.map((a) => ({
+        id: a.id,
+        name: a.name,
+        description: a.description,
+        categories: a.categories,
+        tags: a.tags,
+        relevantProjectTypes: a.relevantProjectTypes,
+        priority: a.priority,
+      })),
+      skills: SKILL_REGISTRY.map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        categories: s.categories,
+        tags: s.tags,
+        relevantProjectTypes: s.relevantProjectTypes,
+        hasResources: s.hasResources,
+        priority: s.priority,
+      })),
+    };
+
+    return {
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "application/json" as const,
+          text: JSON.stringify(catalog, null, 2),
+        },
+      ],
+    };
+  }
+);
+
+// ---------------------------------------------------------------------------
 // Start server
 // ---------------------------------------------------------------------------
 
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("workspace-init-mcp server v2.0.0 started on stdio");
+  console.error("workspace-init-mcp server v3.0.0 started on stdio");
 }
 
 main().catch((err) => {

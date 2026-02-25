@@ -17,6 +17,7 @@ import {
   generateDocsStructure,
   generateInitialChangelog,
   generateSetupWorkLog,
+  generateAgentSkills,
 } from "../generators/index.js";
 
 /**
@@ -40,7 +41,16 @@ export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
   // 3. Documentation governance structure
   files.push(...generateDocsStructure(params));
 
-  // 4. Initial changelog & work log (needs the file list from above)
+  // 4. Agent Skills (.github/skills/ and .github/agents/)
+  if (params.includeAgentSkills !== false) {
+    files.push(
+      ...generateAgentSkills(params, {
+        userIntent: params.agentSkillsIntent,
+      })
+    );
+  }
+
+  // 5. Initial changelog & work log (needs the file list from above)
   const relativePaths = files.map((f) => f.relativePath);
   files.push(generateInitialChangelog(params, relativePaths));
   files.push(generateSetupWorkLog(params, [...relativePaths, "docs/changelog/...", "docs/work-logs/..."]));
