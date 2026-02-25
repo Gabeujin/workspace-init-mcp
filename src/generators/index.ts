@@ -16,3 +16,7 @@ export {
   generateInitialChangelog,
   generateSetupWorkLog,
 } from "./changelog.js";
+export {
+  generateAgentSkills,
+  generateSelectedSkills,
+} from "./agent-skills.js";

@@ -3,9 +3,9 @@
 [![npm version](https://img.shields.io/npm/v/workspace-init-mcp)](https://www.npmjs.com/package/workspace-init-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-VS Code 워크스페이스를 문서 거버넌스, Copilot 지침, 프로젝트 구조와 함께 초기화하는 **MCP(Model Context Protocol) 서버**입니다.
+VS Code 워크스페이스를 문서 거버넌스, Copilot 지침, **Agent Skills**, 프로젝트 구조와 함께 초기화하는 **MCP(Model Context Protocol) 서버**입니다.
 
-> **v2.0.0** — MCP SDK 최신 API(`registerTool`/`registerPrompt`/`registerResource`) 적용, 폼 시스템·프롬프트·리소스·검증·분석 도구 추가
+> **v3.0.0** — Agent Skills (agentskills.io 오픈 표준) 통합, 50+ 에이전트 & 40+ 스킬 카탈로그, 프로젝트 유형별 자동 추천/설치
 
 ---
 
@@ -13,9 +13,10 @@ VS Code 워크스페이스를 문서 거버넌스, Copilot 지침, 프로젝트 
 
 새로운 프로젝트를 시작할 때, LLM에게 **"워크스페이스 초기화해 줘"** 라고 말하면 프로젝트 유형에 맞는 체계적인 구조가 자동으로 생성됩니다.
 
-- **6개 도구(Tools)** — 초기화, 미리보기, 프로젝트 유형 조회, 폼 스키마, 검증, 분석
+- **10개 도구(Tools)** — 초기화, 미리보기, 프로젝트 유형 조회, 폼 스키마, 검증, 분석, Agent Skills 추천/검색/설치/카탈로그
 - **3개 프롬프트(Prompts)** — 전체 설정 폼, 빠른 시작, 워크스페이스 분석
-- **2개 리소스(Resources)** — 프로젝트 유형 가이드 (정적 + 동적)
+- **3개 리소스(Resources)** — 프로젝트 유형 가이드 (정적 + 동적), Agent Skills 카탈로그
+- **Agent Skills 엔진** — [agentskills.io](https://agentskills.io) 오픈 표준 기반, 프로젝트별 맞춤 추천
 - **범용 폼 시스템** — CLI, VS Code, Claude Desktop, ChatGPT, Google AI Studio 등 모든 MCP 클라이언트에서 동작
 
 ### 생성되는 것들
@@ -23,6 +24,9 @@ VS Code 워크스페이스를 문서 거버넌스, Copilot 지침, 프로젝트 
 | 카테고리 | 파일 |
 |---|---|
 | Copilot 공통 지침 | `.github/copilot-instructions.md` |
+| **Agent Skills** | `.github/skills/<name>/SKILL.md` (프로젝트별 자동 추천) |
+| **Agent 정의** | `.github/agents/<name>.agent.md` (프로젝트별 자동 추천) |
+| Agent Skills 인덱스 | `.github/AGENT-SKILLS.md` (설치된 스킬/에이전트 목록) |
 | VS Code 커스텀 지침 | `.vscode/code-generation.instructions.md`, `test-generation`, `code-review`, `commit-message`, `pr-description` |
 | VS Code 설정 | `.vscode/settings.json` (Copilot 커스텀 지침 참조 설정) |
 | 문서 거버넌스 | `docs/work-logs/`, `troubleshooting/`, `changelog/`, `adr/` |
@@ -226,11 +230,12 @@ LLM에게 자연어로 요청하면, MCP 서버가 단계별로 안내합니다.
 
 ## 제공 기능 상세
 
-### 도구 (Tools) — 6개
+### 도구 (Tools) — 10개
 
 #### 1. `initialize_workspace`
 
 워크스페이스를 완전히 초기화합니다. 파일을 실제로 생성합니다.
+**v3.0.0부터 Agent Skills (`.github/skills/`, `.github/agents/`)도 자동 생성됩니다.**
 
 **필수 입력값:**
 
@@ -251,6 +256,8 @@ LLM에게 자연어로 요청하면, MCP 서버가 단계별로 안내합니다.
 | `isMultiRepo` | boolean | `false` | Multi-Repository 워크스페이스 여부 |
 | `additionalContext` | string | — | 추가 컨텍스트 또는 특별 요구사항 |
 | `plannedTasks` | string[] | `[]` | 예정된 주요 작업 목록 |
+| `includeAgentSkills` | boolean | `true` | Agent Skills 포함 여부 |
+| `agentSkillsIntent` | string | — | Agent Skills 추천 튜닝을 위한 사용자 의도 |
 | `force` | boolean | `false` | `true` 시 기존 파일을 덮어씀 |
 
 #### 2. `preview_workspace_init`
@@ -295,6 +302,45 @@ LLM에게 자연어로 요청하면, MCP 서버가 단계별로 안내합니다.
 
 **감지 대상:** TypeScript, React, Vue, Angular, Node.js, Python, Java, Go, Rust, Docker, Kubernetes, Terraform, Jupyter, 모노레포(lerna, nx, turborepo 등)
 
+#### 7. `recommend_agent_skills` *(v3.0.0 신규)*
+
+프로젝트 유형, 기술 스택, 사용자 의도에 기반하여 AI 에이전트 스킬을 추천합니다.
+
+| 파라미터 | 타입 | 설명 |
+|---|---|---|
+| `projectType` | enum (선택) | 프로젝트 유형 |
+| `techStack` | string[] (선택) | 기술 스택 키워드 |
+| `userIntent` | string (선택) | 추천 튜닝을 위한 자유 텍스트 (예: "testing devops automation") |
+| `maxAgents` | number (선택) | 반환할 최대 에이전트 수 (기본: 10) |
+| `maxSkills` | number (선택) | 반환할 최대 스킬 수 (기본: 15) |
+
+#### 8. `search_agent_skills` *(v3.0.0 신규)*
+
+Agent Skills 카탈로그에서 자유 텍스트 검색을 수행합니다.
+
+| 파라미터 | 타입 | 설명 |
+|---|---|---|
+| `query` | string | 검색어 (예: "docker", "react", "security") |
+
+#### 9. `install_agent_skills` *(v3.0.0 신규)*
+
+선택한 스킬과 에이전트를 워크스페이스에 설치합니다.
+
+| 파라미터 | 타입 | 설명 |
+|---|---|---|
+| `workspacePath` | string | 워크스페이스 루트 절대 경로 |
+| `skillIds` | string[] (선택) | 설치할 스킬 ID 목록 |
+| `agentIds` | string[] (선택) | 설치할 에이전트 ID 목록 |
+| `force` | boolean (선택) | 기존 파일 덮어쓰기 여부 |
+
+#### 10. `list_agent_skills_catalog` *(v3.0.0 신규)*
+
+전체 Agent Skills 카탈로그를 카테고리별로 나열합니다.
+
+| 파라미터 | 타입 | 설명 |
+|---|---|---|
+| `filter` | enum (선택) | `"all"` (기본), `"agents"`, `"skills"` |
+
 ---
 
 ### 프롬프트 (Prompts) — 3개
@@ -309,7 +355,7 @@ MCP 프롬프트는 클라이언트가 사용자에게 폼을 보여주는 표�
 
 ---
 
-### 리소스 (Resources) — 2개
+### 리소스 (Resources) — 3개
 
 MCP 리소스는 LLM이 참조할 수 있는 정적/동적 데이터를 제공합니다.
 
@@ -317,6 +363,51 @@ MCP 리소스는 LLM이 참조할 수 있는 정적/동적 데이터를 제공�
 |---|---|
 | `workspace-init://project-types` | 모든 프로젝트 유형의 종합 가이드 (Markdown) |
 | `workspace-init://project-types/{type}` | 특정 프로젝트 유형의 상세 설정 (JSON, 동적) |
+| `workspace-init://agent-skills` | Agent Skills 전체 카탈로그 (JSON) *(v3.0.0 신규)* |
+
+---
+
+## Agent Skills (v3.0.0 신규)
+
+[Agent Skills](https://agentskills.io)는 AI 에이전트의 능력을 표준화하는 오픈 표준입니다. VS Code, Claude, Cursor, OpenHands 등 다양한 AI 도구에서 호환됩니다.
+
+### 스킬 형식 (SKILL.md)
+
+```markdown
+---
+name: "My Skill"
+description: "What this skill does"
+argument-hint: "How to invoke"
+user-invokable: true
+disable-model-invocation: false
+---
+
+# Instructions for the AI agent...
+```
+
+### 카탈로그 개요
+
+| 분류 | 카테고리 | 주요 항목 |
+|---|---|---|
+| **에이전트** | planning, architecture, engineering, debugging, testing, devops, documentation, review, security, meta | Plan, Context Architect, Principal Software Engineer, Debug, DevOps Expert, Technical Writer, Code Reviewer 등 50+ |
+| **스킬** | blueprint, document-gen, code-gen, testing, devops, git, mcp, refactor, analysis, prompt, project-setup | Copilot Instructions Blueprint, Create Specification, Conventional Commit, Playwright Test Generator, Multi-Stage Dockerfile 등 40+ |
+
+### 프로젝트별 자동 추천
+
+`initialize_workspace` 호출 시, 프로젝트 유형과 기술 스택에 따라 적합한 스킬/에이전트가 자동으로 추천되어 설치됩니다:
+
+- **web-app + React**: React Frontend Engineer, Playwright Tester, Web App Testing, Create Specification 등
+- **api + Node.js**: API Architect, Debug, Conventional Commit, Multi-Stage Dockerfile 등
+- **devops**: DevOps Expert, Platform SRE Kubernetes, Terraform, GitHub Actions Expert 등
+
+### 스킬 검색 경로
+
+| AI 도구 | 검색 경로 |
+|---|---|
+| VS Code Copilot | `.github/skills/` |
+| Claude Code | `.claude/skills/` 또는 `.github/skills/` |
+| Cursor | `.cursor/skills/` 또는 `.github/skills/` |
+| OpenHands | `.agents/skills/` 또는 `.github/skills/` |
 
 ---
 
@@ -344,7 +435,21 @@ MCP 리소스는 LLM이 참조할 수 있는 정적/동적 데이터를 제공�
 ```
 <workspace>/
 ├── .github/
-│   └── copilot-instructions.md          # Copilot 공통 지침
+│   ├── copilot-instructions.md          # Copilot 공통 지침
+│   ├── AGENT-SKILLS.md                  # 설치된 스킬/에이전트 인덱스
+│   ├── skills/                          # Agent Skills (agentskills.io)
+│   │   ├── conventional-commit/
+│   │   │   └── SKILL.md
+│   │   ├── create-specification/
+│   │   │   └── SKILL.md
+│   │   ├── refactor/
+│   │   │   └── SKILL.md
+│   │   └── ... (프로젝트 유형별 자동 선택)
+│   └── agents/                          # Agent 정의
+│       ├── plan.agent.md
+│       ├── principal-software-engineer.agent.md
+│       ├── debug.agent.md
+│       └── ... (프로젝트 유형별 자동 선택)
 ├── .vscode/
 │   ├── settings.json                    # Copilot 커스텀 지침 참조 설정
 │   ├── code-generation.instructions.md  # 코드 생성 지침
@@ -452,6 +557,46 @@ MCP 리소스는 LLM이 참조할 수 있는 정적/동적 데이터를 제공�
 // → LLM이 사용자에게 보여줄 마크다운 형태의 입력 가이드 반환
 ```
 
+### 예시 6: Agent Skills 추천 *(v3.0.0 신규)*
+
+```json
+{
+  "tool": "recommend_agent_skills",
+  "arguments": {
+    "projectType": "web-app",
+    "techStack": ["TypeScript", "React", "Next.js"],
+    "userIntent": "testing devops ci/cd"
+  }
+}
+// → 프로젝트에 적합한 에이전트와 스킬 추천 목록 반환
+```
+
+### 예시 7: Agent Skills 검색 *(v3.0.0 신규)*
+
+```json
+{
+  "tool": "search_agent_skills",
+  "arguments": {
+    "query": "docker"
+  }
+}
+// → Docker 관련 에이전트와 스킬 검색 결과 반환
+```
+
+### 예시 8: Agent Skills 개별 설치 *(v3.0.0 신규)*
+
+```json
+{
+  "tool": "install_agent_skills",
+  "arguments": {
+    "workspacePath": "C:/projects/my-app",
+    "skillIds": ["conventional-commit", "multi-stage-dockerfile", "playwright-generate-test"],
+    "agentIds": ["debug", "devops-expert"]
+  }
+}
+// → 선택한 스킬과 에이전트를 .github/skills/ 및 .github/agents/ 에 설치
+```
+
 ---
 
 ## 프로젝트 구조
@@ -461,12 +606,15 @@ workspace-init-mcp/
 ├── src/
 │   ├── index.ts                     # MCP 서버 엔트리포인트 (Tools, Prompts, Resources 등록)
 │   ├── types.ts                     # 타입 정의 및 프로젝트 유형 설정
+│   ├── data/
+│   │   └── agent-skills-registry.ts # Agent Skills 카탈로그 (에이전트/스킬 레지스트리 + 추천 엔진)
 │   ├── generators/
 │   │   ├── index.ts                 # 제너레이터 배럴 export
 │   │   ├── copilot-instructions.ts  # Copilot 공통 지침 생성
 │   │   ├── settings.ts              # VS Code 설정 및 커스텀 지침 생성
 │   │   ├── docs-structure.ts        # 문서 디렉토리 구조 생성
-│   │   └── changelog.ts             # 변경 이력 및 작업 로그 생성
+│   │   ├── changelog.ts             # 변경 이력 및 작업 로그 생성
+│   │   └── agent-skills.ts          # Agent Skills & Agent 파일 생성 (SKILL.md, .agent.md)
 │   ├── tools/
 │   │   ├── initialize.ts            # 초기화 오케스트레이션
 │   │   ├── form-schema.ts           # 범용 JSON 폼 스키마 빌더
