@@ -13,7 +13,22 @@ export type ProjectType =
   | "creative"
   | "library"
   | "monorepo"
+  | "consulting"
+  | "ecommerce"
+  | "fintech"
+  | "healthcare"
+  | "saas"
+  | "iot"
   | "other";
+
+/** Supported file encodings for generated files */
+export type FileEncoding = "utf-8" | "utf-8-bom" | "ascii" | "latin1";
+
+/** Supported target IDEs for Agent Skills path generation */
+export type TargetIDE = "vscode" | "cursor" | "claude-code" | "openhands";
+
+/** Supported line ending styles */
+export type LineEnding = "lf" | "crlf" | "auto";
 
 /** Input parameters for workspace initialization */
 export interface WorkspaceInitParams {
@@ -52,6 +67,15 @@ export interface WorkspaceInitParams {
 
   /** User intent for agent skill recommendation tuning */
   agentSkillsIntent?: string;
+
+  /** File encoding for generated files (default: "utf-8") */
+  fileEncoding?: FileEncoding;
+
+  /** Target IDEs for Agent Skills file generation (default: ["vscode"]) */
+  targetIDEs?: TargetIDE[];
+
+  /** Line ending style for generated files (default: "lf") */
+  lineEnding?: LineEnding;
 }
 
 /** Result of a single file generation */
@@ -186,6 +210,84 @@ export const PROJECT_TYPE_CONFIGS: Record<ProjectType, ProjectTypeConfig> = {
       "패키지 간 의존성을 명확히 관리합니다.",
       "공유 코드와 개별 패키지의 경계를 명확히 합니다.",
       "패키지별 독립 빌드·테스트·배포가 가능하도록 구성합니다.",
+    ],
+  },
+  consulting: {
+    label: "컨설팅/SI",
+    description: "IT 컨설팅, SI 프로젝트, 제안서·산출물 기반 업무",
+    defaultTechStack: ["Markdown", "Excel"],
+    docSections: ["proposal-docs", "deliverables", "meeting-notes"],
+    extraInstructions: [
+      "RFP/RFI 요구사항을 체계적으로 분석하고 추적합니다.",
+      "WBS(Work Breakdown Structure)를 기반으로 프로젝트를 관리합니다.",
+      "산출물 목록과 버전을 명확히 관리합니다.",
+      "고객 커뮤니케이션 이력을 기록합니다.",
+      "일정·리스크·이슈를 지속적으로 추적합니다.",
+    ],
+  },
+  ecommerce: {
+    label: "이커머스/커머스",
+    description: "온라인 쇼핑몰, 결제·주문·상품 관리 시스템",
+    defaultTechStack: ["TypeScript", "Node.js"],
+    docSections: ["api-docs", "design-docs"],
+    extraInstructions: [
+      "결제(PG) 연동 시 보안 및 PCI-DSS 준수를 고려합니다.",
+      "주문·재고·배송 상태 관리의 일관성을 보장합니다.",
+      "상품 카탈로그와 가격 정책을 유연하게 설계합니다.",
+      "대규모 트래픽(프로모션, 세일)에 대비한 성능 설계를 합니다.",
+      "장바구니·위시리스트 등 사용자 경험을 최적화합니다.",
+    ],
+  },
+  fintech: {
+    label: "핀테크/금융",
+    description: "금융 서비스, 결제, 뱅킹, 투자 시스템",
+    defaultTechStack: ["Java", "Spring Boot"],
+    docSections: ["api-docs", "compliance-docs", "audit-logs"],
+    extraInstructions: [
+      "금융 규제(전자금융거래법, PCI-DSS 등)를 반드시 준수합니다.",
+      "모든 거래에 대한 감사 추적(Audit Trail)을 기록합니다.",
+      "데이터 암호화(전송 중·저장 시)를 필수 적용합니다.",
+      "이중화·장애 복구(DR) 전략을 수립합니다.",
+      "소수점 연산 정확성(BigDecimal 등)에 주의합니다.",
+    ],
+  },
+  healthcare: {
+    label: "헬스케어/의료",
+    description: "의료 정보 시스템, EMR, 건강관리 서비스",
+    defaultTechStack: ["Python", "TypeScript"],
+    docSections: ["api-docs", "compliance-docs"],
+    extraInstructions: [
+      "개인건강정보(PHI) 보호를 최우선으로 합니다 (HIPAA/개인정보보호법).",
+      "의료 데이터 표준(HL7 FHIR, DICOM 등)을 따릅니다.",
+      "접근 제어와 감사 로그를 철저히 관리합니다.",
+      "데이터 익명화·비식별화 처리를 적용합니다.",
+      "시스템 가용성과 데이터 무결성을 보장합니다.",
+    ],
+  },
+  saas: {
+    label: "SaaS 플랫폼",
+    description: "멀티테넌트 SaaS 서비스, 구독·과금 시스템",
+    defaultTechStack: ["TypeScript", "Node.js", "React"],
+    docSections: ["api-docs", "infra-docs", "design-docs"],
+    extraInstructions: [
+      "멀티테넌트 아키텍처에서 데이터 격리를 보장합니다.",
+      "구독·과금·청구(Billing) 로직의 정확성을 검증합니다.",
+      "테넌트별 커스터마이징과 확장성을 고려합니다.",
+      "온보딩·사용량 추적·분석 기능을 설계합니다.",
+      "SLA(Service Level Agreement)를 충족하는 가용성을 확보합니다.",
+    ],
+  },
+  iot: {
+    label: "IoT/임베디드",
+    description: "IoT 디바이스, 센서, 엣지 컴퓨팅, 펌웨어 개발",
+    defaultTechStack: ["C", "Python", "MQTT"],
+    docSections: ["infra-docs", "api-docs", "device-docs"],
+    extraInstructions: [
+      "디바이스-클라우드 간 통신 프로토콜(MQTT, CoAP 등)을 명확히 설계합니다.",
+      "OTA(Over-The-Air) 펌웨어 업데이트 전략을 수립합니다.",
+      "저전력·저대역폭 환경을 고려한 최적화를 수행합니다.",
+      "디바이스 프로비저닝과 보안 인증을 철저히 합니다.",
+      "엣지-클라우드 간 데이터 동기화 전략을 수립합니다.",
     ],
   },
   other: {

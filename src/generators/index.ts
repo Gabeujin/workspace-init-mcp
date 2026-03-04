@@ -10,6 +10,8 @@ export {
   generateReviewInstructions,
   generateCommitInstructions,
   generatePRInstructions,
+  generateEditorConfig,
+  generateGitAttributes,
 } from "./settings.js";
 export { generateDocsStructure } from "./docs-structure.js";
 export {

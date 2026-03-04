@@ -209,4 +209,46 @@ const DOC_SECTION_META: Record<
     fileNamePattern: "`<패키지명>.md`",
     contentGuide: "패키지 목적, 공개 API, 의존성, 빌드 설정",
   },
+  "proposal-docs": {
+    title: "제안서/산출물 (Proposals & Deliverables)",
+    description:
+      "이 디렉토리에는 프로젝트 제안서, RFP 분석, 요구사항 정의서가 정리됩니다.",
+    fileNamePattern: "`<프로젝트명>-proposal.md`",
+    contentGuide: "프로젝트 개요, 범위, 일정, 비용, 기대효과, 리스크",
+  },
+  deliverables: {
+    title: "산출물 관리 (Deliverables)",
+    description:
+      "이 디렉토리에는 프로젝트 산출물 목록과 버전 이력이 관리됩니다.",
+    fileNamePattern: "`<산출물명>-v<버전>.md`",
+    contentGuide: "산출물 목록, 버전, 검토 상태, 승인 이력",
+  },
+  "meeting-notes": {
+    title: "회의록 (Meeting Notes)",
+    description:
+      "이 디렉토리에는 고객·내부 회의록과 의사결정 사항이 기록됩니다.",
+    fileNamePattern: "`YYYY-MM-DD-<회의-주제>.md`",
+    contentGuide: "참석자, 안건, 논의 내용, 결정 사항, Action Items",
+  },
+  "compliance-docs": {
+    title: "규제·컴플라이언스 (Compliance Documentation)",
+    description:
+      "이 디렉토리에는 법적 규제 요건, 인증, 감사 대응 문서가 정리됩니다.",
+    fileNamePattern: "`<규제명>-compliance.md`",
+    contentGuide: "규제 요건, 준수 현황, 증적 자료, 감사 체크리스트",
+  },
+  "audit-logs": {
+    title: "감사 로그 (Audit Logs)",
+    description:
+      "이 디렉토리에는 시스템 감사 정책, 로그 형식, 보관 규칙이 정리됩니다.",
+    fileNamePattern: "`<시스템명>-audit-policy.md`",
+    contentGuide: "감사 대상, 로그 형식, 보관 기간, 접근 권한, 모니터링 룰",
+  },
+  "device-docs": {
+    title: "디바이스 문서 (Device Documentation)",
+    description:
+      "이 디렉토리에는 IoT 디바이스 스펙, 프로토콜, 펌웨어 정보가 정리됩니다.",
+    fileNamePattern: "`<디바이스명>-spec.md`",
+    contentGuide: "하드웨어 스펙, 통신 프로토콜, 펌웨어 버전, 프로비저닝 절차",
+  },
 };

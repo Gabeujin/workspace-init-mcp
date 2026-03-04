@@ -304,3 +304,89 @@ applyTo: "**"
     content,
   };
 }
+
+/** Generate .editorconfig for cross-editor consistency */
+export function generateEditorConfig(params: WorkspaceInitParams): GeneratedFile {
+  const encoding = params.fileEncoding ?? "utf-8";
+  // .editorconfig charset value: utf-8, utf-8-bom, latin1
+  const charset = encoding === "utf-8-bom" ? "utf-8-bom" : encoding === "latin1" ? "latin1" : "utf-8";
+  const eol = params.lineEnding === "crlf" ? "crlf" : "lf";
+
+  const content = `root = true
+
+[*]
+charset = ${charset}
+end_of_line = ${eol}
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.py]
+indent_size = 4
+
+[Makefile]
+indent_style = tab
+
+[*.go]
+indent_style = tab
+`;
+
+  return {
+    relativePath: ".editorconfig",
+    content,
+  };
+}
+
+/** Generate .gitattributes for cross-platform line ending consistency */
+export function generateGitAttributes(params: WorkspaceInitParams): GeneratedFile {
+  const lineEnding = params.lineEnding ?? "lf";
+  const eolSetting = lineEnding === "auto" ? "auto" : lineEnding === "crlf" ? "crlf" : "lf";
+  const eolDirective = lineEnding === "auto" ? "text=auto" : `text eol=${eolSetting}`;
+
+  const content = `# Auto-detect text files and normalize line endings
+* ${eolDirective}
+
+# Source code
+*.ts text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+*.tsx text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+*.js text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+*.jsx text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+*.py text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+*.java text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+*.go text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+*.rs text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+*.cs text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+*.rb text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+
+# Config & docs
+*.json text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+*.yaml text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+*.yml text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+*.md text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+*.toml text eol=${eolSetting === "auto" ? "lf" : eolSetting}
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.zip binary
+*.tar.gz binary
+*.pdf binary
+`;
+
+  return {
+    relativePath: ".gitattributes",
+    content,
+  };
+}

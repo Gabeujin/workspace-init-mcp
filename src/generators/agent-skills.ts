@@ -7,12 +7,31 @@
  * @see https://agentskills.io
  */
 
-import { type WorkspaceInitParams, type GeneratedFile } from "../types.js";
+import { type WorkspaceInitParams, type GeneratedFile, type TargetIDE } from "../types.js";
 import {
   type AgentEntry,
   type SkillEntry,
   recommendAgentSkills,
 } from "../data/agent-skills-registry.js";
+
+// ─── IDE Path Mapping ─────────────────────────────────────────────────────
+
+/** Directory prefixes for each target IDE */
+const IDE_PATH_MAP: Record<TargetIDE, { skills: string; agents: string }> = {
+  vscode: { skills: ".github/skills", agents: ".github/agents" },
+  cursor: { skills: ".cursor/skills", agents: ".cursor/agents" },
+  "claude-code": { skills: ".claude/skills", agents: ".claude/agents" },
+  openhands: { skills: ".agents/skills", agents: ".agents/agents" },
+};
+
+/**
+ * Get the list of IDE paths to generate for, based on params.targetIDEs.
+ * Defaults to ["vscode"] if not specified.
+ */
+function getTargetPaths(params: WorkspaceInitParams): { skills: string; agents: string }[] {
+  const targets = params.targetIDEs ?? ["vscode"];
+  return targets.map((ide) => IDE_PATH_MAP[ide]);
+}
 
 // ─── SKILL.md Content Builders ────────────────────────────────────────────
 
@@ -469,6 +488,7 @@ export function generateAgentSkills(
   }
 ): GeneratedFile[] {
   const files: GeneratedFile[] = [];
+  const targetPaths = getTargetPaths(params);
 
   // Get recommendation
   const { agents, skills } = recommendAgentSkills({
@@ -479,23 +499,24 @@ export function generateAgentSkills(
     maxSkills: options?.maxSkills ?? 12,
   });
 
-  // Generate SKILL.md files → .github/skills/<id>/SKILL.md
-  for (const skill of skills) {
-    files.push({
-      relativePath: `.github/skills/${skill.id}/SKILL.md`,
-      content: buildSkillMd(skill),
-    });
+  // Generate SKILL.md and .agent.md files for each target IDE path
+  for (const paths of targetPaths) {
+    for (const skill of skills) {
+      files.push({
+        relativePath: `${paths.skills}/${skill.id}/SKILL.md`,
+        content: buildSkillMd(skill),
+      });
+    }
+
+    for (const agent of agents) {
+      files.push({
+        relativePath: `${paths.agents}/${agent.id}.agent.md`,
+        content: buildAgentMd(agent),
+      });
+    }
   }
 
-  // Generate .agent.md files → .github/agents/<id>.agent.md
-  for (const agent of agents) {
-    files.push({
-      relativePath: `.github/agents/${agent.id}.agent.md`,
-      content: buildAgentMd(agent),
-    });
-  }
-
-  // Generate index/registry file
+  // Generate index/registry file (always in .github/)
   files.push(generateSkillsIndex(agents, skills, params));
 
   return files;
@@ -535,12 +556,21 @@ function generateSkillsIndex(
   skills: SkillEntry[],
   params: WorkspaceInitParams
 ): GeneratedFile {
+  const targetIDEs = params.targetIDEs ?? ["vscode"];
+
   const skillsList = skills
     .map((s) => `| [\`${s.id}\`](skills/${s.id}/SKILL.md) | ${s.name} | ${s.description} | ${s.categories.join(", ")} |`)
     .join("\n");
 
   const agentsList = agents
     .map((a) => `| [\`${a.id}\`](agents/${a.id}.agent.md) | ${a.name} | ${a.description} | ${a.categories.join(", ")} |`)
+    .join("\n");
+
+  const generatedPaths = targetIDEs
+    .map((ide) => {
+      const p = IDE_PATH_MAP[ide];
+      return `- **${ide}**: \`${p.skills}/\`, \`${p.agents}/\``;
+    })
     .join("\n");
 
   const content = `# Agent Skills & Agents Registry
@@ -560,12 +590,17 @@ ${skillsList}
 |---|---|---|---|
 ${agentsList}
 
+## Generated Paths
+
+Skills and agents have been generated for the following IDEs:
+${generatedPaths}
+
 ## Skill Discovery
 
 Skills are discovered automatically by compatible AI tools:
 - **VS Code Copilot**: Reads from \`.github/skills/\`
-- **Claude Code**: Reads from \`.claude/skills/\` or \`.github/skills/\`
 - **Cursor**: Reads from \`.cursor/skills/\` or \`.github/skills/\`
+- **Claude Code**: Reads from \`.claude/skills/\` or \`.github/skills/\`
 - **OpenHands**: Reads from \`.agents/skills/\` or \`.github/skills/\`
 
 ## Adding New Skills

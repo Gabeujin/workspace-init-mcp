@@ -18,6 +18,8 @@ import {
   generateInitialChangelog,
   generateSetupWorkLog,
   generateAgentSkills,
+  generateEditorConfig,
+  generateGitAttributes,
 } from "../generators/index.js";
 
 /**
@@ -38,10 +40,14 @@ export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
   files.push(generateCommitInstructions());
   files.push(generatePRInstructions());
 
-  // 3. Documentation governance structure
+  // 3. Cross-editor config files
+  files.push(generateEditorConfig(params));
+  files.push(generateGitAttributes(params));
+
+  // 4. Documentation governance structure
   files.push(...generateDocsStructure(params));
 
-  // 4. Agent Skills (.github/skills/ and .github/agents/)
+  // 5. Agent Skills (.github/skills/ and .github/agents/)
   if (params.includeAgentSkills !== false) {
     files.push(
       ...generateAgentSkills(params, {
@@ -50,7 +56,7 @@ export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
     );
   }
 
-  // 5. Initial changelog & work log (needs the file list from above)
+  // 6. Initial changelog & work log (needs the file list from above)
   const relativePaths = files.map((f) => f.relativePath);
   files.push(generateInitialChangelog(params, relativePaths));
   files.push(generateSetupWorkLog(params, [...relativePaths, "docs/changelog/...", "docs/work-logs/..."]));
@@ -80,6 +86,9 @@ ${relativePaths.map((p) => `  - ${p}`).join("\n")}
   - Multi-Repo: ${params.isMultiRepo ? "예" : "아니오"}
   - 문서 언어: ${params.docLanguage ?? "한국어"}
   - 코드 주석 언어: ${params.codeCommentLanguage ?? "English"}
+  - 파일 인코딩: ${params.fileEncoding ?? "utf-8"}
+  - 대상 IDE: ${(params.targetIDEs ?? ["vscode"]).join(", ")}
+  - 줄 끝 형식: ${params.lineEnding ?? "lf"}
 
 🚀 다음 단계:
   1. 생성된 .github/copilot-instructions.md 를 검토하고 필요에 맞게 조정하세요.

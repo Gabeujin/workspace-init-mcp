@@ -180,6 +180,45 @@ export function buildInitFormSchema(): FormSchema {
         "이미 존재하는 파일을 덮어쓸지 여부입니다. false이면 기존 파일을 건너뜁니다.",
       default: false,
     },
+    {
+      name: "fileEncoding",
+      label: "파일 인코딩 (File Encoding)",
+      type: "select",
+      required: false,
+      description:
+        'Generated file encoding. Default: "utf-8". Use "utf-8-bom" for Windows tools that require BOM.',
+      default: "utf-8",
+      options: [
+        { value: "utf-8", label: "UTF-8", description: "Standard UTF-8 (recommended)" },
+        { value: "utf-8-bom", label: "UTF-8 BOM", description: "UTF-8 with BOM — for legacy Windows tools" },
+        { value: "ascii", label: "ASCII", description: "7-bit ASCII" },
+        { value: "latin1", label: "Latin-1", description: "ISO 8859-1" },
+      ],
+    },
+    {
+      name: "targetIDEs",
+      label: "대상 IDE (Target IDEs)",
+      type: "tags",
+      required: false,
+      description:
+        'Target IDEs for Agent Skills file paths. Default: "vscode". Select multiple to generate skills into each IDE\'s directory.',
+      default: ["vscode"],
+      placeholder: "vscode, cursor, claude-code, openhands",
+    },
+    {
+      name: "lineEnding",
+      label: "줄 끝 형식 (Line Ending)",
+      type: "select",
+      required: false,
+      description:
+        'Line ending style for generated files and .gitattributes. Default: "lf".',
+      default: "lf",
+      options: [
+        { value: "lf", label: "LF", description: "Unix/macOS (recommended)" },
+        { value: "crlf", label: "CRLF", description: "Windows" },
+        { value: "auto", label: "Auto", description: "Let Git handle via .gitattributes" },
+      ],
+    },
   ];
 
   const conversationalGuide = buildConversationalGuide(

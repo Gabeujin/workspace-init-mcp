@@ -36,6 +36,26 @@ import {
 import { generateSelectedSkills } from "./generators/agent-skills.js";
 
 // ---------------------------------------------------------------------------
+// Encoding helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Write file content with the specified encoding.
+ * Handles utf-8-bom by prepending BOM to utf-8 output.
+ */
+function writeFileWithEncoding(
+  fullPath: string,
+  content: string,
+  encoding: string
+): void {
+  if (encoding === "utf-8-bom") {
+    fs.writeFileSync(fullPath, "\uFEFF" + content, "utf-8");
+  } else {
+    fs.writeFileSync(fullPath, content, encoding as BufferEncoding);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Schema definitions (Zod)
 // ---------------------------------------------------------------------------
 
@@ -49,6 +69,12 @@ const PROJECT_TYPES = [
   "creative",
   "library",
   "monorepo",
+  "consulting",
+  "ecommerce",
+  "fintech",
+  "healthcare",
+  "saas",
+  "iot",
   "other",
 ] as const;
 
@@ -68,7 +94,7 @@ const BaseWorkspaceInputSchema = z.object({
     .enum(PROJECT_TYPES)
     .optional()
     .describe(
-      "Type of project: learning, web-app, api, mobile, data-science, devops, creative, library, monorepo, other"
+      "Type of project: learning, web-app, api, mobile, data-science, devops, creative, library, monorepo, consulting, ecommerce, fintech, healthcare, saas, iot, other"
     ),
   techStack: z
     .array(z.string())
@@ -106,6 +132,24 @@ const BaseWorkspaceInputSchema = z.object({
     .describe(
       "User intent for agent skill recommendation tuning (e.g., 'focus on testing and devops')"
     ),
+  fileEncoding: z
+    .enum(["utf-8", "utf-8-bom", "ascii", "latin1"])
+    .optional()
+    .describe(
+      'File encoding for generated files (default: "utf-8"). Use "utf-8-bom" for Windows tools that require BOM.'
+    ),
+  targetIDEs: z
+    .array(z.enum(["vscode", "cursor", "claude-code", "openhands"]))
+    .optional()
+    .describe(
+      'Target IDEs for Agent Skills file paths (default: ["vscode"]). Select multiple to generate skills into each IDE\'s directory.'
+    ),
+  lineEnding: z
+    .enum(["lf", "crlf", "auto"])
+    .optional()
+    .describe(
+      'Line ending style for generated files and .gitattributes (default: "lf").'
+    ),
 });
 
 const InitializeWorkspaceInputSchema = BaseWorkspaceInputSchema.extend({
@@ -123,7 +167,7 @@ const InitializeWorkspaceInputSchema = BaseWorkspaceInputSchema.extend({
 
 const server = new McpServer({
   name: "workspace-init-mcp",
-  version: "3.0.0",
+  version: "3.1.0",
 });
 
 // ---------------------------------------------------------------------------
@@ -142,14 +186,17 @@ This tool creates a complete workspace setup including:
 - .github/agents/ (Agent definitions — .agent.md files)
 - .vscode/settings.json (Copilot custom instruction references)
 - .vscode/*.instructions.md (code generation, test, review, commit, PR instructions)
+- .editorconfig (cross-editor formatting consistency)
+- .gitattributes (cross-platform line ending consistency)
 - docs/ (work-logs, troubleshooting, changelog, adr, and project-type-specific directories)
 - Initial changelog and work log entries
 
 Agent Skills are included by default (set includeAgentSkills: false to skip).
-Use agentSkillsIntent to tune which skills/agents are recommended.
+Use targetIDEs to generate skills for multiple IDEs (vscode, cursor, claude-code, openhands).
+Use fileEncoding to set file encoding (default: utf-8). Use lineEnding to set line endings (default: lf).
 
 Required inputs: workspaceName, purpose, workspacePath
-Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMultiRepo, additionalContext, plannedTasks, includeAgentSkills, agentSkillsIntent`,
+Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMultiRepo, additionalContext, plannedTasks, includeAgentSkills, agentSkillsIntent, fileEncoding, targetIDEs, lineEnding`,
     inputSchema: InitializeWorkspaceInputSchema,
   },
   async (params) => {
@@ -167,6 +214,9 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
         plannedTasks: params.plannedTasks,
         includeAgentSkills: params.includeAgentSkills,
         agentSkillsIntent: params.agentSkillsIntent,
+        fileEncoding: params.fileEncoding as WorkspaceInitParams["fileEncoding"],
+        targetIDEs: params.targetIDEs as WorkspaceInitParams["targetIDEs"],
+        lineEnding: params.lineEnding as WorkspaceInitParams["lineEnding"],
       };
 
       // Generate all files
@@ -174,6 +224,7 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
 
       // Write files to disk
       const force = params.force ?? false;
+      const encoding = params.fileEncoding ?? "utf-8";
       const written: string[] = [];
       const skipped: string[] = [];
       const errors: string[] = [];
@@ -189,7 +240,7 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
             continue;
           }
 
-          fs.writeFileSync(fullPath, file.content, "utf-8");
+          writeFileWithEncoding(fullPath, file.content, encoding);
           written.push(file.relativePath);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -200,6 +251,15 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
       const result = buildSummary(initParams, files);
 
       let text = result.summary;
+
+      // Append environment info
+      const envInfo: string[] = [];
+      envInfo.push(`📁 File encoding: ${encoding}`);
+      const ides = params.targetIDEs ?? ["vscode"];
+      envInfo.push(`🎯 Target IDEs: ${ides.join(", ")}`);
+      envInfo.push(`↵ Line endings: ${params.lineEnding ?? "lf"}`);
+      text += `\n\n${envInfo.join("\n")}`;
+
       if (skipped.length > 0) {
         const skippedList = skipped.map((s) => `  - ${s}`).join("\n");
         text += `\n\n⏭️ 이미 존재하여 건너뛴 파일 (${skipped.length}개):\n${skippedList}`;
@@ -247,6 +307,9 @@ Useful for reviewing the planned structure before committing to it.`,
         plannedTasks: params.plannedTasks,
         includeAgentSkills: params.includeAgentSkills,
         agentSkillsIntent: params.agentSkillsIntent,
+        fileEncoding: params.fileEncoding as WorkspaceInitParams["fileEncoding"],
+        targetIDEs: params.targetIDEs as WorkspaceInitParams["targetIDEs"],
+        lineEnding: params.lineEnding as WorkspaceInitParams["lineEnding"],
       };
 
       const files = collectFiles(initParams);
@@ -694,7 +757,7 @@ server.registerPrompt(
       projectType: z
         .string()
         .optional()
-        .describe("프로젝트 유형: learning, web-app, api, mobile, data-science, devops, creative, library, monorepo, other"),
+        .describe("프로젝트 유형: learning, web-app, api, mobile, data-science, devops, creative, library, monorepo, consulting, ecommerce, fintech, healthcare, saas, iot, other"),
       techStack: z
         .string()
         .optional()
@@ -896,7 +959,7 @@ server.registerResource(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("workspace-init-mcp server v3.0.0 started on stdio");
+  console.error("workspace-init-mcp server v3.1.0 started on stdio");
 }
 
 main().catch((err) => {
