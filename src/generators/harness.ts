@@ -150,6 +150,9 @@ function buildHarnessManifest(
     "  dashboard_state: docs/ai-harness/dashboard/state/dashboard-state.json",
     "  dashboard_ops: docs/ai-harness/dashboard/scripts/dashboard-ops.mjs",
     "  dashboard_exports: docs/ai-harness/dashboard/exports/",
+    "  runtime_guide: docs/ai-harness/runtime/README.md",
+    "  runtime_session_index: docs/ai-harness/runtime/state/session-index.json",
+    "  runtime_active_session: docs/ai-harness/runtime/state/active-session.json",
     "escalation_triggers:",
     "  - unclear product intent",
     "  - cross-domain architecture impact",
@@ -338,6 +341,7 @@ This directory family defines how AI work is governed for **${params.workspaceNa
 - \`.github/ai-harness/context-strategy.md\`: when to compact vs reset context
 - \`.github/ai-harness/evaluation-rubrics.md\`: explicit grading criteria and quality thresholds
 - \`docs/ai-harness/dashboard/\`: JSON-first administrator dashboard and design system
+- \`docs/ai-harness/runtime/\`: planner / generator / evaluator runtime state, prompts, and session ledgers
 - \`docs/ai-harness/adoption-paths.md\`: legacy-project and greenfield DX/AX adoption playbook
 - \`docs/context/\`: durable context, assumptions, and open questions
 - \`docs/reviews/\`: three-pass review artifacts

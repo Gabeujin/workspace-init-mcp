@@ -21,6 +21,7 @@ import {
   generateEditorConfig,
   generateGitAttributes,
   generateHarnessFiles,
+  generateRuntimeOrchestratorFiles,
   generateInitialChangelog,
   generatePRInstructions,
   generateReviewInstructions,
@@ -65,6 +66,7 @@ export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
 
   // 6. AI harness engineering artifacts
   files.push(...generateHarnessFiles(params));
+  files.push(...generateRuntimeOrchestratorFiles(params));
   files.push(...generateDashboardFiles(params));
   files.push(...generateDashboardOperationFiles(params));
 
@@ -130,8 +132,9 @@ export function buildSummary(
     "  6. Use docs/ai-harness/dashboard/templates/*.state.json when you need a domain-specific starting point.",
     "  7. Run node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh to auto-sync artifacts and git state.",
     "  8. Run node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs export-static --out docs/ai-harness/dashboard/exports/latest when stakeholders need a portable snapshot.",
-    "  9. Tailor skill selection, dashboard KPIs, and operating rules to your real workflows.",
-    "  10. Keep docs/work-logs, docs/reviews, docs/contracts, docs/evaluations, docs/handovers, and dashboard state current as work evolves.",
+    "  9. Use start_harness_session, advance_harness_session, and get_harness_session_status to run real planner/generator/evaluator sessions.",
+    "  10. Tailor skill selection, dashboard KPIs, and operating rules to your real workflows.",
+    "  11. Keep docs/work-logs, docs/reviews, docs/contracts, docs/evaluations, docs/handovers, runtime session files, and dashboard state current as work evolves.",
   ].join("\n");
 
   return {

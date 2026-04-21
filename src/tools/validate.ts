@@ -167,6 +167,24 @@ const EXPECTED_FILES: Omit<ValidationItem, "status">[] = [
     severity: "recommended",
   },
   {
+    path: "docs/ai-harness/runtime/README.md",
+    label: "Runtime orchestrator guide",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/state/session-index.json",
+    label: "Runtime session index",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/state/active-session.json",
+    label: "Active runtime session snapshot",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
     path: "docs/ai-harness/dashboard/index.html",
     label: "Admin dashboard screen",
     category: "dashboard",

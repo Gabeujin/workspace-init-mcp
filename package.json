@@ -1,6 +1,6 @@
 {
   "name": "workspace-init-mcp",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "MCP server that initializes VS Code workspaces with documentation governance, Copilot instructions, Agent Skills (agentskills.io), and AI-native project structure",
   "type": "module",
   "main": "dist/index.js",
