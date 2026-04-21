@@ -8,11 +8,17 @@ const validateModule = await import("../dist/tools/validate.js");
 const registryModule = await import("../dist/data/agent-skills-registry.js");
 const generatorModule = await import("../dist/generators/agent-skills.js");
 const installModule = await import("../dist/tools/agent-skills-install.js");
+const runtimeModule = await import("../dist/tools/harness-runtime.js");
 
 const { collectFiles } = initModule;
 const { validateWorkspace } = validateModule;
 const { generateSelectedSkills } = generatorModule;
 const { resolveWorkspaceTargetIDEs } = installModule;
+const {
+  startHarnessSession,
+  advanceHarnessSession,
+  getHarnessSessionStatus,
+} = runtimeModule;
 const { SKILL_REGISTRY, AGENT_REGISTRY, recommendAgentSkills } = registryModule;
 
 function createParams() {
@@ -133,6 +139,7 @@ const dashboardHtml = byPath.get("docs/ai-harness/dashboard/index.html");
 assert.ok(dashboardHtml, "dashboard HTML not generated");
 assert.match(dashboardHtml, /AI Harness Dashboard/);
 assert.match(dashboardHtml, /Git-friendly/);
+assert.match(dashboardHtml, /runtime-orchestration/);
 
 const dashboardOpsReadme = byPath.get("docs/ai-harness/dashboard/scripts/README.md");
 assert.ok(dashboardOpsReadme, "dashboard operations README not generated");
@@ -142,6 +149,23 @@ const dashboardOpsScript = byPath.get("docs/ai-harness/dashboard/scripts/dashboa
 assert.ok(dashboardOpsScript, "dashboard operations script not generated");
 assert.match(dashboardOpsScript, /export-static/);
 assert.match(dashboardOpsScript, /serve/);
+
+const runtimeReadme = byPath.get("docs/ai-harness/runtime/README.md");
+assert.ok(runtimeReadme, "runtime orchestrator README not generated");
+assert.match(runtimeReadme, /start_harness_session/);
+
+const runtimeStateMachine = byPath.get("docs/ai-harness/runtime/state-machine.md");
+assert.ok(runtimeStateMachine, "runtime state machine not generated");
+assert.match(runtimeStateMachine, /contract-review/);
+assert.match(runtimeStateMachine, /context_reset/);
+
+const runtimeSessionIndex = byPath.get("docs/ai-harness/runtime/state/session-index.json");
+assert.ok(runtimeSessionIndex, "runtime session index not generated");
+assert.equal(JSON.parse(runtimeSessionIndex).activeSessionId, null);
+
+const runtimeActiveSession = byPath.get("docs/ai-harness/runtime/state/active-session.json");
+assert.ok(runtimeActiveSession, "runtime active session template not generated");
+assert.equal(JSON.parse(runtimeActiveSession).status, "idle");
 
 const dashboardState = byPath.get("docs/ai-harness/dashboard/state/dashboard-state.json");
 assert.ok(dashboardState, "dashboard state JSON not generated");
@@ -191,6 +215,15 @@ assert.ok(
 assert.ok(
   parsedDashboardState.artifacts.some((artifact) => artifact.id === "evaluation-ledger"),
   "dashboard should include the evaluation ledger artifact"
+);
+assert.ok(
+  parsedDashboardState.artifacts.some((artifact) => artifact.id === "runtime-session-index"),
+  "dashboard should include the runtime session index artifact"
+);
+assert.equal(
+  parsedDashboardState.runtimeOrchestration.currentPhase,
+  "awaiting-session-start",
+  "dashboard should expose runtime orchestration state before the first session starts"
 );
 assert.ok(
   parsedDashboardState.gitStatus.auditExpectations.includes("Track dashboard JSON files in version control."),
@@ -417,6 +450,90 @@ try {
   const generatedFiles = collectFiles(createParams());
   writeGeneratedFiles(fullWorkspace, generatedFiles);
 
+  const startedSession = startHarnessSession({
+    workspacePath: fullWorkspace,
+    goal: "Deliver the first governed runtime-backed feature slice.",
+    sessionId: "session-runtime-001",
+    chunkId: "chunk-runtime-001",
+    chunkTitle: "First governed runtime slice",
+  });
+  assert.equal(startedSession.currentPhase, "plan-1");
+  assert.equal(startedSession.nextActor, "planner");
+
+  const sessionStatus = getHarnessSessionStatus(fullWorkspace);
+  assert.match(sessionStatus.summary, /Current phase: plan-1/);
+  assert.match(sessionStatus.summary, /Next actor: planner/);
+
+  const reviewTransition = advanceHarnessSession({
+    workspacePath: fullWorkspace,
+    action: "complete",
+    actorRole: "planner",
+    note: "Plan 1 complete and ready for evaluator review.",
+  });
+  assert.equal(reviewTransition.currentPhase, "review-1");
+  assert.equal(reviewTransition.nextActor, "evaluator");
+
+  const reworkTransition = advanceHarnessSession({
+    workspacePath: fullWorkspace,
+    action: "request_changes",
+    actorRole: "evaluator",
+    note: "The first plan needs tighter done criteria before we proceed.",
+  });
+  assert.equal(reworkTransition.currentPhase, "plan-1");
+  assert.equal(reworkTransition.nextActor, "planner");
+
+  const resetTransition = advanceHarnessSession({
+    workspacePath: fullWorkspace,
+    action: "context_reset",
+    actorRole: "planner",
+    note: "Reset the session context before rewriting Plan 1.",
+    nextStep: "Resume Plan 1 from the latest handover and tighten the done criteria.",
+  });
+  assert.equal(resetTransition.currentPhase, "plan-1");
+  assert.equal(resetTransition.nextActor, "planner");
+  assert.ok(
+    fs.existsSync(
+      path.join(
+        fullWorkspace,
+        "docs",
+        "handovers",
+        "session-runtime-001",
+        "chunk-runtime-001-context-reset-1.md"
+      )
+    ),
+    "context reset should generate a durable handover artifact"
+  );
+
+  const runtimeDashboardState = JSON.parse(
+    fs.readFileSync(
+      path.join(
+        fullWorkspace,
+        "docs",
+        "ai-harness",
+        "dashboard",
+        "state",
+        "dashboard-state.json"
+      ),
+      "utf-8"
+    )
+  );
+  assert.equal(
+    runtimeDashboardState.runtimeOrchestration.activeSessionId,
+    "session-runtime-001"
+  );
+  assert.equal(runtimeDashboardState.runtimeOrchestration.currentPhase, "plan-1");
+  assert.equal(runtimeDashboardState.progressState.activeChunk, "chunk-runtime-001");
+  assert.ok(
+    runtimeDashboardState.sessionLog.some((session) => session.id === "session-runtime-001"),
+    "runtime sync should add the governed session to the dashboard session log"
+  );
+  assert.ok(
+    runtimeDashboardState.governedSessions.some(
+      (session) => session.id === "session-runtime-001"
+    ),
+    "runtime sync should add the governed session to the dashboard governed sessions"
+  );
+
   const validation = validateWorkspace(fullWorkspace);
   assert.equal(validation.isInitialized, true, "generated workspace should validate as initialized");
   assert.equal(
@@ -531,6 +648,11 @@ try {
   assert.notEqual(refreshedState.gitStatus.lastCommit.sha, "TBD");
   assert.equal(refreshedState.executiveSummary.currentStage, "plan-2");
   assert.equal(refreshedState.kpiProfile.id, "software-devops-governed-kpis");
+  assert.equal(
+    refreshedState.runtimeOrchestration.activeSessionId,
+    "session-runtime-001",
+    "dashboard refresh should preserve runtime orchestration state"
+  );
   assert.ok(
     refreshedState.governanceState.requiredKpiIds.includes("session-governance-coverage"),
     "refresh should keep required KPI coverage aligned with the governance profile"

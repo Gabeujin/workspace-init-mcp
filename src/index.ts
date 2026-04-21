@@ -1,7 +1,7 @@
 ﻿#!/usr/bin/env node
 
 /**
- * workspace-init-mcp MCP Server v4.0.0
+ * workspace-init-mcp MCP Server v4.0.1
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -25,6 +25,11 @@ import {
 import { buildInitFormSchema } from "./tools/form-schema.js";
 import { validateWorkspace } from "./tools/validate.js";
 import { analyzeWorkspace } from "./tools/status.js";
+import {
+  startHarnessSession,
+  advanceHarnessSession,
+  getHarnessSessionStatus,
+} from "./tools/harness-runtime.js";
 import {
   buildWorkspaceInitMessages,
   buildQuickStartMessages,
@@ -82,6 +87,21 @@ const PROJECT_TYPES = [
   "saas",
   "iot",
   "other",
+] as const;
+
+const HARNESS_RUNTIME_ACTIONS = [
+  "complete",
+  "request_changes",
+  "block",
+  "resume",
+  "context_reset",
+] as const;
+
+const HARNESS_RUNTIME_ACTORS = [
+  "planner",
+  "generator",
+  "evaluator",
+  "operator",
 ] as const;
 
 const BaseWorkspaceInputSchema = z.object({
@@ -201,7 +221,7 @@ const InitializeWorkspaceInputSchema = BaseWorkspaceInputSchema.extend({
 
 const server = new McpServer({
   name: "workspace-init-mcp",
-  version: "4.0.0",
+  version: "4.0.1",
 });
 
 // ---------------------------------------------------------------------------
@@ -219,6 +239,7 @@ This tool creates a complete workspace setup including:
 - .github/skills/ (Agent Skills - SKILL.md files per the agentskills.io standard)
 - .github/agents/ (Agent definitions - .agent.md files)
 - docs/ai-harness/dashboard/ (JSON-first admin dashboard with progress, KPI, issue, and git visibility)
+- docs/ai-harness/runtime/ (planner / generator / evaluator runtime state, prompts, and session ledgers)
 - docs/ai-harness/dashboard/scripts/dashboard-ops.mjs (dashboard refresh, strict validation, local preview server, and static export)
 - .vscode/settings.json (Copilot custom instruction references)
 - .vscode/*.instructions.md (code generation, test, review, commit, PR instructions)
@@ -510,6 +531,189 @@ Checks for the presence of all expected files (.github/copilot-instructions.md,
       const msg = err instanceof Error ? err.message : String(err);
       return {
         content: [{ type: "text" as const, text: `Validation failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: start_harness_session
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "start_harness_session",
+  {
+    title: "Start Harness Session",
+    description: `Start a real planner / generator / evaluator runtime session inside an initialized workspace.
+
+This tool:
+- opens governed runtime state under docs/ai-harness/runtime/
+- creates a durable session JSON snapshot and markdown summary
+- seeds the first chunk and moves the workflow to plan-1
+- synchronizes the administrator dashboard so non-developers can see the active session
+
+Use this before meaningful implementation begins. The session is file-system-based and survives context resets, long-running work, and interrupted sessions.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      goal: z
+        .string()
+        .describe("Approved goal for the next bounded chunk or governed session"),
+      title: z
+        .string()
+        .optional()
+        .describe("Human-readable session title. Defaults to a trimmed goal summary."),
+      sessionId: z
+        .string()
+        .optional()
+        .describe("Optional custom session ID. Useful when external governance already assigned one."),
+      chunkId: z
+        .string()
+        .optional()
+        .describe("Optional custom chunk ID for the bounded implementation scope."),
+      chunkTitle: z
+        .string()
+        .optional()
+        .describe("Human-readable chunk title. Defaults to a trimmed goal summary."),
+      adoptionTrack: z
+        .enum(["legacy-modernization", "greenfield"])
+        .optional()
+        .describe('Whether this governed session belongs to a legacy modernization track or a greenfield track. Default: "greenfield".'),
+      contextPolicy: z
+        .enum(["balanced", "prefer-reset", "prefer-compaction"])
+        .optional()
+        .describe('Context handling preference for long-running work. Default: "balanced".'),
+      force: z
+        .boolean()
+        .optional()
+        .describe("If true, allow replacing the active session pointer when the previous active session is already closed."),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = startHarnessSession({
+        workspacePath: params.workspacePath,
+        goal: params.goal,
+        title: params.title,
+        sessionId: params.sessionId,
+        chunkId: params.chunkId,
+        chunkTitle: params.chunkTitle,
+        adoptionTrack: params.adoptionTrack,
+        contextPolicy: params.contextPolicy,
+        force: params.force,
+      });
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to start harness session: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: advance_harness_session
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "advance_harness_session",
+  {
+    title: "Advance Harness Session",
+    description: `Advance the active planner / generator / evaluator runtime session through the governed state machine.
+
+Use this tool after each meaningful phase step. The action determines how the current phase changes:
+- complete: move to the next approved phase
+- request_changes: send the work back to the required rework phase
+- block: mark the session blocked without changing phase
+- resume: clear a blocked session and continue
+- context_reset: write a handover for a fresh AI session while keeping the same phase active
+
+Every transition writes durable evidence into the runtime session files and re-syncs the dashboard.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      sessionId: z
+        .string()
+        .optional()
+        .describe("Optional session ID. If omitted, the MCP uses the active runtime session."),
+      action: z
+        .enum(HARNESS_RUNTIME_ACTIONS)
+        .describe("Transition action to apply to the current active phase"),
+      actorRole: z
+        .enum(HARNESS_RUNTIME_ACTORS)
+        .describe("Role performing this phase transition"),
+      note: z
+        .string()
+        .describe("Durable note describing what changed, what was decided, or why the session is blocked"),
+      artifactPaths: z
+        .array(z.string())
+        .optional()
+        .describe("Additional workspace-relative artifact paths that should be linked to this transition"),
+      nextStep: z
+        .string()
+        .optional()
+        .describe("Optional explicit next-step instruction to override the default phase guidance"),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = advanceHarnessSession({
+        workspacePath: params.workspacePath,
+        sessionId: params.sessionId,
+        action: params.action,
+        actorRole: params.actorRole,
+        note: params.note,
+        artifactPaths: params.artifactPaths,
+        nextStep: params.nextStep,
+      });
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to advance harness session: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: get_harness_session_status
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "get_harness_session_status",
+  {
+    title: "Get Harness Session Status",
+    description: `Read the current planner / generator / evaluator runtime session and summarize the next actor, current phase, evidence paths, and resumable instruction.
+
+Use this when:
+- a fresh AI session needs to resume ongoing work
+- an operator wants the latest governed runtime status
+- you need the next actor brief before planning, generation, or evaluation continues`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      sessionId: z
+        .string()
+        .optional()
+        .describe("Optional session ID. If omitted, the MCP uses the active runtime session."),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = getHarnessSessionStatus(params.workspacePath, params.sessionId);
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to read harness session status: ${msg}` }],
         isError: true,
       };
     }
@@ -1080,7 +1284,7 @@ server.registerResource(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("workspace-init-mcp server v4.0.0 started on stdio");
+  console.error("workspace-init-mcp server v4.0.1 started on stdio");
 }
 
 main().catch((err) => {

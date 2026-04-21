@@ -147,6 +147,27 @@ function buildDashboardState(params: WorkspaceInitParams) {
       status: "present",
       owner: "harness-quality-gate",
     },
+    {
+      id: "runtime-readme",
+      label: "Runtime Orchestrator Guide",
+      path: "docs/ai-harness/runtime/README.md",
+      status: "present",
+      owner: "harness-implementation-orchestrator",
+    },
+    {
+      id: "runtime-session-index",
+      label: "Runtime Session Index",
+      path: "docs/ai-harness/runtime/state/session-index.json",
+      status: "present",
+      owner: "harness-dashboard-operator",
+    },
+    {
+      id: "runtime-active-session",
+      label: "Active Runtime Session",
+      path: "docs/ai-harness/runtime/state/active-session.json",
+      status: "present",
+      owner: "harness-dashboard-operator",
+    },
   ];
 
   const commonState = {
@@ -346,6 +367,35 @@ function buildDashboardState(params: WorkspaceInitParams) {
           "Replace bootstrap placeholders with the first approved task, evidence set, and KPI values.",
       },
     ],
+    runtimeOrchestration: {
+      mode: "planner-generator-evaluator",
+      activeSessionId: null,
+      activeChunkId: "chunk-unset",
+      currentPhase: "awaiting-session-start",
+      nextActor: "planner",
+      nextAction:
+        "Start the first governed runtime session before implementation begins.",
+      contextPolicy:
+        "Prefer context resets when drift or context anxiety appears; compact only after durable handoff artifacts exist.",
+      contractCoverageRule:
+        "No generator implementation begins before the evaluator-approved chunk contract exists.",
+      evaluatorRule:
+        "The generator may not self-approve; an independent evaluator records the pass or change-request verdict.",
+      lastEventAt: "bootstrap",
+      stateFile: "docs/ai-harness/runtime/state/active-session.json",
+      sessionIndexFile: "docs/ai-harness/runtime/state/session-index.json",
+      sessionSummaryFile: "docs/ai-harness/runtime/sessions/",
+      recentEvents: [
+        {
+          at: "bootstrap",
+          phase: "governance-open",
+          actor: "planner",
+          action: "bootstrap",
+          outcome: "ready-for-session-start",
+          note: "Runtime scaffolding created. Open the first governed session before implementation begins.",
+        },
+      ],
+    },
     artifacts,
   };
 
@@ -610,6 +660,7 @@ This dashboard turns the AI harness into an operator-friendly control board for 
 - \`state/dashboard-state.schema.json\`: JSON schema for editors and validation
 - \`templates/*.state.json\`: domain-oriented starter states for software, narrative, learning, and generic transformation work
 - \`scripts/dashboard-ops.mjs\`: refresh, validate, serve, and export operations
+- \`../runtime/\`: planner / generator / evaluator runtime state, prompts, and session ledgers
 - \`design-system.md\`: design principles for simple, high-readability admin screens
 - linked governance artifacts in \`docs/contracts/\`, \`docs/evaluations/\`, and \`.github/ai-harness/\`
 
@@ -621,7 +672,7 @@ This dashboard turns the AI harness into an operator-friendly control board for 
 4. Keep entries short enough for operators and non-developers to scan quickly.
 5. Keep governed session records aligned with plan, contract, review, verification, and git evidence.
 6. Record independent evaluation status separately from generator progress notes.
-7. Treat the dashboard as a complement to \`docs/context/\`, \`docs/reviews/\`, \`docs/contracts/\`, and \`docs/handovers/\`, not a replacement.
+7. Treat the dashboard as a complement to \`docs/context/\`, \`docs/reviews/\`, \`docs/contracts/\`, \`docs/handovers/\`, and \`docs/ai-harness/runtime/\`, not a replacement.
 
 ## Domain Coverage
 
@@ -634,7 +685,8 @@ This dashboard turns the AI harness into an operator-friendly control board for 
 
 1. Start from \`state/dashboard-state.json\` for the live workspace state.
 2. Use the files in \`templates/\` as reference when the workspace expands into a new domain lens.
-3. Keep dashboard JSON tracked in git so operators can audit how the mission changed over time.
+3. Start governed execution with \`start_harness_session\`, then keep runtime and dashboard state aligned with each phase change.
+4. Keep dashboard JSON tracked in git so operators can audit how the mission changed over time.
 `;
 }
 
@@ -1255,6 +1307,7 @@ function buildDashboardHtml(
         <section class="panel panel-wide" id="executive-summary"></section>
         <section class="panel" id="progress-state"></section>
         <section class="panel" id="governance-state"></section>
+        <section class="panel" id="runtime-orchestration"></section>
         <section class="panel" id="git-status"></section>
         <section class="panel panel-wide" id="kpis"></section>
         <section class="panel panel-wide" id="errors"></section>
@@ -1681,6 +1734,65 @@ function renderGovernanceState(state) {
   \`;
 }
 
+function deriveRuntimeOrchestration(state) {
+  if (state.runtimeOrchestration && typeof state.runtimeOrchestration === "object") {
+    return state.runtimeOrchestration;
+  }
+
+  const governedSessions = Array.isArray(state.governedSessions) ? state.governedSessions : [];
+  const latestSession = governedSessions.length > 0 ? governedSessions[governedSessions.length - 1] : {};
+  return {
+    mode: "planner-generator-evaluator",
+    activeSessionId: latestSession.id || null,
+    activeChunkId: latestSession.chunkId || state.progressState?.activeChunk || "chunk-unset",
+    currentPhase: state.executiveSummary?.currentStage || "awaiting-session-start",
+    nextActor: latestSession.agentRole || state.progressState?.currentOwner || "planner",
+    nextAction: latestSession.nextStep || state.progressState?.nextAction || "Start the first governed runtime session.",
+    contextPolicy:
+      "Prefer context resets when drift or context anxiety appears; compact only after durable handoff artifacts exist.",
+    contractCoverageRule:
+      "No generator implementation begins before the evaluator-approved chunk contract exists.",
+    evaluatorRule:
+      "The generator may not self-approve; an independent evaluator records the pass or change-request verdict.",
+    lastEventAt: latestSession.endedAt || state.executiveSummary?.lastUpdated || "unknown",
+    stateFile: "docs/ai-harness/runtime/state/active-session.json",
+    sessionIndexFile: "docs/ai-harness/runtime/state/session-index.json",
+    sessionSummaryFile: latestSession.id
+      ? "docs/ai-harness/runtime/sessions/" + latestSession.id + ".md"
+      : "docs/ai-harness/runtime/sessions/",
+    recentEvents: [],
+  };
+}
+
+function renderRuntimeOrchestration(state) {
+  const runtime = deriveRuntimeOrchestration(state);
+  const recentEvents = Array.isArray(runtime.recentEvents) ? runtime.recentEvents : [];
+  return \`
+    <h2>Runtime Orchestration</h2>
+    <div class="stack">
+      <div><span class="metric-label">Mode</span><strong>\${escapeHtml(runtime.mode || "planner-generator-evaluator")}</strong></div>
+      <div><span class="metric-label">Active Session</span><strong class="mono">\${escapeHtml(runtime.activeSessionId || "none")}</strong></div>
+      <div><span class="metric-label">Current Phase</span><strong>\${escapeHtml(runtime.currentPhase || "awaiting-session-start")}</strong></div>
+      <div><span class="metric-label">Next Actor</span><strong>\${escapeHtml(runtime.nextActor || "planner")}</strong></div>
+      <div><span class="metric-label">Chunk</span><strong class="mono">\${escapeHtml(runtime.activeChunkId || "chunk-unset")}</strong></div>
+      <div class="pill-note">\${escapeHtml(runtime.nextAction || "")}</div>
+      <div class="pill-note"><strong>Context policy:</strong> \${escapeHtml(runtime.contextPolicy || "")}</div>
+      <div class="pill-note"><strong>Contract rule:</strong> \${escapeHtml(runtime.contractCoverageRule || "")}</div>
+      <div class="pill-note"><strong>Evaluator rule:</strong> \${escapeHtml(runtime.evaluatorRule || "")}</div>
+      <div class="pill-note"><strong>State:</strong> \${escapeHtml(runtime.stateFile || "")}</div>
+      <div class="pill-note"><strong>Index:</strong> \${escapeHtml(runtime.sessionIndexFile || "")}</div>
+      <div class="pill-note"><strong>Summary:</strong> \${escapeHtml(runtime.sessionSummaryFile || "")}</div>
+      <div class="pill-note"><strong>Last Event:</strong> \${escapeHtml(runtime.lastEventAt || "unknown")}</div>
+      \${recentEvents.length > 0 ? \`<ul class="list-reset">\${recentEvents
+        .map(
+          (event) =>
+            \`<li class="list-card"><div class="row"><strong>\${escapeHtml(event.phase || "event")}</strong><span class="badge \${badgeClass(event.outcome || "info")}">\${escapeHtml(event.outcome || "")}</span></div><div class="pill-note">\${escapeHtml(event.at || "")} | \${escapeHtml(event.actor || "")} | \${escapeHtml(event.action || "")}</div><div class="pill-note">\${escapeHtml(event.note || "")}</div></li>\`
+        )
+        .join("")}</ul>\` : "<p class=\\"empty-state\\">No runtime events recorded yet.</p>"}
+    </div>
+  \`;
+}
+
 function renderGitStatus(state) {
   const git = state.gitStatus || {};
   const lastCommit = git.lastCommit || {};
@@ -1907,6 +2019,7 @@ async function main() {
   document.getElementById("executive-summary").innerHTML = renderExecutiveSummary(state);
   document.getElementById("progress-state").innerHTML = renderProgressState(state);
   document.getElementById("governance-state").innerHTML = renderGovernanceState(state);
+  document.getElementById("runtime-orchestration").innerHTML = renderRuntimeOrchestration(state);
   document.getElementById("git-status").innerHTML = renderGitStatus(state);
   document.getElementById("kpis").innerHTML = renderKpis(state);
   document.getElementById("errors").innerHTML = renderErrors(state);

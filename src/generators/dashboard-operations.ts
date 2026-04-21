@@ -773,7 +773,7 @@ function buildDashboardOpsScript(): string {
     "}",
     "",
     "function buildRequiredArtifactPaths(state) {",
-    '  const basePaths = [".github/ai-harness/harness-manifest.yaml", ".github/ai-harness/operating-model.md", "docs/context/", "docs/reviews/", "docs/plans/", "docs/handovers/", "docs/work-logs/", "docs/ai-harness/dashboard/state/dashboard-state.json"];',
+    '  const basePaths = [".github/ai-harness/harness-manifest.yaml", ".github/ai-harness/operating-model.md", "docs/context/", "docs/reviews/", "docs/plans/", "docs/handovers/", "docs/work-logs/", "docs/ai-harness/runtime/README.md", "docs/ai-harness/runtime/state/session-index.json", "docs/ai-harness/runtime/state/active-session.json", "docs/ai-harness/dashboard/state/dashboard-state.json"];',
     "  const artifactPaths = Array.isArray(state.artifacts)",
     "    ? state.artifacts.map((artifact) => String(artifact.path || \"\")).filter(Boolean)",
     "    : [];",

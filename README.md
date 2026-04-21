@@ -69,6 +69,7 @@ Tell your LLM to initialize the workspace and the server can generate:
 - `.github/agents/` and `.github/skills/` as the canonical registry, plus optional `.cursor/`, `.claude/`, and `.agents/` mirrors
 - `.github/ai-harness/` for governance and operating-model artifacts
 - `docs/ai-harness/dashboard/` for a simple administrator dashboard backed by JSON files instead of a database
+- `docs/ai-harness/runtime/` for the planner / generator / evaluator runtime state machine, session snapshots, and role briefs
 - `.vscode/settings.json` and workspace instruction files
 - `.editorconfig` and `.gitattributes`
 - `docs/work-logs`, `docs/changelog`, `docs/adr`, `docs/troubleshooting`
@@ -82,6 +83,7 @@ The current version adds a stronger long-running delivery harness:
 - meaningful work follows `Plan 1 -> Review 1 -> Plan 2 -> Review 2 -> Plan 3 -> Review 3` before broad implementation starts
 - large work is expected to be chunked into resumable execution units
 - review evidence, handovers, and context ledgers are generated as first-class artifacts
+- a real file-system runtime is available for `planner -> generator -> evaluator` orchestration through governed session JSON
 - curated harness skills and agents are included for governance management, orchestration, expert review, verification, and final quality gates
 - a default dashboard operator agent and related skills keep progress state, KPI cards, issue visibility, domain lenses, and git traceability readable for non-developers
 - harness profiles help teams choose between lean, balanced, regulated, and autonomous operating modes
@@ -122,6 +124,9 @@ The goal is the same in both cases: the project can operate under a DX/AX-friend
 | `validate_workspace` | Check initialization completeness |
 | `list_project_types` | List available project types |
 | `list_harness_profiles` | List built-in AI harness profiles |
+| `start_harness_session` | Open a governed planner / generator / evaluator runtime session |
+| `advance_harness_session` | Move the active runtime session through the governed state machine |
+| `get_harness_session_status` | Read the active runtime session and next actor brief |
 | `get_init_form_schema` | Get the initialization form schema |
 | `recommend_agent_skills` | Recommend skills and agents |
 | `search_agent_skills` | Search the skill catalog |
