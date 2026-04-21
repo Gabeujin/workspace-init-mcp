@@ -1,7 +1,7 @@
 ﻿#!/usr/bin/env node
 
 /**
- * workspace-init-mcp MCP Server v3.1.0
+ * workspace-init-mcp MCP Server v4.0.0
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -201,7 +201,7 @@ const InitializeWorkspaceInputSchema = BaseWorkspaceInputSchema.extend({
 
 const server = new McpServer({
   name: "workspace-init-mcp",
-  version: "3.1.0",
+  version: "4.0.0",
 });
 
 // ---------------------------------------------------------------------------
@@ -1080,7 +1080,7 @@ server.registerResource(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("workspace-init-mcp server v3.1.0 started on stdio");
+  console.error("workspace-init-mcp server v4.0.0 started on stdio");
 }
 
 main().catch((err) => {
