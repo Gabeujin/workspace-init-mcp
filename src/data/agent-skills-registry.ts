@@ -6,6 +6,11 @@
  * project type, tech stack, and user intent.
  */
 
+import {
+  PROJECT_TYPE_CONFIGS,
+  type ProjectType,
+} from "../types.js";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -43,7 +48,9 @@ export type SkillCategory =
   | "analysis"
   | "prompt"
   | "project-setup"
-  | "infrastructure";
+  | "infrastructure"
+  | "governance"
+  | "memory";
 
 export interface AgentEntry {
   /** File name without .agent.md extension */
@@ -366,6 +373,36 @@ export const AGENT_REGISTRY: AgentEntry[] = [
     techKeywords: [],
     priority: 2,
   },
+  {
+    id: "harness-doc-writer",
+    name: "Harness Doc Writer",
+    description: "Writes governance-ready context, plan, review, and handover artifacts",
+    categories: ["documentation", "meta"],
+    tags: ["documentation", "harness", "governance", "handover", "plans"],
+    relevantProjectTypes: ["*"],
+    techKeywords: [],
+    priority: 1,
+  },
+  {
+    id: "harness-dashboard-operator",
+    name: "Harness Dashboard Operator",
+    description: "Maintains the administrator dashboard, JSON state snapshots, KPI cards, issue visibility, and git traceability for AI work",
+    categories: ["documentation", "meta", "platform"],
+    tags: ["dashboard", "kpi", "progress", "git", "state", "operators", "ax", "dx", "json"],
+    relevantProjectTypes: ["*"],
+    techKeywords: ["JSON", "Git"],
+    priority: 1,
+  },
+  {
+    id: "legacy-enterprise-analysis",
+    name: "Legacy Enterprise Analysis",
+    description: "Maps layered legacy flows, compares AS-IS vs TO-BE behavior, and surfaces evidence-backed risks",
+    categories: ["architecture", "review", "backend"],
+    tags: ["legacy", "enterprise", "analysis", "traceability", "as-is", "to-be", "controller-service-mapper"],
+    relevantProjectTypes: ["web-app", "api", "consulting", "monorepo", "other"],
+    techKeywords: ["Java", "Spring", "MyBatis", "SQL", "XML", "WebSquare"],
+    priority: 2,
+  },
   // ── Review & Quality ──
   {
     id: "gem-reviewer",
@@ -418,6 +455,46 @@ export const AGENT_REGISTRY: AgentEntry[] = [
     priority: 3,
   },
   // ── Prompt & Meta ──
+  {
+    id: "harness-expert-reviewer",
+    name: "Harness Expert Reviewer",
+    description: "Focused read-only reviewer that evaluates one expert lens with skeptical, evidence-backed findings and no self-approval bias",
+    categories: ["review"],
+    tags: ["review", "experts", "evidence", "harness", "skeptical-evaluator", "independent-eval"],
+    relevantProjectTypes: ["*"],
+    techKeywords: [],
+    priority: 1,
+  },
+  {
+    id: "harness-verifier",
+    name: "Harness Verifier",
+    description: "Runs targeted checks, tests, and coverage validation after each implementation chunk",
+    categories: ["testing", "review"],
+    tags: ["verification", "tests", "coverage", "harness", "regression"],
+    relevantProjectTypes: ["*"],
+    techKeywords: [],
+    priority: 1,
+  },
+  {
+    id: "harness-quality-gate",
+    name: "Harness Quality Gate",
+    description: "Runs the post-work quality gate with independent evaluation, remediation, verification, and governance closure",
+    categories: ["review", "meta"],
+    tags: ["quality-gate", "post-work", "remediation", "harness", "independent-eval", "thresholds"],
+    relevantProjectTypes: ["*"],
+    techKeywords: [],
+    priority: 1,
+  },
+  {
+    id: "risk-focused-code-review",
+    name: "Risk-Focused Code Review",
+    description: "Performs findings-first reviews for bugs, regressions, data integrity risks, security concerns, and missing tests",
+    categories: ["review", "security", "testing"],
+    tags: ["risk-review", "bug-finding", "regression", "data-integrity", "missing-tests", "findings-first"],
+    relevantProjectTypes: ["*"],
+    techKeywords: ["Java", "TypeScript", "JavaScript", "SQL", "Python"],
+    priority: 1,
+  },
   {
     id: "prompt-engineer",
     name: "Prompt Engineer",
@@ -564,6 +641,16 @@ export const AGENT_REGISTRY: AgentEntry[] = [
     relevantProjectTypes: ["*"],
     techKeywords: [],
     priority: 2,
+  },
+  {
+    id: "harness-implementer",
+    name: "Harness Implementer",
+    description: "Implements one approved chunk while following the frozen goal, tests, and verification discipline",
+    categories: ["engineering", "testing"],
+    tags: ["implementation", "chunking", "tests", "harness"],
+    relevantProjectTypes: ["*"],
+    techKeywords: [],
+    priority: 1,
   },
   {
     id: "gem-researcher",
@@ -1008,6 +1095,193 @@ export const SKILL_REGISTRY: SkillEntry[] = [
     priority: 2,
   },
   {
+    id: "agent-governance",
+    name: "Agent Governance",
+    description: "Adds policy, trust, audit, and safety controls to agent systems",
+    categories: ["governance", "analysis"],
+    tags: ["governance", "audit", "policy", "trust", "guardrails"],
+    relevantProjectTypes: ["*"],
+    techKeywords: ["MCP", "AI", "LLM"],
+    hasResources: true,
+    priority: 1,
+  },
+  {
+    id: "harness-governance-manager",
+    name: "Harness Governance Manager",
+    description: "Creates and refreshes governance artifacts for long-running AI delivery",
+    categories: ["governance", "document-gen", "project-setup"],
+    tags: ["harness", "governance", "continuity", "handover", "manifest", "utf-8"],
+    relevantProjectTypes: ["*"],
+    techKeywords: ["MCP", "AI", "LLM"],
+    hasResources: true,
+    priority: 1,
+  },
+  {
+    id: "harness-documentation-records",
+    name: "Harness Documentation Records",
+    description: "Creates durable work logs, final records, AS-IS vs TO-BE notes, and handover-ready summaries",
+    categories: ["document-gen", "governance"],
+    tags: ["documentation", "work-log", "final-record", "as-is", "to-be", "handover", "harness"],
+    relevantProjectTypes: ["*"],
+    techKeywords: ["AI", "LLM"],
+    hasResources: true,
+    priority: 1,
+  },
+  {
+    id: "harness-dashboard-state-manager",
+    name: "Harness Dashboard State Manager",
+    description: "Maintains JSON-based dashboard state for progress, KPIs, issues, governed sessions, contract coverage, and git visibility without using a database",
+    categories: ["analysis", "document-gen", "governance"],
+    tags: ["dashboard", "json", "progress-state", "kpi", "issues", "git", "operator-view", "ax", "dx", "contracts", "governed-sessions"],
+    relevantProjectTypes: ["*"],
+    techKeywords: ["JSON", "Git"],
+    hasResources: false,
+    priority: 1,
+  },
+  {
+    id: "domain-model-ledger",
+    name: "Domain Model Ledger",
+    description: "Maintains domain-specific timeline, entity, release, and version views so operators can understand work across software, narrative, and knowledge domains",
+    categories: ["analysis", "document-gen"],
+    tags: ["timeline", "entities", "characters", "features", "versions", "releases", "story", "domain-model"],
+    relevantProjectTypes: ["*"],
+    techKeywords: [],
+    hasResources: false,
+    priority: 1,
+  },
+  {
+    id: "agentic-eval",
+    name: "Agentic Eval",
+    description: "Builds independent evaluation loops, skeptical rubrics, and generator-evaluator feedback cycles for agent behaviors, outputs, and workflows",
+    categories: ["testing", "governance"],
+    tags: ["evaluation", "agentic", "quality", "review", "regression", "skeptical-evaluator", "rubrics", "generator-evaluator"],
+    relevantProjectTypes: ["*"],
+    techKeywords: ["AI", "LLM"],
+    hasResources: false,
+    priority: 1,
+  },
+  {
+    id: "harness-multi-expert-review",
+    name: "Harness Multi-Expert Review",
+    description: "Runs three-round multi-expert reviews with context isolation and convergence",
+    categories: ["analysis", "governance", "document-gen"],
+    tags: ["review", "experts", "harness", "convergence", "architecture", "quality"],
+    relevantProjectTypes: ["*"],
+    techKeywords: ["AI", "LLM"],
+    hasResources: true,
+    priority: 1,
+  },
+  {
+    id: "harness-code-review-pipeline",
+    name: "Harness Code Review Pipeline",
+    description: "Runs automated checks, code review, coverage checks, and remediation loops after each chunk",
+    categories: ["testing", "governance"],
+    tags: ["code-review", "verification", "coverage", "regression", "harness"],
+    relevantProjectTypes: ["*"],
+    techKeywords: ["AI", "LLM"],
+    hasResources: true,
+    priority: 1,
+  },
+  {
+    id: "structured-autonomy-plan",
+    name: "Structured Autonomy Plan",
+    description: "Creates reviewable implementation plans before any coding starts",
+    categories: ["analysis", "prompt"],
+    tags: ["planning", "autonomy", "phased-delivery", "review"],
+    relevantProjectTypes: ["*"],
+    techKeywords: [],
+    hasResources: false,
+    priority: 1,
+  },
+  {
+    id: "harness-implementation-orchestrator",
+    name: "Harness Implementation Orchestrator",
+    description: "Coordinates three planning and review cycles, contract-first chunking, and planner-generator-evaluator handoffs before implementation begins",
+    categories: ["analysis", "prompt", "project-setup"],
+    tags: ["orchestration", "planning", "chunking", "harness", "execution", "contracts", "planner", "generator", "evaluator", "context-reset"],
+    relevantProjectTypes: ["*"],
+    techKeywords: ["AI", "LLM"],
+    hasResources: true,
+    priority: 1,
+  },
+  {
+    id: "structured-autonomy-implement",
+    name: "Structured Autonomy Implement",
+    description: "Executes approved plans step by step without drifting from scope",
+    categories: ["project-setup", "prompt"],
+    tags: ["implementation", "autonomy", "plan-following", "discipline"],
+    relevantProjectTypes: ["*"],
+    techKeywords: [],
+    hasResources: false,
+    priority: 1,
+  },
+  {
+    id: "harness-post-work-review",
+    name: "Harness Post-Work Review",
+    description: "Runs the final quality gate with remediation, verification, and governance closure",
+    categories: ["testing", "governance", "document-gen"],
+    tags: ["quality-gate", "post-work", "remediation", "verification", "harness"],
+    relevantProjectTypes: ["*"],
+    techKeywords: ["AI", "LLM"],
+    hasResources: true,
+    priority: 1,
+  },
+  {
+    id: "service-endpoint-tracer",
+    name: "Service Endpoint Tracer",
+    description: "Traces service identifiers, URLs, controllers, services, mappers, and SQL boundaries across layered systems",
+    categories: ["analysis"],
+    tags: ["endpoint-tracing", "service-id", "controller-service-mapper", "call-flow", "legacy", "integration"],
+    relevantProjectTypes: ["web-app", "api", "consulting", "monorepo", "other"],
+    techKeywords: ["Java", "Spring", "MyBatis", "SQL", "XML", "WebSquare"],
+    hasResources: false,
+    priority: 2,
+  },
+  {
+    id: "message-resource-lookup",
+    name: "Message Resource Lookup",
+    description: "Finds localization resource IDs, traces usage locations, and checks for reuse before adding new strings",
+    categories: ["analysis"],
+    tags: ["i18n", "l10n", "message-resource", "localization", "translation", "message-id", "locale"],
+    relevantProjectTypes: ["web-app", "api", "consulting", "monorepo", "saas"],
+    techKeywords: ["i18n", "localization", "Java", "TypeScript", "XML", "WebSquare"],
+    hasResources: false,
+    priority: 2,
+  },
+  {
+    id: "legacy-sql-review",
+    name: "Legacy SQL Review",
+    description: "Reviews mapper-driven or vendor-specific legacy SQL for correctness, tuning opportunities, and binding safety",
+    categories: ["analysis", "testing"],
+    tags: ["legacy", "sql", "mybatis", "tibero", "oracle", "query-tuning", "data-integrity"],
+    relevantProjectTypes: ["web-app", "api", "consulting", "monorepo", "other"],
+    techKeywords: ["SQL", "MyBatis", "Oracle", "Tibero"],
+    hasResources: false,
+    priority: 2,
+  },
+  {
+    id: "remember",
+    name: "Remember",
+    description: "Stores durable lessons learned as reusable memory instructions",
+    categories: ["memory", "project-setup"],
+    tags: ["memory", "lessons", "continuity", "workspace", "handover"],
+    relevantProjectTypes: ["*"],
+    techKeywords: [],
+    hasResources: false,
+    priority: 1,
+  },
+  {
+    id: "memory-merger",
+    name: "Memory Merger",
+    description: "Consolidates overlapping memory and instruction artifacts into cleaner guidance",
+    categories: ["memory", "analysis"],
+    tags: ["memory", "cleanup", "consolidation", "continuity"],
+    relevantProjectTypes: ["*"],
+    techKeywords: [],
+    hasResources: false,
+    priority: 2,
+  },
+  {
     id: "boost-prompt",
     name: "Boost Prompt",
     description: "Enhances and improves existing prompts",
@@ -1101,6 +1375,149 @@ export interface RecommendationResult {
   /** Human-readable summary */
   summary: string;
 }
+
+export type CatalogRoleId =
+  | "planner"
+  | "architect"
+  | "implementer"
+  | "reviewer"
+  | "verifier"
+  | "documenter"
+  | "analyst"
+  | "orchestrator"
+  | "platform"
+  | "data"
+  | "frontend"
+  | "backend"
+  | "mobile"
+  | "security";
+
+export interface CatalogRoleGroup {
+  id: CatalogRoleId;
+  label: string;
+  description: string;
+  agents: AgentEntry[];
+  skills: SkillEntry[];
+}
+
+export interface CatalogDomainGroup {
+  id: ProjectType | "shared";
+  label: string;
+  description: string;
+  agents: AgentEntry[];
+  skills: SkillEntry[];
+}
+
+export interface CatalogIndexes {
+  roles: CatalogRoleGroup[];
+  domains: CatalogDomainGroup[];
+}
+
+const ROLE_METADATA: Record<
+  CatalogRoleId,
+  { label: string; description: string }
+> = {
+  planner: {
+    label: "Planner",
+    description: "Task framing, sequencing, scoping, and implementation planning.",
+  },
+  architect: {
+    label: "Architect",
+    description: "System design, boundaries, structure, and deep technical analysis.",
+  },
+  implementer: {
+    label: "Implementer",
+    description: "Code creation, refactoring, and delivery execution.",
+  },
+  reviewer: {
+    label: "Reviewer",
+    description: "Risk detection, quality review, and change assessment.",
+  },
+  verifier: {
+    label: "Verifier",
+    description: "Testing, validation, coverage, and regression checking.",
+  },
+  documenter: {
+    label: "Documenter",
+    description: "Governance notes, records, handovers, and technical documentation.",
+  },
+  analyst: {
+    label: "Analyst",
+    description: "Tracing, discovery, diagnostics, and evidence-backed investigation.",
+  },
+  orchestrator: {
+    label: "Orchestrator",
+    description: "Workflow control, agent coordination, and process setup.",
+  },
+  platform: {
+    label: "Platform / DevOps",
+    description: "Infrastructure, delivery pipelines, runtime operations, and platform work.",
+  },
+  data: {
+    label: "Data Specialist",
+    description: "Database, analytics, and data-layer expertise.",
+  },
+  frontend: {
+    label: "Frontend Specialist",
+    description: "Client-side delivery, UI implementation, and browser-focused work.",
+  },
+  backend: {
+    label: "Backend Specialist",
+    description: "Server-side delivery, APIs, services, and integration layers.",
+  },
+  mobile: {
+    label: "Mobile Specialist",
+    description: "Native and cross-platform mobile delivery.",
+  },
+  security: {
+    label: "Security Specialist",
+    description: "Security review, trust boundaries, and vulnerability-focused work.",
+  },
+};
+
+const AGENT_ROLE_CATEGORY_MAP: Record<AgentCategory, CatalogRoleId[]> = {
+  planning: ["planner"],
+  architecture: ["architect"],
+  engineering: ["implementer"],
+  debugging: ["analyst"],
+  testing: ["verifier"],
+  devops: ["platform"],
+  documentation: ["documenter"],
+  review: ["reviewer"],
+  security: ["reviewer", "security"],
+  data: ["data"],
+  frontend: ["frontend"],
+  backend: ["backend"],
+  mobile: ["mobile"],
+  cloud: ["platform"],
+  creative: ["documenter"],
+  meta: ["orchestrator"],
+  platform: ["platform"],
+};
+
+const SKILL_ROLE_CATEGORY_MAP: Record<SkillCategory, CatalogRoleId[]> = {
+  blueprint: ["architect"],
+  "document-gen": ["documenter"],
+  "code-gen": ["implementer"],
+  testing: ["verifier"],
+  devops: ["platform"],
+  migration: ["architect", "implementer"],
+  refactor: ["implementer"],
+  git: ["orchestrator"],
+  mcp: ["backend", "architect"],
+  platform: ["platform"],
+  analysis: ["analyst"],
+  prompt: ["planner", "orchestrator"],
+  "project-setup": ["orchestrator"],
+  infrastructure: ["platform"],
+  governance: ["documenter", "reviewer"],
+  memory: ["documenter", "analyst"],
+};
+
+const DOMAIN_ORDER: Array<ProjectType | "shared"> = [
+  "shared",
+  ...(Object.keys(PROJECT_TYPE_CONFIGS) as ProjectType[]),
+];
 
 /**
  * Recommend agents and skills based on project type, tech stack, and user intent.
@@ -1200,16 +1617,18 @@ export function recommendAgentSkills(options: {
     .join("\n");
 
   const summary = `
-🤖 추천 Agent Skills (프로젝트: ${projectType}, 기술: ${techStack.join(", ") || "미지정"})
+Recommended agent skills for project type \`${projectType}\`
+Tech stack: ${techStack.join(", ") || "not specified"}
 
-## 추천 에이전트 (${scoredAgents.length}개)
-${agentList || "  없음"}
+## Recommended Agents (${scoredAgents.length})
+${agentList || "  - none"}
 
-## 추천 스킬 (${scoredSkills.length}개)
-${skillList || "  없음"}
+## Recommended Skills (${scoredSkills.length})
+${skillList || "  - none"}
 
-💡 선택한 항목을 \`install_agent_skills\` 도구로 설치하면
-\`.github/skills/\` 및 \`.github/agents/\` 에 자동 배포됩니다.
+Install selected items with \`install_agent_skills\` to generate a canonical
+registry under \`.github/skills/\` and \`.github/agents/\`, plus mirrors for
+any selected target IDEs.
 `.trim();
 
   return { agents: scoredAgents, skills: scoredSkills, summary };
@@ -1245,16 +1664,105 @@ export function searchAgentSkills(query: string): RecommendationResult {
     .join("\n");
 
   const summary = `
-🔍 검색 결과: "${query}"
+Search results for "${query}"
 
-## 에이전트 (${matchedAgents.length}개)
-${agentList || "  없음"}
+## Agents (${matchedAgents.length})
+${agentList || "  - none"}
 
-## 스킬 (${matchedSkills.length}개)
-${skillList || "  없음"}
+## Skills (${matchedSkills.length})
+${skillList || "  - none"}
 `.trim();
 
   return { agents: matchedAgents, skills: matchedSkills, summary };
+}
+
+function sortByName<T extends { name: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function dedupeRoles(roles: CatalogRoleId[]): CatalogRoleId[] {
+  return [...new Set(roles)];
+}
+
+function rolesForAgent(agent: AgentEntry): CatalogRoleId[] {
+  const roles = agent.categories.flatMap((category) => AGENT_ROLE_CATEGORY_MAP[category]);
+  return dedupeRoles(roles);
+}
+
+function rolesForSkill(skill: SkillEntry): CatalogRoleId[] {
+  const roles = skill.categories.flatMap((category) => SKILL_ROLE_CATEGORY_MAP[category]);
+  return dedupeRoles(roles);
+}
+
+function domainKeysForEntry(
+  relevantProjectTypes: string[]
+): Array<ProjectType | "shared"> {
+  const specific = relevantProjectTypes.filter(
+    (projectType): projectType is ProjectType =>
+      projectType !== "*" && projectType in PROJECT_TYPE_CONFIGS
+  );
+
+  if (specific.length > 0) {
+    return specific;
+  }
+
+  if (relevantProjectTypes.includes("*")) {
+    return ["shared"];
+  }
+
+  return ["shared"];
+}
+
+export function buildCatalogIndexes(options?: {
+  agents?: AgentEntry[];
+  skills?: SkillEntry[];
+}): CatalogIndexes {
+  const agents = options?.agents ?? AGENT_REGISTRY;
+  const skills = options?.skills ?? SKILL_REGISTRY;
+
+  const roles = Object.entries(ROLE_METADATA)
+    .map(([id, metadata]) => {
+      const roleId = id as CatalogRoleId;
+      return {
+        id: roleId,
+        label: metadata.label,
+        description: metadata.description,
+        agents: sortByName(agents.filter((agent) => rolesForAgent(agent).includes(roleId))),
+        skills: sortByName(skills.filter((skill) => rolesForSkill(skill).includes(roleId))),
+      };
+    })
+    .filter((group) => group.agents.length > 0 || group.skills.length > 0);
+
+  const domains = DOMAIN_ORDER.map((domainId) => {
+    const metadata =
+      domainId === "shared"
+        ? {
+            label: "Shared Foundation",
+            description: "Cross-domain assets that fit most workspaces and initialization flows.",
+          }
+        : {
+            label: PROJECT_TYPE_CONFIGS[domainId].label,
+            description: PROJECT_TYPE_CONFIGS[domainId].description,
+          };
+
+    return {
+      id: domainId,
+      label: metadata.label,
+      description: metadata.description,
+      agents: sortByName(
+        agents.filter((agent) =>
+          domainKeysForEntry(agent.relevantProjectTypes).includes(domainId)
+        )
+      ),
+      skills: sortByName(
+        skills.filter((skill) =>
+          domainKeysForEntry(skill.relevantProjectTypes).includes(domainId)
+        )
+      ),
+    };
+  }).filter((group) => group.agents.length > 0 || group.skills.length > 0);
+
+  return { roles, domains };
 }
 
 /**

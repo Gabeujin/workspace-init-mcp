@@ -9,6 +9,7 @@
   },
   "files": [
     "dist/",
+    "awesome/",
     "README.md",
     "LICENSE"
   ],
@@ -16,6 +17,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
+    "test": "npm run build && node tests/harness-generation.test.js",
     "clean": "rimraf dist",
     "prepublishOnly": "npm run build"
   },

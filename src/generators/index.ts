@@ -22,3 +22,6 @@ export {
   generateAgentSkills,
   generateSelectedSkills,
 } from "./agent-skills.js";
+export { generateHarnessFiles } from "./harness.js";
+export { generateDashboardFiles } from "./dashboard.js";
+export { generateDashboardOperationFiles } from "./dashboard-operations.js";

@@ -5,34 +5,41 @@
  * for workspace initialization.
  */
 
-import { type WorkspaceInitParams, type GeneratedFile, type InitResult } from "../types.js";
 import {
-  generateCopilotInstructions,
-  generateSettings,
-  generateCodeGenInstructions,
-  generateTestInstructions,
-  generateReviewInstructions,
-  generateCommitInstructions,
-  generatePRInstructions,
-  generateDocsStructure,
-  generateInitialChangelog,
-  generateSetupWorkLog,
+  type GeneratedFile,
+  type InitResult,
+  type WorkspaceInitParams,
+} from "../types.js";
+import {
   generateAgentSkills,
+  generateCodeGenInstructions,
+  generateCommitInstructions,
+  generateCopilotInstructions,
+  generateDashboardFiles,
+  generateDashboardOperationFiles,
+  generateDocsStructure,
   generateEditorConfig,
   generateGitAttributes,
+  generateHarnessFiles,
+  generateInitialChangelog,
+  generatePRInstructions,
+  generateReviewInstructions,
+  generateSettings,
+  generateSetupWorkLog,
+  generateTestInstructions,
 } from "../generators/index.js";
 
 /**
  * Collect all files to be generated for the workspace.
- * Does NOT write to disk — returns a list of GeneratedFile objects.
+ * Does not write to disk; returns a list of GeneratedFile objects.
  */
 export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
   const files: GeneratedFile[] = [];
 
-  // 1. Copilot global instructions
+  // 1. Copilot/global instructions
   files.push(generateCopilotInstructions(params));
 
-  // 2. VS Code settings & custom instruction files
+  // 2. VS Code settings and custom instruction files
   files.push(generateSettings(params));
   files.push(generateCodeGenInstructions(params));
   files.push(generateTestInstructions());
@@ -56,10 +63,21 @@ export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
     );
   }
 
-  // 6. Initial changelog & work log (needs the file list from above)
-  const relativePaths = files.map((f) => f.relativePath);
+  // 6. AI harness engineering artifacts
+  files.push(...generateHarnessFiles(params));
+  files.push(...generateDashboardFiles(params));
+  files.push(...generateDashboardOperationFiles(params));
+
+  // 7. Initial changelog and work log
+  const relativePaths = files.map((file) => file.relativePath);
   files.push(generateInitialChangelog(params, relativePaths));
-  files.push(generateSetupWorkLog(params, [...relativePaths, "docs/changelog/...", "docs/work-logs/..."]));
+  files.push(
+    generateSetupWorkLog(params, [
+      ...relativePaths,
+      "docs/changelog/...",
+      "docs/work-logs/...",
+    ])
+  );
 
   return files;
 }
@@ -71,30 +89,50 @@ export function buildSummary(
   params: WorkspaceInitParams,
   files: GeneratedFile[]
 ): InitResult {
-  const relativePaths = files.map((f) => f.relativePath);
+  const relativePaths = files.map((file) => file.relativePath);
+  const harnessStatus =
+    params.includeHarnessEngineering === false
+      ? "disabled"
+      : params.harnessProfile ?? "balanced";
+  const primaryDomains =
+    params.primaryDomains?.join(", ") ??
+    params.projectType ??
+    "general-software-delivery";
 
-  const summary = `
-✅ 워크스페이스 초기화 완료: ${params.workspaceName}
-
-📁 생성된 파일 (${files.length}개):
-${relativePaths.map((p) => `  - ${p}`).join("\n")}
-
-📋 설정 요약:
-  - 목적: ${params.purpose}
-  - 프로젝트 유형: ${params.projectType ?? "other"}
-  - 기술 스택: ${params.techStack?.join(", ") || "미지정"}
-  - Multi-Repo: ${params.isMultiRepo ? "예" : "아니오"}
-  - 문서 언어: ${params.docLanguage ?? "한국어"}
-  - 코드 주석 언어: ${params.codeCommentLanguage ?? "English"}
-  - 파일 인코딩: ${params.fileEncoding ?? "utf-8"}
-  - 대상 IDE: ${(params.targetIDEs ?? ["vscode"]).join(", ")}
-  - 줄 끝 형식: ${params.lineEnding ?? "lf"}
-
-🚀 다음 단계:
-  1. 생성된 .github/copilot-instructions.md 를 검토하고 필요에 맞게 조정하세요.
-  2. 프로젝트별 .instructions.md 파일을 추가하여 세부 지침을 구성하세요.
-  3. 작업을 시작하면 docs/work-logs/ 에 자동으로 기록됩니다.
-`.trim();
+  const summary = [
+    `Workspace initialization complete: ${params.workspaceName}`,
+    "",
+    `Generated files (${files.length}):`,
+    ...relativePaths.map((relativePath) => `  - ${relativePath}`),
+    "",
+    "Configuration summary:",
+    `  - Purpose: ${params.purpose}`,
+    `  - Project type: ${params.projectType ?? "other"}`,
+    `  - Tech stack: ${params.techStack?.join(", ") || "not specified"}`,
+    `  - Multi-repo: ${params.isMultiRepo ? "yes" : "no"}`,
+    `  - Documentation language: ${params.docLanguage ?? "Korean"}`,
+    `  - Code comment language: ${params.codeCommentLanguage ?? "English"}`,
+    `  - File encoding: ${params.fileEncoding ?? "utf-8"}`,
+    `  - Target IDEs: ${(params.targetIDEs ?? ["vscode"]).join(", ")}`,
+    `  - Line endings: ${params.lineEnding ?? "lf"}`,
+    `  - Harness engineering: ${harnessStatus}`,
+    `  - Governance profile: ${params.governanceProfile ?? "strict"}`,
+    `  - Autonomy mode: ${params.autonomyMode ?? "balanced"}`,
+    `  - Token budget: ${params.tokenBudget ?? "balanced"}`,
+    `  - Primary domains: ${primaryDomains}`,
+    "",
+    "Suggested next steps:",
+    "  1. Review .github/copilot-instructions.md and the AI harness files.",
+    "  2. Review .github/ai-harness/context-strategy.md and evaluation-rubrics.md before long-running work begins.",
+    "  3. Start from .github/AGENT-SKILLS.md, AGENT-SKILLS-BY-ROLE.md, and AGENT-SKILLS-BY-DOMAIN.md to trim or extend the catalog.",
+    "  4. Open docs/ai-harness/dashboard/index.html and replace the template JSON state with real project signals.",
+    "  5. Use docs/contracts/ and docs/evaluations/ to record chunk contracts and independent evaluator evidence.",
+    "  6. Use docs/ai-harness/dashboard/templates/*.state.json when you need a domain-specific starting point.",
+    "  7. Run node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh to auto-sync artifacts and git state.",
+    "  8. Run node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs export-static --out docs/ai-harness/dashboard/exports/latest when stakeholders need a portable snapshot.",
+    "  9. Tailor skill selection, dashboard KPIs, and operating rules to your real workflows.",
+    "  10. Keep docs/work-logs, docs/reviews, docs/contracts, docs/evaluations, docs/handovers, and dashboard state current as work evolves.",
+  ].join("\n");
 
   return {
     filesCreated: files.length,

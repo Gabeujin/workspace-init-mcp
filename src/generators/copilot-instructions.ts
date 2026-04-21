@@ -1,6 +1,6 @@
 /**
- * Generator for .github/copilot-instructions.md
- * Creates workspace-wide Copilot instructions tailored to the project purpose.
+ * Generator for .github/copilot-instructions.md.
+ * Creates workspace-wide instructions tailored to the project and harness model.
  */
 
 import {
@@ -13,243 +13,208 @@ export function generateCopilotInstructions(
   params: WorkspaceInitParams
 ): GeneratedFile {
   const config = PROJECT_TYPE_CONFIGS[params.projectType ?? "other"];
-  const docLang = params.docLanguage ?? "한국어";
+  const docLang = params.docLanguage ?? "Korean";
   const codeLang = params.codeCommentLanguage ?? "English";
   const isMulti = params.isMultiRepo ?? false;
+  const techStack = params.techStack?.length
+    ? params.techStack
+    : config.defaultTechStack;
 
-  const techStackSection = params.techStack?.length
-    ? `- **기술 스택**: ${params.techStack.join(", ")}`
-    : "";
+  const content = `# Workspace Copilot Instructions
 
-  const extraInstructionLines = config.extraInstructions
-    .map((line) => `- ${line}`)
-    .join("\n");
+These instructions apply across the entire workspace unless a more specific local instruction file overrides them.
 
-  const multiRepoSection = isMulti
-    ? `
----
+## Workspace Overview
 
-## 3. Multi-Repository Orchestration
+- Workspace: ${params.workspaceName}
+- Purpose: ${params.purpose}
+- Project type: ${config.label}
+- Project profile: ${config.description}
+- Tech stack: ${techStack.join(", ") || "Not specified"}
+- Repository model: ${isMulti ? "Multi-repository or multi-project" : "Single repository"}
 
-### 3.1 프로젝트 독립성
+${renderPlannedTasks(params)}
+${renderAdditionalContext(params)}
+## Governance First
 
-- 각 프로젝트는 **독립된 개발환경** (언어, 프레임워크, 의존성)을 가집니다.
-- 프로젝트 간 의존성이 있는 경우, 반드시 문서에 명시합니다.
+- Governance documentation comes first and last for every meaningful task.
+- Before any implementation, refresh the active context, plan, and review artifacts.
+- Do not start coding until the goal is explicit, review-backed, and frozen.
+- If work is too large for one safe session, split it into resumable chunks before coding.
+- Every chunk must end with updated review, verification, and handover state.
+- Keep the admin dashboard JSON current so non-developers can see progress, KPIs, issues, and git visibility.
 
-### 3.2 변경 추적
+## Delivery Workflow
 
-- 모든 프로젝트의 **신규 개발, 변경, 수정, 삭제** 내역은 즉시 문서에 반영합니다.
-- 변경 이력은 \`docs/changelog/\` 하위에 프로젝트별로 관리합니다.
-- 크로스 프로젝트 영향이 있는 변경은 별도 표시합니다.
-`
-    : "";
+Follow this sequence for meaningful work:
 
-  const plannedTasksSection = params.plannedTasks?.length
-    ? `
-### 예정된 주요 작업
-${params.plannedTasks.map((t) => `- ${t}`).join("\n")}
-`
-    : "";
+1. Governance open
+2. Plan 1
+3. Review 1
+4. Plan 2
+5. Review 2
+6. Plan 3
+7. Review 3
+8. Goal freeze
+9. Governance refresh
+10. Implementation
+11. Verification, code review, and remediation
+12. Governance close
 
-  const additionalContextSection = params.additionalContext
-    ? `
-### 추가 컨텍스트
-${params.additionalContext}
-`
-    : "";
+### Workflow Rules
 
-  const content = `# Copilot 공통 지침 (Global Instructions)
+- Plan 1 should establish the first workable approach and identify unknowns.
+- Review 1 should challenge scope, architecture, and missing context.
+- Plan 2 should tighten sequencing, chunking, and risk controls.
+- Review 2 should cover domain risks such as product, security, data, platform, and operations.
+- Plan 3 should define the final chunk map, tests, and exit conditions.
+- Review 3 should confirm resumability, validation order, and readiness to execute.
+- Programming work must include matching tests or an explicit documented test gap with rationale.
+- After implementation, run verification, code review, and immediate remediation before closure.
 
-> 이 파일은 워크스페이스 전체에 자동 적용되는 공통 지침입니다.
-> 모든 채팅 요청에 자동으로 포함됩니다.
+## Documentation Governance
 
----
+Use repo artifacts as durable operational memory rather than relying on chat history.
 
-## 1. 워크스페이스 개요
+- Context ledger: \`docs/context/\`
+- Review ledger: \`docs/reviews/\`
+- Execution plans: \`docs/plans/\`
+- Handovers: \`docs/handovers/\`
+- Work logs: \`docs/work-logs/\`
+- Changelog: \`docs/changelog/\`
+- Architectural decisions: \`docs/adr/\`
+- AI harness policy: \`.github/ai-harness/\`
+- Admin dashboard: \`docs/ai-harness/dashboard/\`
 
-이 워크스페이스는 **${params.workspaceName}** 프로젝트입니다.
+### Minimum Documentation Expectations
 
-- **목적**: ${params.purpose}
-- **유형**: ${config.label} — ${config.description}
-${techStackSection ? techStackSection + "\n" : ""}- **구조**: ${isMulti ? "Multi-Repository / Multi-Project 워크스페이스" : "단일 프로젝트 워크스페이스"}
-${plannedTasksSection}${additionalContextSection}
----
+- Record the goal, scope, constraints, and success criteria before work begins.
+- Track review outcomes and plan revisions as separate artifacts.
+- Keep handover notes short, explicit, and immediately actionable.
+- Update governance artifacts again after implementation and verification finish.
 
-## 2. 핵심 원칙
+## Evidence-Based Development
 
-### 2.1 문서 거버넌스 (Documentation Governance)
+- Base decisions on current repository evidence, approved documents, and verified references.
+- Prefer targeted reads over broad scans to control token usage.
+- Summarize durable findings into repo artifacts instead of re-reading the same context repeatedly.
+- Stop and re-plan when token usage grows without decision progress.
 
-모든 작업은 반드시 문서로 기록되어야 합니다. 문서는 에이전트 세션의 **장기 기억**, **패턴 인식**, **Orchestration** 을 위한 핵심 자산입니다.
+## Project-Specific Guidance
 
-| 문서 유형 | 위치 | 자동 생성 | 설명 |
-|---|---|---|---|
-| 작업 로그 (Work Log) | \`docs/work-logs/\` | ✅ | 작업 요청 프롬프트, 진행 과정, 결과를 기록 |
-| 트러블슈팅 (Troubleshooting) | \`docs/troubleshooting/\` | ✅ | 버그·이슈 발생 → 원인 분석 → 해결까지 전 과정 기록 |
-| 변경 이력 (Changelog) | \`docs/changelog/\` | ✅ | ${isMulti ? "프로젝트별 " : ""}신규·변경·수정·삭제 내역 즉시 반영 |
-| 아키텍처 결정 (ADR) | \`docs/adr/\` | 📝 | 주요 기술 결정 사항과 근거 기록 |
-
-### 2.2 계획 우선 (Plan First)
-
-모든 작업은 다음 순서를 따릅니다:
-
-1. **계획 (Plan)**: 요구사항 분석, 기술 검토, 접근 방식 결정
-2. **문서화 (Document)**: 작업 로그에 계획 기록
-3. **구현 (Implement)**: 코드 작성 및 테스트
-4. **검토 (Review)**: 코드 품질, 문서 정합성 확인
-5. **기록 (Record)**: 결과 및 변경 이력 업데이트
-
-### 2.3 근거 기반 개발 (Evidence-Based Development)
-
-- **Context7 MCP** 를 적극 활용하여 최신 공식 문서 기반으로 개발합니다.
-- 라이브러리·프레임워크 사용 시 반드시 최신 API 문서를 확인합니다.
-- 불확실한 정보가 아닌 **검증된 근거** 에 기반하여 코드를 작성합니다.
-${
-  config.extraInstructions.length
-    ? `
-### 2.4 프로젝트 특화 원칙
-
-${extraInstructionLines}
-`
-    : ""
-}${multiRepoSection}
----
-
-## ${isMulti ? "4" : "3"}. 작업 폴더 구조
+${renderExtraInstructions(config.extraInstructions)}
+${renderMultiRepoSection(isMulti)}
+## Recommended Workspace Structure
 
 \`\`\`
 ${params.workspaceName}/
-├── .github/
-│   └── copilot-instructions.md   # 이 파일 (공통 지침)
-├── .vscode/
-│   ├── settings.json             # Copilot 커스텀 지침 설정
-│   └── *.instructions.md         # 특정 작업용 커스텀 지침 파일
-├── docs/
-│   ├── work-logs/                # 작업 로그
-│   ├── troubleshooting/          # 트러블슈팅 기록
-│   ├── changelog/                # 변경 이력
-│   └── adr/                      # 아키텍처 결정 기록
-${isMulti ? "├── <project-a>/                  # 개별 프로젝트\n├── <project-b>/                  # 개별 프로젝트\n" : "├── src/                          # 소스 코드\n"}└── ${params.workspaceName}.code-workspace
+|-- .github/
+|   |-- copilot-instructions.md
+|   |-- ai-harness/
+|   |-- agents/
+|   \`-- skills/
+|-- .vscode/
+|   |-- settings.json
+|   \`-- *.instructions.md
+|-- docs/
+|   |-- context/
+|   |-- reviews/
+|   |-- plans/
+|   |-- handovers/
+|   |-- work-logs/
+|   |-- changelog/
+|   \`-- adr/
+${isMulti ? "|-- <project-a>/\n|-- <project-b>/\n" : "|-- src/\n"}\`-- ${params.workspaceName}.code-workspace
 \`\`\`
 
----
+## Coding Conventions
 
-## ${isMulti ? "5" : "4"}. 문서 자동 생성 규칙
+- Prefer clear, intention-revealing names.
+- Keep functions and modules focused on one responsibility.
+- Use comments to explain why, not to restate obvious code.
+- Handle errors explicitly and avoid silent failure paths.
+- Keep changes small, reviewable, and traceable back to approved plans.
 
-### 작업 로그 (Work Log)
+## Agent Operating Cadence
 
-모든 작업 시작 시 자동 생성합니다.
+### Session Start
 
-**파일명**: \`docs/work-logs/YYYY-MM-DD-<작업-요약>.md\`
+1. Read the latest governance artifacts before acting.
+2. Continue unfinished work only if the current goal and handover state are still clear.
+3. Open or refresh the active work log for new meaningful work.
+4. Refresh the dashboard state before starting if progress, KPI, or git data is stale.
 
-\`\`\`markdown
-# 작업 로그: <제목>
+### During Work
 
-- **일시**: YYYY-MM-DD HH:mm
-- **프로젝트**: <대상 프로젝트>
-- **유형**: 신규 개발 | 기능 수정 | 버그 수정 | 리팩토링 | 학습
+1. Follow the approved plan and chunk boundaries.
+2. Update documents as soon as decisions or scope change.
+3. Run narrow verification early and often.
+4. Escalate when cross-domain or high-risk decisions appear.
+5. Update dashboard state when progress, blockers, KPIs, or git visibility changes.
 
-## 요청 프롬프트
-> <원본 사용자 요청을 그대로 기록>
+### Session End
 
-## 계획
-- [ ] 단계 1: ...
+1. Refresh review, verification, and handover artifacts.
+2. Record residual risks and the exact next step.
+3. Refresh dashboard progress, issue, KPI, and git status snapshots.
+4. Do not mark the work complete until governance and verification agree.
 
-## 진행 과정
-### Step 1: ...
-- 수행 내용
-- 결정 사항과 근거
+## Language and Encoding
 
-## 결과
-- 변경된 파일 목록
-- 주요 변경 사항 요약
+- Documentation language: ${docLang}
+- Code comment language: ${codeLang}
+- Default file encoding: UTF-8
 
-## 참고 자료
-- 사용한 공식 문서 링크
-\`\`\`
+## Harness Overrides
 
-### 트러블슈팅 (Troubleshooting)
-
-이슈 발생 시 자동 생성합니다.
-
-**파일명**: \`docs/troubleshooting/YYYY-MM-DD-<이슈-요약>.md\`
-
-\`\`\`markdown
-# 트러블슈팅: <이슈 제목>
-
-- **일시**: YYYY-MM-DD HH:mm
-- **심각도**: Critical | High | Medium | Low
-- **상태**: 🔴 Open | 🟡 In Progress | 🟢 Resolved
-
-## 증상
-- 에러 메시지 및 스택 트레이스
-- 재현 조건
-
-## 원인 분석
-1. 가설 → 검증 결과
-
-## 해결 방법
-- 적용한 수정 사항
-
-## 근본 원인 (Root Cause)
-- 왜 이 문제가 발생했는지
-
-## 예방 조치
-- 재발 방지를 위한 조치
-\`\`\`
-
-### 변경 이력 (Changelog)
-
-파일 변경 발생 시 자동 갱신합니다.
-
----
-
-## ${isMulti ? "6" : "5"}. 코딩 공통 규칙
-
-- 명확하고 의미 있는 변수·함수·클래스 이름을 사용합니다.
-- 함수는 단일 책임 원칙(SRP)을 따릅니다.
-- 매직 넘버 대신 상수를 사용합니다.
-- 주석은 **왜(Why)** 를 설명하며, 코드 자체가 **무엇(What)** 을 설명하도록 작성합니다.
-- 에러 처리를 철저히 합니다 (빈 catch 블록 금지).
-- 커밋 메시지는 [Conventional Commits](https://www.conventionalcommits.org/) 규칙을 따릅니다.
-
----
-
-## ${isMulti ? "7" : "6"}. 에이전트 행동 지침
-
-### 세션 시작 시
-
-1. \`docs/\` 디렉토리의 최신 문서를 확인하여 컨텍스트를 파악합니다.
-2. 진행 중인 작업이 있으면 이어서 진행합니다.
-3. 새 작업이면 작업 로그를 생성합니다.
-
-### 작업 중
-
-1. 계획 → 구현 → 검토 순서를 반드시 따릅니다.
-2. 이슈 발생 시 즉시 트러블슈팅 문서를 생성합니다.
-3. 파일 변경 시 변경 이력을 업데이트합니다.
-4. Context7 MCP로 최신 문서를 조회하여 근거 기반 개발을 합니다.
-
-### 세션 종료 시
-
-1. 작업 로그의 결과 섹션을 업데이트합니다.
-2. 미완료 작업이 있으면 TODO로 명시합니다.
-3. 다음 세션에서 이어갈 수 있도록 컨텍스트를 정리합니다.
-
----
-
-## ${isMulti ? "8" : "7"}. 문서 작성 언어
-
-- 문서는 **${docLang}** 로 작성합니다.
-- 코드 주석은 **${codeLang}** 로 작성합니다.
-- 기술 용어는 원어 그대로 사용합니다.
-
----
-
-*이 지침은 워크스페이스의 모든 작업에 자동 적용됩니다.*
+- Governance documentation comes first and last for every meaningful agent task.
+- Before implementation, create or refresh the relevant context, plan, and review artifacts.
+- Complete Plan 1 -> Review 1 -> Plan 2 -> Review 2 -> Plan 3 -> Review 3 before broad coding starts.
+- If the work is too large to complete safely in one uninterrupted session, split it into chunks before coding.
+- Each chunk must end with updated work-log, review, verification, and handover state so the task remains resumable.
+- Do not treat a task as complete until documentation, verification, and handover all agree on the final state.
 `;
 
   return {
     relativePath: ".github/copilot-instructions.md",
     content,
   };
+}
+
+function renderPlannedTasks(params: WorkspaceInitParams): string {
+  if (!params.plannedTasks?.length) {
+    return "";
+  }
+
+  return `## Planned Work\n\n${params.plannedTasks.map((task) => `- ${task}`).join("\n")}\n\n`;
+}
+
+function renderAdditionalContext(params: WorkspaceInitParams): string {
+  if (!params.additionalContext) {
+    return "";
+  }
+
+  return `## Additional Context\n\n${params.additionalContext}\n\n`;
+}
+
+function renderExtraInstructions(lines: string[]): string {
+  if (!lines.length) {
+    return "- No extra project-specific guidance was supplied.\n";
+  }
+
+  return lines.map((line) => `- ${line}`).join("\n");
+}
+
+function renderMultiRepoSection(isMulti: boolean): string {
+  if (!isMulti) {
+    return "";
+  }
+
+  return `## Multi-Repository Coordination
+
+- Document repository ownership, boundaries, and cross-repo impacts explicitly.
+- Track changes per repository in changelog and handover artifacts.
+- Make cross-repo dependencies visible before implementation starts.
+
+`;
 }

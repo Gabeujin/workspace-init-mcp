@@ -159,10 +159,21 @@ def evaluate_with_rubric(output: str, rubric: dict) -> float:
 | Practice | Rationale |
 |----------|-----------|
 | **Clear criteria** | Define specific, measurable evaluation criteria upfront |
+| **Separate generator and evaluator** | Independent judgment is more reliable than generator self-approval |
+| **Contract before evaluation** | A written done definition makes skeptical grading easier and more consistent |
 | **Iteration limits** | Set max iterations (3-5) to prevent infinite loops |
 | **Convergence check** | Stop if output score isn't improving between iterations |
 | **Log history** | Keep full trajectory for debugging and analysis |
 | **Structured output** | Use JSON for reliable parsing of evaluation results |
+
+---
+
+## Frontier Harness Notes
+
+- Use a dedicated evaluator when the task involves subjective quality, product taste, or subtle usability judgment.
+- Prefer skeptical evaluators that are calibrated to fail weak work rather than praise it.
+- For long-running work, combine evaluation loops with durable plan, contract, and handover artifacts.
+- Use context resets instead of endless compaction when the agent starts drifting, forgetting constraints, or showing context anxiety.
 
 ---
 

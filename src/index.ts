@@ -1,7 +1,7 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 
 /**
- * workspace-init-mcp — MCP Server v3.0.0
+ * workspace-init-mcp MCP Server v3.1.0
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -18,6 +18,10 @@ import * as path from "node:path";
 
 import { type WorkspaceInitParams, PROJECT_TYPE_CONFIGS } from "./types.js";
 import { collectFiles, buildSummary } from "./tools/initialize.js";
+import {
+  TARGET_IDE_VALUES,
+  resolveWorkspaceTargetIDEs,
+} from "./tools/agent-skills-install.js";
 import { buildInitFormSchema } from "./tools/form-schema.js";
 import { validateWorkspace } from "./tools/validate.js";
 import { analyzeWorkspace } from "./tools/status.js";
@@ -30,9 +34,11 @@ import {
   recommendAgentSkills,
   searchAgentSkills,
   listCategories,
+  buildCatalogIndexes,
   AGENT_REGISTRY,
   SKILL_REGISTRY,
 } from "./data/agent-skills-registry.js";
+import { buildHarnessProfilesSummary } from "./data/harness-profiles.js";
 import { generateSelectedSkills } from "./generators/agent-skills.js";
 
 // ---------------------------------------------------------------------------
@@ -103,7 +109,7 @@ const BaseWorkspaceInputSchema = z.object({
   docLanguage: z
     .string()
     .optional()
-    .describe('Language for documentation (default: "한국어")'),
+    .describe('Language for documentation (default: "Korean")'),
   codeCommentLanguage: z
     .string()
     .optional()
@@ -139,7 +145,7 @@ const BaseWorkspaceInputSchema = z.object({
       'File encoding for generated files (default: "utf-8"). Use "utf-8-bom" for Windows tools that require BOM.'
     ),
   targetIDEs: z
-    .array(z.enum(["vscode", "cursor", "claude-code", "openhands"]))
+    .array(z.enum(TARGET_IDE_VALUES))
     .optional()
     .describe(
       'Target IDEs for Agent Skills file paths (default: ["vscode"]). Select multiple to generate skills into each IDE\'s directory.'
@@ -149,6 +155,34 @@ const BaseWorkspaceInputSchema = z.object({
     .optional()
     .describe(
       'Line ending style for generated files and .gitattributes (default: "lf").'
+    ),
+  includeHarnessEngineering: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether to generate AI harness engineering artifacts. Default: true"
+    ),
+  harnessProfile: z
+    .enum(["lean", "balanced", "regulated", "autonomous"])
+    .optional()
+    .describe('Harness profile for long-running AI delivery. Default: "balanced".'),
+  governanceProfile: z
+    .enum(["standard", "strict", "regulated"])
+    .optional()
+    .describe('Governance strictness for the workspace. Default: "strict".'),
+  autonomyMode: z
+    .enum(["guided", "balanced", "autonomous"])
+    .optional()
+    .describe('How independently AI should execute work. Default: "balanced".'),
+  tokenBudget: z
+    .enum(["lean", "balanced", "thorough"])
+    .optional()
+    .describe('Token usage strategy for the workspace. Default: "balanced".'),
+  primaryDomains: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Primary domains the harness must coordinate (e.g., ["product", "platform", "security"]).'
     ),
 });
 
@@ -182,8 +216,10 @@ server.registerTool(
 
 This tool creates a complete workspace setup including:
 - .github/copilot-instructions.md (global Copilot instructions)
-- .github/skills/ (Agent Skills — SKILL.md files per the agentskills.io standard)
-- .github/agents/ (Agent definitions — .agent.md files)
+- .github/skills/ (Agent Skills - SKILL.md files per the agentskills.io standard)
+- .github/agents/ (Agent definitions - .agent.md files)
+- docs/ai-harness/dashboard/ (JSON-first admin dashboard with progress, KPI, issue, and git visibility)
+- docs/ai-harness/dashboard/scripts/dashboard-ops.mjs (dashboard refresh, strict validation, local preview server, and static export)
 - .vscode/settings.json (Copilot custom instruction references)
 - .vscode/*.instructions.md (code generation, test, review, commit, PR instructions)
 - .editorconfig (cross-editor formatting consistency)
@@ -214,6 +250,12 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
         plannedTasks: params.plannedTasks,
         includeAgentSkills: params.includeAgentSkills,
         agentSkillsIntent: params.agentSkillsIntent,
+        includeHarnessEngineering: params.includeHarnessEngineering,
+        harnessProfile: params.harnessProfile,
+        governanceProfile: params.governanceProfile,
+        autonomyMode: params.autonomyMode,
+        tokenBudget: params.tokenBudget,
+        primaryDomains: params.primaryDomains,
         fileEncoding: params.fileEncoding as WorkspaceInitParams["fileEncoding"],
         targetIDEs: params.targetIDEs as WorkspaceInitParams["targetIDEs"],
         lineEnding: params.lineEnding as WorkspaceInitParams["lineEnding"],
@@ -254,26 +296,26 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
 
       // Append environment info
       const envInfo: string[] = [];
-      envInfo.push(`📁 File encoding: ${encoding}`);
+      envInfo.push(`File encoding: ${encoding}`);
       const ides = params.targetIDEs ?? ["vscode"];
-      envInfo.push(`🎯 Target IDEs: ${ides.join(", ")}`);
-      envInfo.push(`↵ Line endings: ${params.lineEnding ?? "lf"}`);
+      envInfo.push(`Target IDEs: ${ides.join(", ")}`);
+      envInfo.push(`Line endings: ${params.lineEnding ?? "lf"}`);
       text += `\n\n${envInfo.join("\n")}`;
 
       if (skipped.length > 0) {
         const skippedList = skipped.map((s) => `  - ${s}`).join("\n");
-        text += `\n\n⏭️ 이미 존재하여 건너뛴 파일 (${skipped.length}개):\n${skippedList}`;
-        text += `\n  → 덮어쓰려면 force: true 로 다시 실행하세요.`;
+        text += `\n\nSkipped existing files (${skipped.length}):\n${skippedList}`;
+        text += "\n  Re-run with force: true to overwrite them.";
       }
       if (errors.length > 0) {
-        text += `\n\n⚠️ 일부 파일 생성 실패:\n${errors.map((e) => `  - ${e}`).join("\n")}`;
+        text += `\n\nFailed file writes:\n${errors.map((e) => `  - ${e}`).join("\n")}`;
       }
 
       return { content: [{ type: "text" as const, text }] };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return {
-        content: [{ type: "text" as const, text: `❌ 초기화 실패: ${msg}` }],
+        content: [{ type: "text" as const, text: `Initialization failed: ${msg}` }],
         isError: true,
       };
     }
@@ -307,6 +349,12 @@ Useful for reviewing the planned structure before committing to it.`,
         plannedTasks: params.plannedTasks,
         includeAgentSkills: params.includeAgentSkills,
         agentSkillsIntent: params.agentSkillsIntent,
+        includeHarnessEngineering: params.includeHarnessEngineering,
+        harnessProfile: params.harnessProfile,
+        governanceProfile: params.governanceProfile,
+        autonomyMode: params.autonomyMode,
+        tokenBudget: params.tokenBudget,
+        primaryDomains: params.primaryDomains,
         fileEncoding: params.fileEncoding as WorkspaceInitParams["fileEncoding"],
         targetIDEs: params.targetIDEs as WorkspaceInitParams["targetIDEs"],
         lineEnding: params.lineEnding as WorkspaceInitParams["lineEnding"],
@@ -317,17 +365,17 @@ Useful for reviewing the planned structure before committing to it.`,
       const preview = files
         .map(
           (f) =>
-            `📄 ${f.relativePath}\n${"─".repeat(60)}\n${f.content.slice(0, 500)}${f.content.length > 500 ? "\n... (truncated)" : ""}\n`
+            `- ${f.relativePath}\n${"-".repeat(60)}\n${f.content.slice(0, 500)}${f.content.length > 500 ? "\n... (truncated)" : ""}\n`
         )
         .join("\n");
 
-      const text = `🔍 워크스페이스 초기화 미리보기: ${params.workspaceName}\n\n총 ${files.length}개 파일이 생성됩니다.\n\n${preview}`;
+      const text = `Workspace initialization preview: ${params.workspaceName}\n\nGenerated files: ${files.length}\n\n${preview}`;
 
       return { content: [{ type: "text" as const, text }] };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return {
-        content: [{ type: "text" as const, text: `❌ 미리보기 실패: ${msg}` }],
+        content: [{ type: "text" as const, text: `Preview failed: ${msg}` }],
         isError: true,
       };
     }
@@ -349,11 +397,35 @@ server.registerTool(
   async () => {
     const lines = Object.entries(PROJECT_TYPE_CONFIGS).map(
       ([key, config]) =>
-        `- **${key}** (${config.label}): ${config.description}\n  기본 기술 스택: ${config.defaultTechStack.length ? config.defaultTechStack.join(", ") : "없음"}\n  추가 문서 섹션: ${config.docSections.length ? config.docSections.join(", ") : "없음"}`
+        `- **${key}** (${config.label}): ${config.description}\n  Default tech stack: ${config.defaultTechStack.length ? config.defaultTechStack.join(", ") : "none"}\n  Documentation sections: ${config.docSections.length ? config.docSections.join(", ") : "none"}`
     );
 
-    const text = `📋 사용 가능한 프로젝트 유형:\n\n${lines.join("\n\n")}`;
+    const text = `Available project types:\n\n${lines.join("\n\n")}`;
     return { content: [{ type: "text" as const, text }] };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: list_harness_profiles
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "list_harness_profiles",
+  {
+    title: "List Harness Profiles",
+    description:
+      "List the built-in AI harness profiles for long-running workspace delivery.",
+    inputSchema: z.object({}),
+  },
+  async () => {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: buildHarnessProfilesSummary(),
+        },
+      ],
+    };
   }
 );
 
@@ -422,6 +494,7 @@ Checks for the presence of all expected files (.github/copilot-instructions.md,
 - Overall initialization status (initialized or not)
 - Completeness percentage (0-100%)
 - Per-file status (present/missing) with severity levels
+- Dashboard state validity against the stricter JSON shape
 - Actionable suggestions for fixing gaps`,
     inputSchema: z.object({
       workspacePath: z
@@ -436,7 +509,7 @@ Checks for the presence of all expected files (.github/copilot-instructions.md,
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return {
-        content: [{ type: "text" as const, text: `❌ 검증 실패: ${msg}` }],
+        content: [{ type: "text" as const, text: `Validation failed: ${msg}` }],
         isError: true,
       };
     }
@@ -460,7 +533,10 @@ This tool is useful when:
 - The user chose "quick-start" and you need to detect optimal settings
 
 The analysis checks for: package.json, tsconfig.json, pyproject.toml, Docker,
-Kubernetes, monorepo markers, and many other project indicators.`,
+Kubernetes, monorepo markers, and many other project indicators.
+
+Use this before initializing a legacy project so the generated harness, dashboard,
+and governance layers can be applied without replacing the existing architecture.`,
     inputSchema: z.object({
       workspacePath: z
         .string()
@@ -474,7 +550,7 @@ Kubernetes, monorepo markers, and many other project indicators.`,
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return {
-        content: [{ type: "text" as const, text: `❌ 분석 실패: ${msg}` }],
+        content: [{ type: "text" as const, text: `Analysis failed: ${msg}` }],
         isError: true,
       };
     }
@@ -499,7 +575,7 @@ The recommendation engine scores each entry based on:
 - Project type relevance
 - Tech stack keyword matching
 - User intent/tag matching
-- Priority level (core → recommended → specialized)
+- Priority level (core, recommended, specialized)
 
 Use this tool to help users discover and select appropriate agent skills
 before installing them with install_agent_skills.
@@ -572,8 +648,10 @@ server.registerTool(
     title: "Install Agent Skills",
     description: `Install selected agent skills and agents into a workspace.
 
-Creates .github/skills/<id>/SKILL.md files and .github/agents/<id>.agent.md files
-for the specified skill and agent IDs. Files follow the open Agent Skills standard.
+Creates a canonical .github/skills/<id>/SKILL.md registry and .github/agents/<id>.agent.md
+registry for the specified skill and agent IDs. When targetIDEs are provided or
+detected from the workspace, the MCP also mirrors those files into the matching
+IDE-specific directories and refreshes the canonical catalog indexes.
 
 Use recommend_agent_skills or search_agent_skills first to discover available
 skills and agents, then pass the selected IDs to this tool.`,
@@ -592,6 +670,12 @@ skills and agents, then pass the selected IDs to this tool.`,
         .optional()
         .describe(
           "Agent IDs to install (e.g., ['plan', 'principal-software-engineer'])"
+        ),
+      targetIDEs: z
+        .array(z.enum(TARGET_IDE_VALUES))
+        .optional()
+        .describe(
+          'Target IDE mirrors to generate (e.g., ["cursor", "claude-code"]). If omitted, the MCP reuses the workspace machine index or existing skill directories.'
         ),
       force: z
         .boolean()
@@ -614,21 +698,29 @@ skills and agents, then pass the selected IDs to this tool.`,
           content: [
             {
               type: "text" as const,
-              text: "⚠️ 유효한 스킬/에이전트 ID가 없습니다. recommend_agent_skills 또는 search_agent_skills 로 사용 가능한 ID를 확인하세요.",
+              text: "No recognized skill or agent IDs were provided. Use recommend_agent_skills or search_agent_skills first to confirm valid IDs.",
             },
           ],
         };
       }
 
-      // Find unrecognized IDs
       const unknownSkills = (params.skillIds ?? []).filter(
         (id) => !SKILL_REGISTRY.some((s) => s.id === id)
       );
       const unknownAgents = (params.agentIds ?? []).filter(
         (id) => !AGENT_REGISTRY.some((a) => a.id === id)
       );
+      const targetIDEs = resolveWorkspaceTargetIDEs(
+        params.workspacePath,
+        params.targetIDEs as WorkspaceInitParams["targetIDEs"]
+      );
 
-      const files = generateSelectedSkills(skillEntries, agentEntries);
+      const files = generateSelectedSkills(skillEntries, agentEntries, {
+        workspaceName: path.basename(params.workspacePath),
+        workspacePath: params.workspacePath,
+        purpose: "Selected agent skill installation",
+        targetIDEs,
+      });
       const force = params.force ?? false;
       const written: string[] = [];
       const skipped: string[] = [];
@@ -653,21 +745,24 @@ skills and agents, then pass the selected IDs to this tool.`,
         }
       }
 
-      let text = `✅ Agent Skills 설치 완료\n\n`;
-      text += `📁 생성된 파일 (${written.length}개):\n${written.map((w) => `  - ${w}`).join("\n")}\n`;
+      const writtenList = written.length > 0 ? written.map((entry) => `  - ${entry}`).join("\n") : "  - none";
+      let text = "Agent Skills installation complete.\n\n";
+      text += `Target IDE mirrors: ${targetIDEs.join(", ")}\n`;
+      text += "Canonical registry: .github/skills/ and .github/agents/\n\n";
+      text += `Written files (${written.length}):\n${writtenList}\n`;
 
       if (skipped.length > 0) {
-        text += `\n⏭️ 이미 존재하여 건너뛴 파일 (${skipped.length}개):\n${skipped.map((s) => `  - ${s}`).join("\n")}`;
-        text += `\n  → 덮어쓰려면 force: true 로 다시 실행하세요.\n`;
+        text += `\nSkipped existing files (${skipped.length}):\n${skipped.map((entry) => `  - ${entry}`).join("\n")}`;
+        text += "\n  Re-run with force: true to overwrite them.\n";
       }
       if (unknownSkills.length > 0) {
-        text += `\n⚠️ 알 수 없는 스킬 ID: ${unknownSkills.join(", ")}`;
+        text += `\nUnknown skill IDs: ${unknownSkills.join(", ")}`;
       }
       if (unknownAgents.length > 0) {
-        text += `\n⚠️ 알 수 없는 에이전트 ID: ${unknownAgents.join(", ")}`;
+        text += `\nUnknown agent IDs: ${unknownAgents.join(", ")}`;
       }
       if (errors.length > 0) {
-        text += `\n\n❌ 오류:\n${errors.map((e) => `  - ${e}`).join("\n")}`;
+        text += `\n\nErrors:\n${errors.map((entry) => `  - ${entry}`).join("\n")}`;
       }
 
       return { content: [{ type: "text" as const, text }] };
@@ -675,7 +770,7 @@ skills and agents, then pass the selected IDs to this tool.`,
       const msg = err instanceof Error ? err.message : String(err);
       return {
         content: [
-          { type: "text" as const, text: `❌ 설치 실패: ${msg}` },
+          { type: "text" as const, text: `Installation failed: ${msg}` },
         ],
         isError: true,
       };
@@ -705,27 +800,37 @@ names, descriptions, and categories. Use this for browsing the full catalog.`,
   async (params) => {
     const filter = params.filter ?? "all";
     const cats = listCategories();
+    const indexes = buildCatalogIndexes();
     const parts: string[] = [];
 
-    parts.push(`📚 Agent Skills 카탈로그\n`);
+    parts.push("# Agent Skills Catalog");
+    parts.push("");
+    parts.push("## Indexed Views");
+    parts.push(
+      `- Roles: ${indexes.roles.map((role) => `${role.label} (${role.agents.length + role.skills.length})`).join(", ")}`
+    );
+    parts.push(
+      `- Domains: ${indexes.domains.map((domain) => `${domain.label} (${domain.agents.length + domain.skills.length})`).join(", ")}`
+    );
+    parts.push("");
 
     if (filter !== "skills") {
-      parts.push(`## 에이전트 (${AGENT_REGISTRY.length}개)\n`);
-      parts.push(`카테고리: ${cats.agentCategories.join(", ")}\n`);
+      parts.push(`## Agents (${AGENT_REGISTRY.length})`);
+      parts.push(`Categories: ${cats.agentCategories.join(", ")}`);
       for (const agent of AGENT_REGISTRY) {
         parts.push(
-          `- **${agent.name}** (\`${agent.id}\`) [${agent.categories.join(", ")}] — ${agent.description}`
+          `- **${agent.name}** (\`${agent.id}\`) [${agent.categories.join(", ")}] - ${agent.description}`
         );
       }
       parts.push("");
     }
 
     if (filter !== "agents") {
-      parts.push(`## 스킬 (${SKILL_REGISTRY.length}개)\n`);
-      parts.push(`카테고리: ${cats.skillCategories.join(", ")}\n`);
+      parts.push(`## Skills (${SKILL_REGISTRY.length})`);
+      parts.push(`Categories: ${cats.skillCategories.join(", ")}`);
       for (const skill of SKILL_REGISTRY) {
         parts.push(
-          `- **${skill.name}** (\`${skill.id}\`) [${skill.categories.join(", ")}] — ${skill.description}`
+          `- **${skill.name}** (\`${skill.id}\`) [${skill.categories.join(", ")}] - ${skill.description}`
         );
       }
     }
@@ -741,51 +846,50 @@ names, descriptions, and categories. Use this for browsing the full catalog.`,
 server.registerPrompt(
   "workspace-init",
   {
-    title: "워크스페이스 초기화",
+    title: "Initialize Workspace",
     description:
-      "워크스페이스 초기화를 위한 전체 설정 폼입니다. 필수/선택 입력값을 안내받고 맞춤형 워크스페이스를 생성합니다.",
+      "Collect the full set of inputs required to initialize a workspace with documentation, governance, and Agent Skills.",
     argsSchema: {
       workspaceName: z
         .string()
-        .describe("워크스페이스 이름 (프로젝트 식별용, 파일명/제목에 사용)"),
+        .describe("Workspace name used in headings, filenames, and generated summaries"),
       purpose: z
         .string()
-        .describe("프로젝트의 주요 목적과 목표를 구체적으로 작성해 주세요"),
+        .describe("Primary project goal and delivery objective"),
       workspacePath: z
         .string()
-        .describe("워크스페이스 루트 디렉토리의 절대 경로"),
+        .describe("Absolute path to the workspace root directory"),
       projectType: z
         .string()
         .optional()
-        .describe("프로젝트 유형: learning, web-app, api, mobile, data-science, devops, creative, library, monorepo, consulting, ecommerce, fintech, healthcare, saas, iot, other"),
+        .describe("Project type: learning, web-app, api, mobile, data-science, devops, creative, library, monorepo, consulting, ecommerce, fintech, healthcare, saas, iot, other"),
       techStack: z
         .string()
         .optional()
-        .describe('기술 스택 (쉼표로 구분, 예: "TypeScript, React, Node.js")'),
+        .describe('Technology stack as a comma-separated list, for example "TypeScript, React, Node.js"'),
       docLanguage: z
         .string()
         .optional()
-        .describe('문서 작성 언어 (기본: "한국어")'),
+        .describe('Documentation language (default: "Korean")'),
       codeCommentLanguage: z
         .string()
         .optional()
-        .describe('코드 주석 언어 (기본: "English")'),
+        .describe('Code comment language (default: "English")'),
       isMultiRepo: z
         .string()
         .optional()
-        .describe('멀티 레포지토리 여부 ("true" 또는 "false", 기본: false)'),
+        .describe('Whether the workspace manages multiple repositories ("true" or "false", default: false)'),
       additionalContext: z
         .string()
         .optional()
-        .describe("추가 컨텍스트 (팀 규칙, 특수 요구사항 등)"),
+        .describe("Additional constraints, policies, or project-specific context"),
       plannedTasks: z
         .string()
         .optional()
-        .describe('예정된 주요 작업 (쉼표로 구분, 예: "인증 구현, API 설계")'),
+        .describe('Planned workflows as a comma-separated list, for example "Auth implementation, API design"'),
     },
   },
   (args) => {
-    // Filter out undefined values to match Record<string, string>
     const filtered: Record<string, string> = {};
     for (const [k, v] of Object.entries(args)) {
       if (v !== undefined) filtered[k] = v;
@@ -797,13 +901,13 @@ server.registerPrompt(
 server.registerPrompt(
   "workspace-quick-start",
   {
-    title: "빠른 워크스페이스 초기화",
+    title: "Quick Workspace Init",
     description:
-      "최소 필수 정보만으로 빠르게 워크스페이스를 초기화합니다. 선택 항목은 자동 감지됩니다.",
+      "Initialize a workspace from the minimum required inputs and let the MCP infer the rest when possible.",
     argsSchema: {
-      workspaceName: z.string().describe("워크스페이스 이름"),
-      purpose: z.string().describe("프로젝트 목적 (한 줄 요약도 OK)"),
-      workspacePath: z.string().describe("워크스페이스 경로 (절대 경로)"),
+      workspaceName: z.string().describe("Workspace name"),
+      purpose: z.string().describe("Project purpose or short objective"),
+      workspacePath: z.string().describe("Absolute workspace path"),
     },
   },
   (args) => buildQuickStartMessages(args)
@@ -812,11 +916,11 @@ server.registerPrompt(
 server.registerPrompt(
   "workspace-analyze",
   {
-    title: "워크스페이스 분석",
+    title: "Analyze Workspace",
     description:
-      "기존 프로젝트 디렉토리를 분석하여 프로젝트 유형, 기술 스택, 초기화 상태를 파악합니다.",
+      "Analyze an existing workspace to infer project type, tech stack, and initialization status.",
     argsSchema: {
-      workspacePath: z.string().describe("분석할 워크스페이스 경로 (절대 경로)"),
+      workspacePath: z.string().describe("Absolute path to the workspace being analyzed"),
     },
   },
   (args) => buildAnalyzeMessages(args)
@@ -830,8 +934,8 @@ server.registerResource(
   "project-types-overview",
   "workspace-init://project-types",
   {
-    title: "프로젝트 유형 가이드",
-    description: "사용 가능한 모든 프로젝트 유형과 설정 정보",
+    title: "Project Type Guide",
+    description: "Overview of supported project types and their default configuration",
     mimeType: "text/markdown",
   },
   async (uri) => {
@@ -839,9 +943,9 @@ server.registerResource(
       .map(
         ([key, config]) =>
           `## ${config.label} (\`${key}\`)\n\n${config.description}\n\n` +
-          `- 기본 기술 스택: ${config.defaultTechStack.length ? config.defaultTechStack.join(", ") : "없음"}\n` +
-          `- 문서 섹션: ${config.docSections.length ? config.docSections.join(", ") : "없음"}\n` +
-          `- 특화 지침:\n${config.extraInstructions.map((i) => `  - ${i}`).join("\n")}`
+          `- Default tech stack: ${config.defaultTechStack.length ? config.defaultTechStack.join(", ") : "none"}\n` +
+          `- Documentation sections: ${config.docSections.length ? config.docSections.join(", ") : "none"}\n` +
+          `- Extra guidance:\n${config.extraInstructions.map((instruction) => `  - ${instruction}`).join("\n")}`
       )
       .join("\n\n---\n\n");
 
@@ -850,7 +954,7 @@ server.registerResource(
         {
           uri: uri.href,
           mimeType: "text/markdown",
-          text: `# 프로젝트 유형 가이드\n\n${overview}`,
+          text: `# Project Type Guide\n\n${overview}`,
         },
       ],
     };
@@ -870,8 +974,8 @@ server.registerResource(
     }),
   }),
   {
-    title: "프로젝트 유형 상세",
-    description: "특정 프로젝트 유형의 상세 설정 정보",
+    title: "Project Type Detail",
+    description: "Detailed configuration data for a specific project type",
     mimeType: "application/json",
   },
   async (uri, params) => {
@@ -885,7 +989,7 @@ server.registerResource(
           {
             uri: uri.href,
             mimeType: "text/plain" as const,
-            text: `프로젝트 유형 "${typeName}"을 찾을 수 없습니다. 사용 가능: ${Object.keys(PROJECT_TYPE_CONFIGS).join(", ")}`,
+            text: `Project type "${typeName}" was not found. Supported types: ${Object.keys(PROJECT_TYPE_CONFIGS).join(", ")}`,
           },
         ],
       };
@@ -911,14 +1015,31 @@ server.registerResource(
   "agent-skills-catalog",
   "workspace-init://agent-skills",
   {
-    title: "Agent Skills 카탈로그",
+    title: "Agent Skills Catalog",
     description:
-      "사용 가능한 모든 Agent Skills 및 에이전트 목록 (agentskills.io 표준 기반)",
+      "Catalog of all registered Agent Skills and agents, including role and domain indexes.",
     mimeType: "application/json",
   },
   async (uri) => {
+    const indexes = buildCatalogIndexes();
     const catalog = {
       standard: "https://agentskills.io",
+      indexes: {
+        roles: indexes.roles.map((role) => ({
+          id: role.id,
+          label: role.label,
+          description: role.description,
+          agentIds: role.agents.map((agent) => agent.id),
+          skillIds: role.skills.map((skill) => skill.id),
+        })),
+        domains: indexes.domains.map((domain) => ({
+          id: domain.id,
+          label: domain.label,
+          description: domain.description,
+          agentIds: domain.agents.map((agent) => agent.id),
+          skillIds: domain.skills.map((skill) => skill.id),
+        })),
+      },
       agents: AGENT_REGISTRY.map((a) => ({
         id: a.id,
         name: a.name,
