@@ -3,6 +3,15 @@ import {
   type WorkspaceInitParams,
 } from "../types.js";
 
+const RUNTIME_COMPATIBILITY_VERSION = "4.1.2";
+const ADAPTER_CONTRACT_VERSION = "1.0.0";
+const RUNTIME_COMPATIBILITY_FILES = [
+  "docs/ai-harness/runtime/version-index.json",
+  "docs/ai-harness/runtime/compatibility-matrix.json",
+  "docs/ai-harness/runtime/adapter-contract.json",
+  "docs/ai-harness/runtime/session-continuity.md",
+];
+
 function buildRuntimeReadme(): string {
   return `# Planner / Generator / Evaluator Runtime
 
@@ -22,9 +31,13 @@ This directory stores the file-system runtime for governed AI delivery.
 - \`state/current-work-packet.json\`: latest active or queued work packet pointer for external AI handoff
 - \`state/current-execution-bridge.json\`: latest prepared execution bridge pointer for external runtime launch
 - \`state/current-native-execution.json\`: latest native executor launch pointer and status snapshot
+- \`version-index.json\`: machine-readable feature and file index by workspace-init-mcp version
+- \`compatibility-matrix.json\`: upgrade paths and compatibility checks for older harness workspaces
+- \`adapter-contract.json\`: stable handoff interface for Copilot, Codex, Claude, Gemini, OpenHands, and portable runtimes
+- \`session-continuity.md\`: cross-agent continuity rules for switching execution environments without losing governance state
 - \`templates/harness-session.template.json\`: shape reference for runtime session state
 - \`prompts/*.md\`: role briefs for planner, generator, and evaluator agents
-- \`adapters/*.md\`: runtime-specific operating guidance for Codex CLI, Claude Code, Gemini CLI, generic CLI agents, OpenHands, and generic file-based execution
+- \`adapters/*.md\`: runtime-specific operating guidance for GitHub Copilot Chat, Codex CLI, Claude Code, Gemini CLI, generic CLI agents, OpenHands, and generic file-based execution
 - \`bridges/*.md\`: launch guidance for concrete execution bridges
 - \`native-executors/*.md\`: executable-specific guidance for directly launching supported runtimes
 - \`work-packets/*.work-packet.json\`: durable per-session execution packets for external AI runtimes
@@ -53,7 +66,7 @@ Use these MCP tools against the initialized workspace:
 7. \`list_harness_runtime_adapters\`
    Lists the supported runtime adapters and their execution style.
 8. \`prepare_harness_adapter_handoff\`
-   Builds a runtime-specific handoff bundle for Codex CLI, Claude Code, Gemini CLI, generic CLI agents, OpenHands, or a generic file-based runtime.
+   Builds a runtime-specific handoff bundle for GitHub Copilot Chat, Codex CLI, Claude Code, Gemini CLI, generic CLI agents, OpenHands, or a generic file-based runtime.
 9. \`list_harness_execution_bridges\`
    Lists the supported execution bridges and their launch style.
 10. \`prepare_harness_execution_bridge\`
@@ -226,6 +239,7 @@ function buildCurrentNativeExecutionTemplate(): string {
       nativeExecutionStateFile: null,
       stdoutLogFile: null,
       stderrLogFile: null,
+      lastMessageFile: null,
       processId: null,
       executablePath: null,
       summary:
@@ -234,6 +248,382 @@ function buildCurrentNativeExecutionTemplate(): string {
     null,
     2
   )}\n`;
+}
+
+function buildRuntimeVersionIndex(): string {
+  return `${JSON.stringify(
+    {
+      schemaVersion: "1.0.0",
+      generatedAt: "bootstrap",
+      generatedBy: "workspace-init-mcp",
+      latestVersion: RUNTIME_COMPATIBILITY_VERSION,
+      purpose:
+        "Machine-readable index of harness capabilities by workspace-init-mcp version so agents can reconcile old workspaces after @latest upgrades.",
+      versions: [
+        {
+          version: "4.0.0",
+          releaseTheme: "Governed workspace initialization baseline",
+          capabilities: [
+            "managed-harness-files",
+            "three-plan-three-review-governance",
+            "dashboard-state",
+            "planner-generator-evaluator-ledgers",
+          ],
+          introducedFiles: [
+            ".github/ai-harness/harness-manifest.yaml",
+            ".github/ai-harness/operating-model.md",
+            "docs/ai-harness/dashboard/state/dashboard-state.json",
+          ],
+          upgradeNotes: [
+            "Use reconcile_workspace_initialization before relying on runtime handoffs.",
+            "Preserve customized governance documents unless an operator explicitly refreshes them.",
+          ],
+        },
+        {
+          version: "4.0.1",
+          releaseTheme: "Managed inventory and safer legacy reconcile posture",
+          capabilities: [
+            "managed-file-inventory",
+            "reconcile-policy",
+            "legacy-resource-import",
+            "semantic-diff-audit",
+          ],
+          introducedFiles: [
+            ".github/ai-harness/managed-file-inventory.json",
+            ".github/ai-harness/reconcile-policy.json",
+          ],
+          upgradeNotes: [
+            "Inventory-aware reconcile can add missing latest files while protecting drifted managed files.",
+          ],
+        },
+        {
+          version: "4.1.0",
+          releaseTheme: "Planner/generator/evaluator runtime orchestration",
+          capabilities: [
+            "start_harness_session",
+            "advance_harness_session",
+            "prepare_harness_work_packet",
+            "prepare_harness_adapter_handoff",
+            "prepare_harness_execution_bridge",
+            "record_harness_execution_result",
+            "compact_harness_runtime",
+          ],
+          introducedFiles: [
+            "docs/ai-harness/runtime/README.md",
+            "docs/ai-harness/runtime/state/session-index.json",
+            "docs/ai-harness/runtime/state/active-session.json",
+            "docs/ai-harness/runtime/state/current-work-packet.json",
+            "docs/ai-harness/runtime/state/current-execution-bridge.json",
+          ],
+          upgradeNotes: [
+            "Runtime state files are live session state and should be merged, not blindly replaced.",
+          ],
+        },
+        {
+          version: "4.1.1",
+          releaseTheme: "Codex native execution bridge hardening",
+          capabilities: [
+            "codex-exec-native-executor",
+            "native-last-message-artifact",
+            "native-executor-overrides",
+            "dashboard-native-execution-visibility",
+          ],
+          introducedFiles: [
+            ".github/ai-harness/native-executor-overrides.json",
+            "docs/ai-harness/runtime/state/current-native-execution.json",
+            "docs/ai-harness/runtime/native-executors/README.md",
+          ],
+          upgradeNotes: [
+            "Codex runs should prefer codex exec with --output-last-message for durable final-message capture.",
+          ],
+        },
+        {
+          version: RUNTIME_COMPATIBILITY_VERSION,
+          releaseTheme: "Cross-agent compatibility and version capability indexing",
+          capabilities: [
+            "version-capability-index",
+            "compatibility-matrix",
+            "cross-agent-adapter-contract",
+            "session-continuity-contract",
+            "handoff-compatibility-metadata",
+            "github-copilot-runtime-adapter",
+          ],
+          introducedFiles: [
+            ...RUNTIME_COMPATIBILITY_FILES,
+            "docs/ai-harness/runtime/adapters/github-copilot.md",
+            "docs/ai-harness/runtime/bridges/github-copilot.md",
+            "docs/ai-harness/runtime/native-executors/github-copilot.md",
+          ],
+          upgradeNotes: [
+            "All adapter handoffs should include compatibility metadata and point to the stable adapter contract.",
+            "Agents switching between Copilot, Codex, Claude, Gemini, OpenHands, or a portable runtime should read continuity files before chat history.",
+            "Older workspaces should run reconcile_workspace_initialization to install missing compatibility files before starting @latest sessions.",
+          ],
+        },
+      ],
+      latestRequiredArtifacts: RUNTIME_COMPATIBILITY_FILES,
+      adapterCompatibility: {
+        stableContractVersion: ADAPTER_CONTRACT_VERSION,
+        supportedRuntimes: [
+          "copilot",
+          "github-copilot",
+          "codex",
+          "claude",
+          "gemini",
+          "openhands",
+          "generic-cli",
+          "generic-file-runtime",
+        ],
+        stableHandoffFields: [
+          "sessionId",
+          "leaseStatus",
+          "nextActor",
+          "currentPhase",
+          "nextAction",
+          "goal",
+          "chunkId",
+          "adapter",
+          "fileReferences",
+          "operatorChecklist",
+          "runtimeExpectations",
+          "packet",
+          "promptBlock",
+          "compatibility",
+        ],
+      },
+    },
+    null,
+    2
+  )}\n`;
+}
+
+function buildRuntimeCompatibilityMatrix(): string {
+  return `${JSON.stringify(
+    {
+      schemaVersion: "1.0.0",
+      generatedAt: "bootstrap",
+      generatedBy: "workspace-init-mcp",
+      currentVersion: RUNTIME_COMPATIBILITY_VERSION,
+      adapterContractVersion: ADAPTER_CONTRACT_VERSION,
+      upgradePolicy: {
+        latestKeyword:
+          "When an agent uses @latest, first inspect version-index.json and run reconcile_workspace_initialization if required compatibility files are missing.",
+        safeDefault:
+          "Use dry-run reconcile first; apply only after manual-review items are understood or intentionally held.",
+        stateRule:
+          "Merge live runtime state and dashboard state; replace generated compatibility contract files from the latest baseline.",
+      },
+      upgradePaths: [
+        {
+          from: "<=4.0.1",
+          to: RUNTIME_COMPATIBILITY_VERSION,
+          requiredActions: [
+            "Add runtime orchestrator state and guide files.",
+            "Add native executor override and current native execution snapshot files.",
+            "Add version index, compatibility matrix, adapter contract, and session continuity contract.",
+            "Refresh dashboard artifacts so operators can see runtime and compatibility surfaces.",
+          ],
+          preserve: [
+            "customized operating model",
+            "harness manifest",
+            "dashboard truth fields",
+            "legacy custom skills and agents",
+          ],
+        },
+        {
+          from: "4.1.0",
+          to: RUNTIME_COMPATIBILITY_VERSION,
+          requiredActions: [
+            "Add Codex native executor last-message support.",
+            "Add current native execution state file.",
+            "Add version index and adapter compatibility contract files.",
+          ],
+          preserve: [
+            "active runtime sessions",
+            "work packets",
+            "adapter handoff bundles",
+            "execution receipts",
+          ],
+        },
+        {
+          from: "4.1.1",
+          to: RUNTIME_COMPATIBILITY_VERSION,
+          requiredActions: [
+            "Add version index, compatibility matrix, adapter contract, and session continuity contract.",
+            "Add the GitHub Copilot adapter, bridge, and manual native executor profile.",
+            "Refresh adapter handoffs so compatibility metadata is embedded in new bundles.",
+          ],
+          preserve: [
+            "native executor overrides",
+            "current native execution state",
+            "Codex last-message artifacts",
+          ],
+        },
+      ],
+      compatibilityChecks: [
+        {
+          id: "version-index-present",
+          file: "docs/ai-harness/runtime/version-index.json",
+          severity: "required",
+          reason: "Agents need a machine-readable capability index before assuming @latest behavior.",
+        },
+        {
+          id: "adapter-contract-present",
+          file: "docs/ai-harness/runtime/adapter-contract.json",
+          severity: "required",
+          reason: "Cross-agent handoffs need a stable interface shared by Copilot, Codex, Claude, Gemini, and OpenHands.",
+        },
+        {
+          id: "session-continuity-present",
+          file: "docs/ai-harness/runtime/session-continuity.md",
+          severity: "required",
+          reason: "Agent switching must preserve session id, active chunk, phase, receipts, and governed source-of-truth ordering.",
+        },
+        {
+          id: "runtime-state-merge",
+          file: "docs/ai-harness/runtime/state/",
+          severity: "required",
+          reason: "Runtime state stores live work and should be merged through reconcile.",
+        },
+      ],
+      requiredRuntimeFiles: [
+        "docs/ai-harness/runtime/state/session-index.json",
+        "docs/ai-harness/runtime/state/active-session.json",
+        "docs/ai-harness/runtime/state/current-work-packet.json",
+        "docs/ai-harness/runtime/state/current-execution-bridge.json",
+        "docs/ai-harness/runtime/state/current-native-execution.json",
+        ...RUNTIME_COMPATIBILITY_FILES,
+        "docs/ai-harness/runtime/adapters/github-copilot.md",
+        "docs/ai-harness/runtime/bridges/github-copilot.md",
+        "docs/ai-harness/runtime/native-executors/github-copilot.md",
+      ],
+    },
+    null,
+    2
+  )}\n`;
+}
+
+function buildRuntimeAdapterContract(): string {
+  return `${JSON.stringify(
+    {
+      schemaVersion: "1.0.0",
+      contractVersion: ADAPTER_CONTRACT_VERSION,
+      generatedAt: "bootstrap",
+      generatedBy: "workspace-init-mcp",
+      purpose:
+        "Stable cross-agent handoff interface for keeping governed harness work continuous across Copilot, Codex, Claude, Gemini, OpenHands, and portable runtimes.",
+      supportedRuntimes: [
+        "copilot",
+        "github-copilot",
+        "codex",
+        "claude",
+        "gemini",
+        "openhands",
+        "generic-cli",
+        "generic-file-runtime",
+      ],
+      requiredHandoffFields: [
+        "schemaVersion",
+        "generatedAt",
+        "adapterId",
+        "sessionId",
+        "leaseStatus",
+        "nextActor",
+        "currentPhase",
+        "nextAction",
+        "goal",
+        "chunkId",
+        "adapter",
+        "fileReferences",
+        "operatorChecklist",
+        "runtimeExpectations",
+        "packet",
+        "promptBlock",
+        "compatibility",
+      ],
+      requiredFileReferences: [
+        "workPacketFile",
+        "workPacketMarkdownFile",
+        "actorInboxFile",
+        "sessionFile",
+        "sessionSummaryFile",
+        "rolePromptFile",
+        "adapterProfileFile",
+        "adapterContractFile",
+        "versionIndexFile",
+        "compatibilityMatrixFile",
+        "sessionContinuityFile",
+      ],
+      sourceOfTruthOrder: [
+        "runtime session JSON",
+        "work packet JSON and markdown",
+        "adapter handoff JSON and markdown",
+        "execution bridge manifest and receipts",
+        "dashboard state",
+        "chat history",
+      ],
+      persistenceRules: [
+        "Keep sessionId, chunkId, currentPhase, nextActor, and leaseStatus stable across runtime switches.",
+        "Record runtime outcomes through governed receipts or advance_harness_session artifact paths before moving phases.",
+        "Do not rely on hidden chat memory when a durable file provides the same fact.",
+        "Use context_reset and handover artifacts when an agent cannot safely continue from current context.",
+      ],
+      switchingRules: [
+        "Before switching runtimes, prepare a fresh adapter handoff for the target runtime.",
+        "The receiving runtime must read adapter-contract.json, session-continuity.md, the handoff JSON, and the work packet before editing.",
+        "The receiving runtime must not widen scope beyond the active chunk unless governance is advanced to a planning phase.",
+        "If compatibility files are missing, run reconcile_workspace_initialization before starting governed execution.",
+      ],
+      receiptContract: {
+        requiredFields: [
+          "sessionId",
+          "bridgeId",
+          "outcome",
+          "summary",
+          "artifactPaths",
+          "nextStep",
+        ],
+        returnRule:
+          "Every external or native execution returns through a governed receipt or an advance_harness_session artifact before the session phase changes.",
+      },
+    },
+    null,
+    2
+  )}\n`;
+}
+
+function buildSessionContinuityContract(): string {
+  return `# Session Continuity Contract
+
+This contract keeps governed harness work stable when a user switches between Copilot, Codex, Claude, Gemini, OpenHands, or another runtime.
+
+## Source Of Truth Order
+
+1. Runtime session JSON in \`docs/ai-harness/runtime/sessions/\`
+2. Work packet JSON and markdown in \`docs/ai-harness/runtime/work-packets/\`
+3. Adapter handoff JSON and markdown in \`docs/ai-harness/runtime/adapter-handoffs/\`
+4. Execution bridge manifests and receipts in \`docs/ai-harness/runtime/execution-bridges/\`
+5. Dashboard state in \`docs/ai-harness/dashboard/state/dashboard-state.json\`
+6. Chat history, terminal scrollback, or IDE memory
+
+## Switching Rule
+
+Before moving Copilot <-> Codex <-> Claude <-> Gemini <-> OpenHands, prepare a fresh adapter handoff for the target runtime and keep the same \`sessionId\`, \`chunkId\`, \`currentPhase\`, and \`nextActor\` unless governance explicitly advances them.
+
+## Receiving Runtime Checklist
+
+- Read \`docs/ai-harness/runtime/adapter-contract.json\`.
+- Read \`docs/ai-harness/runtime/version-index.json\`.
+- Read \`docs/ai-harness/runtime/compatibility-matrix.json\`.
+- Read the generated handoff JSON and markdown for the selected adapter.
+- Read the work packet and actor inbox before touching project files.
+- Treat durable harness files as stronger evidence than prior chat context.
+- Return results through \`record_harness_execution_result\` or \`advance_harness_session\` with artifact paths.
+
+## Upgrade Rule
+
+If a workspace was initialized with an older workspace-init-mcp version, run \`reconcile_workspace_initialization\` before using \`@latest\` capabilities. Reconcile should add missing compatibility files while preserving live runtime state, dashboard state, customized governance documents, and local adapter overrides.
+`;
 }
 
 function buildSessionTemplate(params: WorkspaceInitParams): string {
@@ -377,6 +767,8 @@ function buildAdaptersReadme(): string {
 
 These adapter profiles explain how to hand governed runtime work to specific execution environments.
 
+- \`../adapter-contract.json\`: stable interface all adapters must preserve
+- \`github-copilot.md\`
 - \`codex-cli.md\`
 - \`claude-code.md\`
 - \`gemini-cli.md\`
@@ -384,7 +776,7 @@ These adapter profiles explain how to hand governed runtime work to specific exe
 - \`openhands.md\`
 - \`generic-file-runtime.md\`
 
-Use \`prepare_harness_adapter_handoff\` to generate a session-specific handoff bundle after selecting the adapter.
+Use \`prepare_harness_adapter_handoff\` to generate a session-specific handoff bundle after selecting the adapter. When switching between Copilot, Codex, Claude, Gemini, OpenHands, or a portable runtime, read \`../session-continuity.md\` first.
 `;
 }
 
@@ -432,6 +824,7 @@ function buildBridgesReadme(): string {
 Bridge profiles describe how to launch governed sessions in concrete runtime environments.
 
 - \`codex-cli.md\`
+- \`github-copilot.md\`
 - \`claude-code.md\`
 - \`gemini-cli.md\`
 - \`generic-cli.md\`
@@ -487,11 +880,14 @@ function buildNativeExecutorsReadme(): string {
 Native executor profiles describe direct-launch integrations for supported runtimes.
 
 - \`codex-cli.md\`
+- \`github-copilot.md\`
 - \`claude-code.md\`
 - \`gemini-cli.md\`
 - \`generic-cli.md\`
 - \`openhands.md\`
 - \`generic-file-runtime.md\`
+
+The Codex native executor can use \`codex exec\` and write the final assistant message into the execution bridge bundle so the governed run leaves durable operator-facing evidence.
 
 Use \`list_harness_native_executors\` to inspect what is locally available, \`prepare_harness_native_executor\` to generate a governed launch plan, and \`launch_harness_native_executor\` to execute the plan when appropriate.
 `;
@@ -560,6 +956,22 @@ export function generateRuntimeOrchestratorFiles(
       content: buildRuntimeReadme(),
     },
     {
+      relativePath: "docs/ai-harness/runtime/version-index.json",
+      content: buildRuntimeVersionIndex(),
+    },
+    {
+      relativePath: "docs/ai-harness/runtime/compatibility-matrix.json",
+      content: buildRuntimeCompatibilityMatrix(),
+    },
+    {
+      relativePath: "docs/ai-harness/runtime/adapter-contract.json",
+      content: buildRuntimeAdapterContract(),
+    },
+    {
+      relativePath: "docs/ai-harness/runtime/session-continuity.md",
+      content: buildSessionContinuityContract(),
+    },
+    {
       relativePath: "docs/ai-harness/runtime/state-machine.md",
       content: buildRuntimeStateMachine(),
     },
@@ -604,14 +1016,29 @@ export function generateRuntimeOrchestratorFiles(
       content: buildAdaptersReadme(),
     },
     {
+      relativePath: "docs/ai-harness/runtime/adapters/github-copilot.md",
+      content: buildAdapterProfile(
+        "github-copilot",
+        "GitHub Copilot Chat / VS Code Adapter",
+        "copilot",
+        "IDE-native continuation that keeps .github/copilot-instructions.md aligned with governed runtime handoffs",
+        [
+          "Open the handoff markdown, actor inbox, and work packet in VS Code before prompting Copilot Chat.",
+          "Tell Copilot to follow the adapter contract and session continuity contract over prior chat memory.",
+          "Record Copilot outcomes through governed receipts or advance_harness_session artifact paths.",
+        ]
+      ),
+    },
+    {
       relativePath: "docs/ai-harness/runtime/adapters/codex-cli.md",
       content: buildAdapterProfile(
         "codex-cli",
         "Codex CLI / Desktop Adapter",
         "codex",
-        "File-first coding continuation with strong patch/test discipline",
+        "File-first coding continuation with strong patch/test discipline plus governed codex exec handoff support",
         [
           "Open the handoff markdown, actor inbox, and work packet before editing files.",
+          "Prefer codex exec when you want a governed non-interactive run with a durable last-message file.",
           "Use governed artifacts as the source of truth over transient chat context.",
           "Advance the governed session after each meaningful phase completion.",
         ]
@@ -696,9 +1123,18 @@ export function generateRuntimeOrchestratorFiles(
       content: buildBridgesReadme(),
     },
     {
+      relativePath: "docs/ai-harness/runtime/bridges/github-copilot.md",
+      content: buildBridgeProfile("github-copilot", "GitHub Copilot Chat Execution Bridge", "workspace-worker", [
+        "Use this bridge when the target runtime is Copilot Chat inside VS Code.",
+        "Open the generated handoff markdown and actor inbox before asking Copilot to continue.",
+        "Return to governance with a receipt or advance_harness_session artifact paths after the Copilot run.",
+      ]),
+    },
+    {
       relativePath: "docs/ai-harness/runtime/bridges/codex-cli.md",
       content: buildBridgeProfile("codex-cli", "Codex Execution Bridge", "guided-command", [
         "Use the generated bridge manifest and launch script as the runtime bootstrap.",
+        "Prefer codex exec with --output-last-message for governed non-interactive runs, and keep interactive codex as the supervised fallback.",
         "Launch from the shared workspace so patch/test operations stay reproducible.",
         "Record a governed receipt when the run ends.",
       ]),
@@ -752,6 +1188,19 @@ export function generateRuntimeOrchestratorFiles(
       content: buildNativeExecutorsReadme(),
     },
     {
+      relativePath: "docs/ai-harness/runtime/native-executors/github-copilot.md",
+      content: buildNativeExecutorProfile(
+        "github-copilot",
+        "GitHub Copilot Chat Native Executor",
+        "manual-only",
+        [
+          "Copilot Chat is usually launched through VS Code rather than a stable CLI.",
+          "Use the generated bridge bundle and handoff markdown as the IDE prompt envelope.",
+          "Record the Copilot result through governed receipts or advance_harness_session artifact paths.",
+        ]
+      ),
+    },
+    {
       relativePath: "docs/ai-harness/runtime/native-executors/codex-cli.md",
       content: buildNativeExecutorProfile(
         "codex-cli",
@@ -759,6 +1208,8 @@ export function generateRuntimeOrchestratorFiles(
         "native",
         [
           "Prefer the generated native execution plan over ad-hoc terminal commands.",
+          "The default Codex plan uses codex exec and captures the last message in a durable file inside the execution bridge bundle.",
+          "Use native-executor-overrides.json if your Codex team standard needs explicit sandbox, approval, model, or profile flags.",
           "Use foreground mode when you want an immediate governed pass/fail result.",
           "Use background mode only when an operator is explicitly supervising the run.",
         ]

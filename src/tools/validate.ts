@@ -216,6 +216,30 @@ const EXPECTED_FILES: Omit<ValidationItem, "status">[] = [
     severity: "recommended",
   },
   {
+    path: "docs/ai-harness/runtime/version-index.json",
+    label: "Runtime version capability index",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/compatibility-matrix.json",
+    label: "Runtime compatibility matrix",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/adapter-contract.json",
+    label: "Runtime adapter contract",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/session-continuity.md",
+    label: "Runtime session continuity contract",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
     path: "docs/ai-harness/runtime/state/session-index.json",
     label: "Runtime session index",
     category: "docs",
@@ -373,6 +397,29 @@ function inspectExpectedFile(
       ...expected,
       status: validation.valid ? "present" : "outdated",
     };
+  }
+
+  if (
+    expected.path === "docs/ai-harness/runtime/version-index.json" ||
+    expected.path === "docs/ai-harness/runtime/compatibility-matrix.json" ||
+    expected.path === "docs/ai-harness/runtime/adapter-contract.json"
+  ) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(fullPath, "utf-8")) as Record<
+        string,
+        unknown
+      >;
+      const hasSchema = typeof parsed.schemaVersion === "string";
+      return {
+        ...expected,
+        status: hasSchema ? "present" : "outdated",
+      };
+    } catch {
+      return {
+        ...expected,
+        status: "outdated",
+      };
+    }
   }
 
   return {

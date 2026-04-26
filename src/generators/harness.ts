@@ -159,6 +159,34 @@ function buildReconcilePolicy(): string {
           reason: "Runtime state is live session evidence and should be merged instead of blindly refreshed.",
         },
         {
+          id: "runtime-compatibility-contract-refresh",
+          matchType: "exact",
+          pattern: "docs/ai-harness/runtime/adapter-contract.json",
+          policy: "replace",
+          reason: "Adapter contracts should refresh to the latest stable cross-agent interface so @latest sessions stay compatible.",
+        },
+        {
+          id: "runtime-version-index-refresh",
+          matchType: "exact",
+          pattern: "docs/ai-harness/runtime/version-index.json",
+          policy: "replace",
+          reason: "Version indexes are generated compatibility metadata and should reflect the latest server capabilities.",
+        },
+        {
+          id: "runtime-compatibility-matrix-refresh",
+          matchType: "exact",
+          pattern: "docs/ai-harness/runtime/compatibility-matrix.json",
+          policy: "replace",
+          reason: "Compatibility matrices are generated upgrade metadata and should refresh with the latest server release.",
+        },
+        {
+          id: "runtime-session-continuity-refresh",
+          matchType: "exact",
+          pattern: "docs/ai-harness/runtime/session-continuity.md",
+          policy: "replace",
+          reason: "Session continuity guidance should stay aligned with the latest supported adapter contract.",
+        },
+        {
           id: "readiness-json-merge",
           matchType: "glob",
           pattern: "docs/ai-harness/readiness/*.json",
@@ -187,10 +215,19 @@ function buildNativeExecutorOverrides(): string {
         "Use this file to tune bridge commands and native executor launch arguments for local CLI environments.",
         "Leave arrays empty to keep the built-in safe defaults.",
         "defaultArgsTemplate or powershell/bash replaces the built-in base command template.",
-        "prependArgsTemplate / appendArgsTemplate and prependPowerShell / appendPowerShell / prependBash / appendBash layer around the chosen base template.",
+        "prependArgsTemplate / appendArgsTemplate and prependPowershell / appendPowershell / prependBash / appendBash layer around the chosen base template.",
         "Prefer workspace-relative prompt files and governed handoff instructions so runs stay reproducible.",
+        "Useful template placeholders include {workspacePath}, {handoffMarkdownPath}, {handoffMarkdownRelativePath}, {handoffInstruction}, {actorInboxPath}, {lastMessagePath}, and {lastMessageRelativePath}.",
+        "The built-in Codex profile prefers codex exec plus --output-last-message so the final assistant response becomes a durable governed artifact.",
+        "All runtime overrides should preserve docs/ai-harness/runtime/adapter-contract.json and session-continuity.md so Copilot, Codex, Claude, Gemini, OpenHands, and portable runtimes can switch safely.",
       ],
       executors: {
+        "github-copilot": {
+          commandCandidates: [],
+          defaultArgsTemplate: [],
+          prependArgsTemplate: [],
+          appendArgsTemplate: [],
+        },
         "codex-cli": {
           commandCandidates: [],
           defaultArgsTemplate: [],
@@ -211,6 +248,14 @@ function buildNativeExecutorOverrides(): string {
         },
       },
       bridges: {
+        "github-copilot": {
+          powershell: [],
+          bash: [],
+          prependPowershell: [],
+          appendPowershell: [],
+          prependBash: [],
+          appendBash: [],
+        },
         "codex-cli": {
           powershell: [],
           bash: [],
@@ -322,6 +367,10 @@ function buildHarnessManifest(
     "  dashboard_ops: docs/ai-harness/dashboard/scripts/dashboard-ops.mjs",
     "  dashboard_exports: docs/ai-harness/dashboard/exports/",
     "  runtime_guide: docs/ai-harness/runtime/README.md",
+    "  runtime_version_index: docs/ai-harness/runtime/version-index.json",
+    "  runtime_compatibility_matrix: docs/ai-harness/runtime/compatibility-matrix.json",
+    "  runtime_adapter_contract: docs/ai-harness/runtime/adapter-contract.json",
+    "  runtime_session_continuity: docs/ai-harness/runtime/session-continuity.md",
     "  runtime_session_index: docs/ai-harness/runtime/state/session-index.json",
     "  runtime_active_session: docs/ai-harness/runtime/state/active-session.json",
     "escalation_triggers:",
@@ -510,7 +559,7 @@ This directory family defines how AI work is governed for **${params.workspaceNa
 - \`.github/ai-harness/harness-manifest.yaml\`: execution policy and review loop
 - \`.github/ai-harness/managed-file-inventory.json\`: managed baseline used for safer reconcile and upgrade audits
 - \`.github/ai-harness/reconcile-policy.json\`: file-level reconcile policy for hold / merge / replace decisions
-- \`.github/ai-harness/native-executor-overrides.json\`: vendor-specific CLI launch overrides for Codex CLI, Claude Code, Gemini CLI, and future executor tuning
+- \`.github/ai-harness/native-executor-overrides.json\`: vendor-specific handoff and CLI launch overrides for GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, and future executor tuning
 - \`.github/ai-harness/operating-model.md\`: how humans and AI should operate
 - \`.github/ai-harness/context-strategy.md\`: when to compact vs reset context
 - \`.github/ai-harness/evaluation-rubrics.md\`: explicit grading criteria and quality thresholds

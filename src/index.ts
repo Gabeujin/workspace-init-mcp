@@ -1,7 +1,7 @@
 ﻿#!/usr/bin/env node
 
 /**
- * workspace-init-mcp MCP Server v4.1.0
+ * workspace-init-mcp MCP Server v4.1.2
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -308,7 +308,7 @@ const ReconcileWorkspaceInputSchema = BaseWorkspaceInputSchema.partial().extend(
 
 const server = new McpServer({
   name: "workspace-init-mcp",
-  version: "4.1.0",
+  version: "4.1.2",
 });
 
 // ---------------------------------------------------------------------------
@@ -327,7 +327,7 @@ This tool creates a complete workspace setup including:
 - .github/agents/ (Agent definitions - .agent.md files)
 - .github/ai-harness/managed-file-inventory.json (managed baseline for safer future upgrades and reconcile audits)
 - .github/ai-harness/reconcile-policy.json (file-level reconcile safety policy for hold / merge / replace decisions)
-- .github/ai-harness/native-executor-overrides.json (workspace-local launch tuning for Codex CLI, Claude Code, Gemini CLI, and similar runtimes)
+- .github/ai-harness/native-executor-overrides.json (workspace-local handoff and launch tuning for GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, and similar runtimes)
 - docs/ai-harness/readiness/ (remaining-work spec, scoring model, and readiness scorecard template)
 - docs/ai-harness/dashboard/ (JSON-first admin dashboard with progress, KPI, issue, and git visibility)
 - docs/ai-harness/runtime/ (planner / generator / evaluator runtime state, prompts, and session ledgers)
@@ -453,6 +453,7 @@ This tool:
 - analyzes the existing repository and resolves a best-effort latest configuration
 - consults the managed file inventory when present so customized managed files can be held for manual review
 - writes missing latest-version files
+- installs version-index, compatibility-matrix, adapter-contract, and session-continuity files required by newer agent runtimes
 - merges live governed JSON state such as dashboard and runtime snapshots
 - refreshes managed generated files to the latest templates
 - archives replaced managed files under docs/ai-harness/migrations/
@@ -1355,7 +1356,7 @@ server.registerTool(
     description: `List the supported runtime adapters that can consume governed harness work packets.
 
 Use this when:
-- an operator needs to choose between Codex CLI, Claude Code, Gemini CLI, generic CLI adapters, OpenHands, or a generic file-based runtime
+- an operator needs to choose between GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, generic CLI adapters, OpenHands, or a generic file-based runtime
 - you want to understand the handoff style before generating a runtime bundle
 - different stakeholders need different AI execution environments for the same governed session`,
     inputSchema: z.object({}),
@@ -1388,7 +1389,7 @@ This tool:
 - refreshes the durable work packet if needed
 - maps the governed session into a runtime-specific adapter bundle
 - writes portable handoff files under docs/ai-harness/runtime/adapter-handoffs/
-- gives operators a clean artifact set to pass to Codex CLI, Claude Code, Gemini CLI, generic CLI adapters, OpenHands, or a generic external runtime
+- gives operators a clean artifact set to pass to GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, generic CLI adapters, OpenHands, or a generic external runtime
 
 Use this whenever a governed session should continue in a concrete execution environment.`,
     inputSchema: z.object({
@@ -1482,7 +1483,9 @@ server.registerTool(
     title: "Prepare Harness Native Executor",
     description: `Build the governed native execution plan, state file, and log targets for a supported runtime executor.
 
-Use this after preparing an execution bridge when you want a directly launchable command plan for Codex CLI, Claude Code, Gemini CLI, generic CLI adapters, OpenHands, or a portable file-based runtime.`,
+Use this after preparing an execution bridge when you want a directly launchable command plan for GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, generic CLI adapters, OpenHands, or a portable file-based runtime.
+
+For Codex CLI, the generated plan can prefer codex exec and capture the final assistant message in a durable runtime artifact.`,
     inputSchema: z.object({
       workspacePath: z
         .string()
@@ -1536,7 +1539,7 @@ server.registerTool(
     title: "Launch Harness Native Executor",
     description: `Launch a supported native executor from the governed workspace and record its direct execution state.
 
-Use foreground mode when you want an immediate result in the current tool call. Use background mode when an operator will supervise the run through the generated logs and status files.`,
+Use foreground mode when you want an immediate result in the current tool call. Use background mode when an operator will supervise the run through the generated logs, status files, and any captured last-message artifact.`,
     inputSchema: z.object({
       workspacePath: z
         .string()
@@ -1692,7 +1695,7 @@ server.registerTool(
     title: "Record Harness Execution Result",
     description: `Record the result of an external runtime execution as a governed receipt.
 
-Use this after a Codex CLI, Claude Code, Gemini CLI, generic CLI runtime, OpenHands, or another external runtime finishes its launch bundle work. The receipt does not advance the governed state machine by itself, but it gives the next planner / generator / evaluator step a durable artifact to review.`,
+Use this after GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, generic CLI runtime, OpenHands, or another external runtime finishes its launch bundle work. The receipt does not advance the governed state machine by itself, but it gives the next planner / generator / evaluator step a durable artifact to review.`,
     inputSchema: z.object({
       workspacePath: z
         .string()

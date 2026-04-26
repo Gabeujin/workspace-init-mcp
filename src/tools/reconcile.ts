@@ -147,7 +147,7 @@ export interface ReconcilePreflightExportResult {
   summary: string;
 }
 
-const RECONCILE_VERSION = "4.1.0";
+const RECONCILE_VERSION = "4.1.2";
 const RECONCILE_POLICY_PATH = ".github/ai-harness/reconcile-policy.json";
 
 const LEGACY_RESOURCE_ROOTS: Array<{

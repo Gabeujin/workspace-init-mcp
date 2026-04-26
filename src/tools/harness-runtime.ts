@@ -38,6 +38,7 @@ type AdoptionTrack = "legacy-modernization" | "greenfield";
 type ContextPolicy = "balanced" | "prefer-reset" | "prefer-compaction";
 type HarnessLeaseStatus = "idle" | "active" | "queued" | "inactive";
 export const HARNESS_RUNTIME_ADAPTER_IDS = [
+  "github-copilot",
   "codex-cli",
   "claude-code",
   "gemini-cli",
@@ -48,6 +49,31 @@ export const HARNESS_RUNTIME_ADAPTER_IDS = [
 type HarnessRuntimeAdapterId = (typeof HARNESS_RUNTIME_ADAPTER_IDS)[number];
 const NATIVE_EXECUTOR_OVERRIDES_PATH =
   ".github/ai-harness/native-executor-overrides.json";
+const HARNESS_RUNTIME_VERSION = "4.1.2";
+const HARNESS_ADAPTER_CONTRACT_VERSION = "1.0.0";
+const HARNESS_VERSION_INDEX_PATH = "docs/ai-harness/runtime/version-index.json";
+const HARNESS_COMPATIBILITY_MATRIX_PATH =
+  "docs/ai-harness/runtime/compatibility-matrix.json";
+const HARNESS_ADAPTER_CONTRACT_PATH =
+  "docs/ai-harness/runtime/adapter-contract.json";
+const HARNESS_SESSION_CONTINUITY_PATH =
+  "docs/ai-harness/runtime/session-continuity.md";
+const HARNESS_REQUIRED_INTERFACE_FIELDS = [
+  "sessionId",
+  "leaseStatus",
+  "nextActor",
+  "currentPhase",
+  "nextAction",
+  "goal",
+  "chunkId",
+  "adapter",
+  "fileReferences",
+  "operatorChecklist",
+  "runtimeExpectations",
+  "packet",
+  "promptBlock",
+  "compatibility",
+] as const;
 
 interface HarnessRuntimeAdapterDescriptor {
   id: HarnessRuntimeAdapterId;
@@ -356,6 +382,7 @@ export interface PrepareHarnessNativeExecutorResult {
   nativeExecutionStatePath: string;
   stdoutLogPath: string;
   stderrLogPath: string;
+  lastMessagePath: string;
   summary: string;
 }
 
@@ -382,6 +409,7 @@ export interface LaunchHarnessNativeExecutorResult {
   nativeExecutionStatePath: string;
   stdoutLogPath: string;
   stderrLogPath: string;
+  lastMessagePath: string;
   summary: string;
 }
 
@@ -390,6 +418,7 @@ export interface HarnessNativeExecutionStatusResult {
   sessionId: string | null;
   status: string;
   nativeExecutionStatePath: string;
+  lastMessagePath: string | null;
   errorCode?: string | null;
   errorMessage?: string | null;
   summary: string;
@@ -544,6 +573,24 @@ const CHECKLIST_STAGE_ORDER = [
 
 const HARNESS_RUNTIME_ADAPTERS: HarnessRuntimeAdapterDescriptor[] = [
   {
+    id: "github-copilot",
+    title: "GitHub Copilot Chat / VS Code",
+    runtimeFamily: "copilot",
+    handoffMode: "file-first",
+    summary:
+      "Optimized for Copilot Chat sessions inside VS Code where repository instructions and governed handoff files must stay aligned.",
+    operatorChecklist: [
+      "Open the generated handoff markdown, actor inbox, and work packet in VS Code before prompting Copilot Chat.",
+      "Make Copilot follow the adapter contract and session continuity contract instead of relying on prior chat state.",
+      "Record any Copilot-produced result through governed receipts or advance_harness_session artifact paths.",
+    ],
+    runtimeExpectations: [
+      "Treat .github/copilot-instructions.md plus the generated handoff as the boot context.",
+      "Keep edits bounded to the active chunk and expected write paths.",
+      "If Copilot cannot continue from files alone, trigger a context_reset and write a durable handover.",
+    ],
+  },
+  {
     id: "codex-cli",
     title: "Codex CLI / Desktop",
     runtimeFamily: "codex",
@@ -656,6 +703,32 @@ const HARNESS_RUNTIME_ADAPTERS: HarnessRuntimeAdapterDescriptor[] = [
 
 const HARNESS_EXECUTION_BRIDGES: HarnessExecutionBridgeDescriptor[] = [
   {
+    id: "github-copilot",
+    title: "GitHub Copilot Chat Execution Bridge",
+    adapterId: "github-copilot",
+    runtimeFamily: "copilot",
+    launchMode: "workspace-worker",
+    summary:
+      "VS Code / Copilot Chat bridge that turns governed runtime files into a reproducible IDE handoff.",
+    preferredCommands: {
+      powershell: [
+        'Set-Location "{workspacePath}"',
+        'code "{workspacePath}"',
+        'Write-Host "Open {handoffMarkdownRelativePath} in VS Code, then ask Copilot Chat to follow the adapter handoff and session continuity contract."',
+      ],
+      bash: [
+        'cd "{workspacePath}"',
+        'code "{workspacePath}"',
+        'echo "Open {handoffMarkdownRelativePath} in VS Code, then ask Copilot Chat to follow the adapter handoff and session continuity contract."',
+      ],
+    },
+    resultExpectations: [
+      "Use the handoff markdown and actor inbox as the Copilot Chat prompt source of truth.",
+      "Keep .github/copilot-instructions.md and runtime adapter-contract.json aligned when making governed changes.",
+      "Return a governed receipt or advance the session with artifact paths after Copilot completes or blocks.",
+    ],
+  },
+  {
     id: "codex-cli",
     title: "Codex Execution Bridge",
     adapterId: "codex-cli",
@@ -666,13 +739,15 @@ const HARNESS_EXECUTION_BRIDGES: HarnessExecutionBridgeDescriptor[] = [
     preferredCommands: {
       powershell: [
         'Set-Location "{workspacePath}"',
-        'codex',
-        'codex "{handoffInstruction}"',
+        'codex exec --cd "{workspacePath}" --skip-git-repo-check --output-last-message "{lastMessagePath}" "{handoffInstruction}"',
+        'Get-Content "{handoffMarkdownPath}" | codex exec --cd "{workspacePath}" --skip-git-repo-check --output-last-message "{lastMessagePath}" -',
+        'codex --cd "{workspacePath}" "{handoffInstruction}"',
       ],
       bash: [
         'cd "{workspacePath}"',
-        'codex',
-        'codex "{handoffInstruction}"',
+        'codex exec --cd "{workspacePath}" --skip-git-repo-check --output-last-message "{lastMessagePath}" "{handoffInstruction}"',
+        'cat "{handoffMarkdownPath}" | codex exec --cd "{workspacePath}" --skip-git-repo-check --output-last-message "{lastMessagePath}" -',
+        'codex --cd "{workspacePath}" "{handoffInstruction}"',
       ],
     },
     resultExpectations: [
@@ -807,14 +882,32 @@ const HARNESS_EXECUTION_BRIDGES: HarnessExecutionBridgeDescriptor[] = [
 
 const HARNESS_NATIVE_EXECUTORS: HarnessNativeExecutorDescriptor[] = [
   {
+    id: "github-copilot",
+    title: "GitHub Copilot Chat Native Executor",
+    launchSupport: "manual-only",
+    commandCandidates: [],
+    versionArgs: [],
+    defaultArgsTemplate: [],
+    summary:
+      "Manual-only profile for VS Code Copilot Chat. Use the generated bridge bundle and handoff files as the IDE prompt envelope.",
+  },
+  {
     id: "codex-cli",
     title: "Codex Native Executor",
     launchSupport: "native",
     commandCandidates: ["codex"],
     versionArgs: ["--version"],
-    defaultArgsTemplate: ["{handoffInstruction}"],
+    defaultArgsTemplate: [
+      "exec",
+      "--cd",
+      "{workspacePath}",
+      "--skip-git-repo-check",
+      "--output-last-message",
+      "{lastMessagePath}",
+      "{handoffInstruction}",
+    ],
     summary:
-      "Launch Codex directly from the governed workspace using the handoff instruction as the boot prompt.",
+      "Launch Codex through codex exec from the governed workspace, capture the final message in a durable file, and keep the handoff instruction reproducible.",
   },
   {
     id: "claude-code",
@@ -1091,6 +1184,7 @@ function buildNativeExecutionPaths(
   nativeExecutionStatePath: string;
   stdoutLogPath: string;
   stderrLogPath: string;
+  lastMessagePath: string;
 } {
   const executionPaths = buildExecutionBridgePaths(workspacePath, sessionId, bridgeId);
   return {
@@ -1104,6 +1198,7 @@ function buildNativeExecutionPaths(
     ),
     stdoutLogPath: path.join(executionPaths.bridgeDir, "native-executor.stdout.log"),
     stderrLogPath: path.join(executionPaths.bridgeDir, "native-executor.stderr.log"),
+    lastMessagePath: path.join(executionPaths.bridgeDir, "native-executor.last-message.md"),
   };
 }
 
@@ -1336,6 +1431,7 @@ function buildIdleNativeExecutionSnapshot() {
     nativeExecutionStateFile: null,
     stdoutLogFile: null,
     stderrLogFile: null,
+    lastMessageFile: null,
     processId: null,
     executablePath: null,
     summary: "No native executor launch is currently active.",
@@ -1561,7 +1657,7 @@ function applyArgumentTemplate(
 }
 
 function buildHandoffInstruction(handoffMarkdownRelativePath: string): string {
-  return `Open and follow ${handoffMarkdownRelativePath} and continue the governed session in this workspace.`;
+  return `Open and follow ${handoffMarkdownRelativePath}. Read the referenced work packet and actor inbox before editing, keep work within the approved chunk, and continue the governed session in this workspace with durable evidence in files.`;
 }
 
 function appendLogHeader(fullPath: string, lines: string[]): void {
@@ -2697,6 +2793,10 @@ function buildPhaseReadPaths(session: HarnessRuntimeSessionState): string[] {
     session.context.lastHandoverPath,
     "docs/ai-harness/runtime/state/session-index.json",
     "docs/ai-harness/runtime/state/active-session.json",
+    HARNESS_VERSION_INDEX_PATH,
+    HARNESS_COMPATIBILITY_MATRIX_PATH,
+    HARNESS_ADAPTER_CONTRACT_PATH,
+    HARNESS_SESSION_CONTINUITY_PATH,
   ]);
 }
 
@@ -2781,8 +2881,10 @@ function buildAdapterPromptBlock(
     "",
     "Follow these rules strictly:",
     "- Treat the governed files as the source of truth over any hidden chat memory.",
+    "- If another runtime handed this off, trust adapter-contract.json, session-continuity.md, the work packet, and runtime session state before chat history.",
     "- Do not widen scope beyond the active chunk and approved contract.",
     "- Persist decisions, evidence, and outcomes into the referenced durable files.",
+    "- Preserve sessionId, chunkId, currentPhase, nextActor, and leaseStatus unless an MCP runtime tool advances governance.",
     "- If the work is blocked or ambiguous, stop and record the blocker instead of improvising.",
     "",
     `Current instruction: ${session.notes.current}`,
@@ -2803,6 +2905,9 @@ function buildAdapterHandoffMarkdown(handoff: Record<string, unknown>): string {
   const packet = isPlainObject(handoff.packet) ? handoff.packet : {};
   const fileReferences = isPlainObject(handoff.fileReferences)
     ? handoff.fileReferences
+    : {};
+  const compatibility = isPlainObject(handoff.compatibility)
+    ? handoff.compatibility
     : {};
   const operatorChecklist = Array.isArray(handoff.operatorChecklist)
     ? (handoff.operatorChecklist as string[])
@@ -2834,6 +2939,19 @@ function buildAdapterHandoffMarkdown(handoff: Record<string, unknown>): string {
 - Session summary: ${String(fileReferences.sessionSummaryFile || "n/a")}
 - Runtime prompt: ${String(fileReferences.rolePromptFile || "n/a")}
 - Adapter profile: ${String(fileReferences.adapterProfileFile || "n/a")}
+- Adapter contract: ${String(fileReferences.adapterContractFile || "n/a")}
+- Version index: ${String(fileReferences.versionIndexFile || "n/a")}
+- Compatibility matrix: ${String(fileReferences.compatibilityMatrixFile || "n/a")}
+- Session continuity: ${String(fileReferences.sessionContinuityFile || "n/a")}
+
+## Compatibility
+
+- MCP server version: ${String(compatibility.mcpServerVersion || "unknown")}
+- Adapter contract version: ${String(compatibility.adapterContractVersion || "unknown")}
+
+## Agent Switching Rule
+
+When moving this session between Copilot, Codex, Claude, Gemini, OpenHands, or another runtime, keep \`sessionId\`, \`chunkId\`, \`currentPhase\`, and \`nextActor\` stable. Read the adapter contract and session continuity files before relying on chat history.
 
 ## Operator Checklist
 
@@ -2898,6 +3016,9 @@ function buildExecutionBridgeMarkdown(manifest: Record<string, unknown>): string
   const launchCommands = isPlainObject(manifest.launchCommands)
     ? manifest.launchCommands
     : {};
+  const resultArtifacts = isPlainObject(manifest.resultArtifacts)
+    ? manifest.resultArtifacts
+    : {};
   const resultExpectations = Array.isArray(manifest.resultExpectations)
     ? (manifest.resultExpectations as string[])
     : [];
@@ -2919,6 +3040,7 @@ function buildExecutionBridgeMarkdown(manifest: Record<string, unknown>): string
 - Work packet: ${String(handoff.workPacketFile || "n/a")}
 - Actor inbox: ${String(handoff.actorInboxFile || "n/a")}
 - Result template: ${String(manifest.resultTemplateFile || "n/a")}
+- Native last message file: ${String(resultArtifacts.nativeLastMessageFile || "n/a")}
 
 ## Suggested Commands
 
@@ -2941,6 +3063,9 @@ ${resultExpectations.map((item) => `- ${item}`).join("\n") || "- none"}
 }
 
 function buildExecutionBridgeGuide(manifest: Record<string, unknown>): string {
+  const resultArtifacts = isPlainObject(manifest.resultArtifacts)
+    ? manifest.resultArtifacts
+    : {};
   const resultExpectations = Array.isArray(manifest.resultExpectations)
     ? (manifest.resultExpectations as string[])
     : [];
@@ -2949,9 +3074,10 @@ function buildExecutionBridgeGuide(manifest: Record<string, unknown>): string {
 
 1. Run the external execution environment using the launch bundle files in this directory.
 2. Capture durable outputs in governed paths or runtime/outbox references.
-3. Fill out \`${String(manifest.resultTemplateFile || "result-template.json")}\`.
-4. Call \`record_harness_execution_result\` or manually persist the same receipt in this directory.
-5. Resume the governed phase with \`advance_harness_session\` once the receipt and evidence are in place.
+3. Review any native last-message artifact such as \`${String(resultArtifacts.nativeLastMessageFile || "n/a")}\` and keep it with the governed evidence.
+4. Fill out \`${String(manifest.resultTemplateFile || "result-template.json")}\`.
+5. Call \`record_harness_execution_result\` or manually persist the same receipt in this directory.
+6. Resume the governed phase with \`advance_harness_session\` once the receipt and evidence are in place.
 
 ## Result Expectations
 
@@ -2960,6 +3086,9 @@ ${resultExpectations.map((item) => `- ${item}`).join("\n") || "- none"}
 }
 
 function buildExecutionResultTemplate(manifest: Record<string, unknown>): Record<string, unknown> {
+  const resultArtifacts = isPlainObject(manifest.resultArtifacts)
+    ? manifest.resultArtifacts
+    : {};
   return {
     schemaVersion: "1.0.0",
     generatedAt: nowIso(),
@@ -2967,7 +3096,10 @@ function buildExecutionResultTemplate(manifest: Record<string, unknown>): Record
     bridgeId: manifest.bridgeId,
     outcome: "completed",
     summary: "Describe what the external runtime completed and what remains.",
-    artifactPaths: [],
+    artifactPaths:
+      typeof resultArtifacts.nativeLastMessageFile === "string"
+        ? [resultArtifacts.nativeLastMessageFile]
+        : [],
     nextStep: "Advance the governed session with the correct actor and action.",
   };
 }
@@ -3845,7 +3977,8 @@ function syncDashboardNativeExecution(
   nativeExecutionPlanPath: string,
   nativeExecutionStatePath: string,
   stdoutLogPath: string,
-  stderrLogPath: string
+  stderrLogPath: string,
+  lastMessagePath: string
 ): void {
   const paths = buildRuntimePaths(workspacePath);
   const dashboardState = readJsonIfExists<Record<string, unknown>>(
@@ -3898,6 +4031,13 @@ function syncDashboardNativeExecution(
     stderrLogPath,
     "harness-dashboard-operator"
   );
+  upsertDashboardArtifact(
+    dashboardState,
+    `runtime-native-execution-last-message-${session.session.id}-${bridgeId}`,
+    `${executor.title} Last Message (${session.session.id})`,
+    lastMessagePath,
+    "harness-dashboard-operator"
+  );
 
   if (
     typeof dashboardState.runtimeOrchestration === "object" &&
@@ -3929,6 +4069,7 @@ function syncDashboardNativeExecution(
         nativeExecutionStatePath,
         stdoutLogPath,
         stderrLogPath,
+        lastMessagePath,
       ]),
     };
     dashboardState.governedSessions = governedSessions;
@@ -4760,6 +4901,8 @@ export function prepareHarnessNativeExecutor(
   const commandPath = options?.executableOverride?.trim() || detected.commandPath;
   const handoffMarkdownRelativePath = adapterHandoff.handoffMarkdownPath;
   const handoffMarkdownPath = path.join(workspacePath, handoffMarkdownRelativePath);
+  const lastMessagePath = nativePaths.lastMessagePath;
+  const lastMessageRelativePath = relativeToWorkspace(workspacePath, lastMessagePath);
   const actorInboxPath = buildActorInboxPath(
     workspacePath,
     session.session.nextActor,
@@ -4773,6 +4916,8 @@ export function prepareHarnessNativeExecutor(
         handoffMarkdownRelativePath,
         handoffInstruction: buildHandoffInstruction(handoffMarkdownRelativePath),
         actorInboxPath,
+        lastMessagePath,
+        lastMessageRelativePath,
       });
   if (
     !options?.argsOverride?.length &&
@@ -4809,6 +4954,7 @@ export function prepareHarnessNativeExecutor(
       waitForExitRecommended: false,
       stdoutLogFile: relativeToWorkspace(workspacePath, nativePaths.stdoutLogPath),
       stderrLogFile: relativeToWorkspace(workspacePath, nativePaths.stderrLogPath),
+      lastMessageFile: lastMessageRelativePath,
       stateFile: relativeToWorkspace(workspacePath, nativePaths.nativeExecutionStatePath),
     },
     sources: {
@@ -4839,6 +4985,7 @@ export function prepareHarnessNativeExecutor(
     ),
     stdoutLogFile: relativeToWorkspace(workspacePath, nativePaths.stdoutLogPath),
     stderrLogFile: relativeToWorkspace(workspacePath, nativePaths.stderrLogPath),
+    lastMessageFile: lastMessageRelativePath,
     processId: null,
     executablePath: commandPath ?? null,
     summary: available
@@ -4862,6 +5009,7 @@ export function prepareHarnessNativeExecutor(
     ),
     stdoutLogFile: relativeToWorkspace(workspacePath, nativePaths.stdoutLogPath),
     stderrLogFile: relativeToWorkspace(workspacePath, nativePaths.stderrLogPath),
+    lastMessageFile: lastMessageRelativePath,
     processId: null,
     executablePath: commandPath ?? null,
     summary: available
@@ -4876,7 +5024,8 @@ export function prepareHarnessNativeExecutor(
     relativeToWorkspace(workspacePath, nativePaths.nativeExecutionPlanPath),
     relativeToWorkspace(workspacePath, nativePaths.nativeExecutionStatePath),
     relativeToWorkspace(workspacePath, nativePaths.stdoutLogPath),
-    relativeToWorkspace(workspacePath, nativePaths.stderrLogPath)
+    relativeToWorkspace(workspacePath, nativePaths.stderrLogPath),
+    lastMessageRelativePath
   );
 
   return {
@@ -4893,6 +5042,7 @@ export function prepareHarnessNativeExecutor(
     ),
     stdoutLogPath: relativeToWorkspace(workspacePath, nativePaths.stdoutLogPath),
     stderrLogPath: relativeToWorkspace(workspacePath, nativePaths.stderrLogPath),
+    lastMessagePath: lastMessageRelativePath,
     summary: [
       `Native executor prepared: ${sessionId} -> ${executor.title}`,
       `Available: ${available ? "yes" : "no"}`,
@@ -4900,6 +5050,7 @@ export function prepareHarnessNativeExecutor(
       `State: ${relativeToWorkspace(workspacePath, nativePaths.nativeExecutionStatePath)}`,
       `Stdout log: ${relativeToWorkspace(workspacePath, nativePaths.stdoutLogPath)}`,
       `Stderr log: ${relativeToWorkspace(workspacePath, nativePaths.stderrLogPath)}`,
+      `Last message: ${lastMessageRelativePath}`,
     ].join("\n"),
   };
 }
@@ -4950,11 +5101,13 @@ export function launchHarnessNativeExecutor(
       nativeExecutionStatePath: prepared.nativeExecutionStatePath,
       stdoutLogPath: prepared.stdoutLogPath,
       stderrLogPath: prepared.stderrLogPath,
+      lastMessagePath: prepared.lastMessagePath,
       summary: [
         `Native executor dry run: ${executor.title}`,
         `Command: ${commandPath}`,
         `Args: ${args.join(" ")}`,
         `Plan: ${prepared.nativeExecutionPlanPath}`,
+        `Last message: ${prepared.lastMessagePath}`,
       ].join("\n"),
     };
   }
@@ -5006,6 +5159,7 @@ export function launchHarnessNativeExecutor(
       nativeExecutionStateFile: prepared.nativeExecutionStatePath,
       stdoutLogFile: prepared.stdoutLogPath,
       stderrLogFile: prepared.stderrLogPath,
+      lastMessageFile: prepared.lastMessagePath,
       processId: null,
       executablePath: commandPath,
       exitCode: result.status,
@@ -5025,7 +5179,8 @@ export function launchHarnessNativeExecutor(
       prepared.nativeExecutionPlanPath,
       prepared.nativeExecutionStatePath,
       prepared.stdoutLogPath,
-      prepared.stderrLogPath
+      prepared.stderrLogPath,
+      prepared.lastMessagePath
     );
 
     return {
@@ -5039,12 +5194,14 @@ export function launchHarnessNativeExecutor(
       nativeExecutionStatePath: prepared.nativeExecutionStatePath,
       stdoutLogPath: prepared.stdoutLogPath,
       stderrLogPath: prepared.stderrLogPath,
+      lastMessagePath: prepared.lastMessagePath,
       summary: [
         `Native executor launch finished: ${executor.title}`,
         `Status: ${status}`,
         `Exit code: ${String(result.status)}`,
         `Error code: ${String(errorCode ?? "none")}`,
         `State: ${prepared.nativeExecutionStatePath}`,
+        `Last message: ${prepared.lastMessagePath}`,
       ].join("\n"),
     };
   }
@@ -5073,6 +5230,7 @@ export function launchHarnessNativeExecutor(
     nativeExecutionStateFile: prepared.nativeExecutionStatePath,
     stdoutLogFile: prepared.stdoutLogPath,
     stderrLogFile: prepared.stderrLogPath,
+    lastMessageFile: prepared.lastMessagePath,
     processId: child.pid ?? null,
     executablePath: commandPath,
     summary: `${executor.title} launched in background mode.`,
@@ -5086,7 +5244,8 @@ export function launchHarnessNativeExecutor(
     prepared.nativeExecutionPlanPath,
     prepared.nativeExecutionStatePath,
     prepared.stdoutLogPath,
-    prepared.stderrLogPath
+    prepared.stderrLogPath,
+    prepared.lastMessagePath
   );
 
   return {
@@ -5098,10 +5257,12 @@ export function launchHarnessNativeExecutor(
     nativeExecutionStatePath: prepared.nativeExecutionStatePath,
     stdoutLogPath: prepared.stdoutLogPath,
     stderrLogPath: prepared.stderrLogPath,
+    lastMessagePath: prepared.lastMessagePath,
     summary: [
       `Native executor launched: ${executor.title}`,
       `PID: ${String(child.pid ?? "unknown")}`,
       `State: ${prepared.nativeExecutionStatePath}`,
+      `Last message: ${prepared.lastMessagePath}`,
     ].join("\n"),
   };
 }
@@ -5149,6 +5310,8 @@ export function getHarnessNativeExecutionStatus(
     sessionId: (state.activeSessionId as string | null) ?? null,
     status,
     nativeExecutionStatePath: relativeToWorkspace(workspacePath, statePath),
+    lastMessagePath:
+      typeof state.lastMessageFile === "string" ? state.lastMessageFile : null,
     errorCode: typeof state.errorCode === "string" ? state.errorCode : null,
     errorMessage: typeof state.errorMessage === "string" ? state.errorMessage : null,
     summary: [
@@ -5158,6 +5321,7 @@ export function getHarnessNativeExecutionStatus(
       `Executable: ${String(state.executablePath || "n/a")}`,
       `Process ID: ${String(state.processId ?? "n/a")}`,
       `Error code: ${String(state.errorCode ?? "none")}`,
+      `Last message: ${String(state.lastMessageFile || "none")}`,
       `State: ${relativeToWorkspace(workspacePath, statePath)}`,
     ].join("\n"),
   };
@@ -5228,12 +5392,15 @@ export function prepareHarnessExecutionBridge(
 
   const executionPaths = buildExecutionBridgePaths(workspacePath, sessionId, bridgeId);
   const handoffMarkdownRelativePath = adapterHandoff.handoffMarkdownPath;
+  const nativePaths = buildNativeExecutionPaths(workspacePath, sessionId, bridgeId);
   const launchCommands = resolveBridgeCommands(workspacePath, bridge);
   const replacements = {
     workspacePath,
     handoffMarkdownPath: adapterHandoff.handoffMarkdownPath,
     handoffMarkdownRelativePath,
     handoffInstruction: buildHandoffInstruction(handoffMarkdownRelativePath),
+    lastMessagePath: nativePaths.lastMessagePath,
+    lastMessageRelativePath: relativeToWorkspace(workspacePath, nativePaths.lastMessagePath),
     actorInboxPath: String(
       (isPlainObject(handoff.fileReferences) ? handoff.fileReferences.actorInboxFile : "") || ""
     ),
@@ -5262,6 +5429,17 @@ export function prepareHarnessExecutionBridge(
       actorInboxFile: replacements.actorInboxPath,
       workPacketFile: replacements.workPacketPath,
     },
+    compatibility: isPlainObject(handoff.compatibility)
+      ? handoff.compatibility
+      : {
+          mcpServerVersion: HARNESS_RUNTIME_VERSION,
+          adapterContractVersion: HARNESS_ADAPTER_CONTRACT_VERSION,
+          adapterContractFile: HARNESS_ADAPTER_CONTRACT_PATH,
+          versionIndexFile: HARNESS_VERSION_INDEX_PATH,
+          compatibilityMatrixFile: HARNESS_COMPATIBILITY_MATRIX_PATH,
+          sessionContinuityFile: HARNESS_SESSION_CONTINUITY_PATH,
+          requiredInterfaceFields: [...HARNESS_REQUIRED_INTERFACE_FIELDS],
+        },
     launchCommands: {
       powershell: launchCommands.powershell.map((command) =>
         applyBridgeTemplate(command, replacements)
@@ -5271,6 +5449,9 @@ export function prepareHarnessExecutionBridge(
       ),
     },
     resultExpectations: bridge.resultExpectations,
+    resultArtifacts: {
+      nativeLastMessageFile: relativeToWorkspace(workspacePath, nativePaths.lastMessagePath),
+    },
     resultTemplateFile: relativeToWorkspace(workspacePath, executionPaths.resultTemplatePath),
     resultGuideFile: relativeToWorkspace(workspacePath, executionPaths.resultGuidePath),
   };
@@ -5365,6 +5546,17 @@ export function prepareHarnessAdapterHandoff(
   const packet = readJsonIfExists<Record<string, unknown>>(
     path.join(workspacePath, packetPaths.workPacketPath)
   ) ?? {};
+  const compatibility = {
+    mcpServerVersion: HARNESS_RUNTIME_VERSION,
+    adapterContractVersion: HARNESS_ADAPTER_CONTRACT_VERSION,
+    adapterContractFile: HARNESS_ADAPTER_CONTRACT_PATH,
+    versionIndexFile: HARNESS_VERSION_INDEX_PATH,
+    compatibilityMatrixFile: HARNESS_COMPATIBILITY_MATRIX_PATH,
+    sessionContinuityFile: HARNESS_SESSION_CONTINUITY_PATH,
+    requiredInterfaceFields: [...HARNESS_REQUIRED_INTERFACE_FIELDS],
+    switchingRule:
+      "Read durable harness files before chat history and preserve session identity across runtime switches.",
+  };
   const handoff = {
     schemaVersion: "1.0.0",
     generatedAt: nowIso(),
@@ -5392,9 +5584,14 @@ export function prepareHarnessAdapterHandoff(
       sessionSummaryFile: relativeToWorkspace(workspacePath, summaryPath),
       rolePromptFile: rolePromptRelativePath(session.session.nextActor),
       adapterProfileFile: relativeToWorkspace(workspacePath, adapterProfilePath),
+      adapterContractFile: HARNESS_ADAPTER_CONTRACT_PATH,
+      versionIndexFile: HARNESS_VERSION_INDEX_PATH,
+      compatibilityMatrixFile: HARNESS_COMPATIBILITY_MATRIX_PATH,
+      sessionContinuityFile: HARNESS_SESSION_CONTINUITY_PATH,
     },
     operatorChecklist: adapter.operatorChecklist,
     runtimeExpectations: adapter.runtimeExpectations,
+    compatibility,
     packet,
     promptBlock: buildAdapterPromptBlock(session, adapter, packet),
   };

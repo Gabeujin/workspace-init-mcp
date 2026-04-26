@@ -61,6 +61,18 @@ Add the server to your MCP configuration.
 }
 ```
 
+### Codex CLI / Desktop
+
+```bash
+codex mcp add workspace-init -- npx -y workspace-init-mcp
+```
+
+Then verify it from Codex with:
+
+```bash
+codex mcp get workspace-init
+```
+
 ## What It Generates
 
 Tell your LLM to initialize the workspace and the server can generate:
@@ -70,7 +82,7 @@ Tell your LLM to initialize the workspace and the server can generate:
 - `.github/ai-harness/` for governance and operating-model artifacts
 - `.github/ai-harness/managed-file-inventory.json` for safer future reconcile runs and upgrade-risk audits
 - `.github/ai-harness/reconcile-policy.json` for file-level hold / merge / replace safety rules during reconcile
-- `.github/ai-harness/native-executor-overrides.json` for workspace-local Codex CLI / Claude Code / Gemini CLI launch tuning
+- `.github/ai-harness/native-executor-overrides.json` for workspace-local GitHub Copilot, Codex CLI, Claude Code, and Gemini CLI launch tuning
 - `docs/ai-harness/readiness/` for the remaining-work specification, scoring model, readiness scorecard template, and later semantic audit outputs
 - `docs/ai-harness/dashboard/` for a simple administrator dashboard backed by JSON files instead of a database
 - `docs/ai-harness/runtime/` for the planner / generator / evaluator runtime state machine, session snapshots, bridges, native executor launch plans, and archive bundles
@@ -92,6 +104,8 @@ The current version adds a stronger long-running delivery harness:
 - curated harness skills and agents are included for governance management, orchestration, expert review, verification, and final quality gates
 - a default dashboard operator agent and related skills keep progress state, KPI cards, issue visibility, domain lenses, and git traceability readable for non-developers
 - harness profiles help teams choose between lean, balanced, regulated, and autonomous operating modes
+- the Codex bridge now prefers `codex exec` for governed non-interactive runs and captures the final assistant message as a durable runtime artifact
+- runtime compatibility files index version-by-version harness capabilities and define a stable adapter contract for Copilot, Codex, Claude, Gemini, OpenHands, and portable runtimes
 
 ## Admin Dashboard
 
@@ -131,11 +145,22 @@ For safer legacy adoption:
 - `requireZeroManualReviewItemsForApply: true` can block reconcile apply runs until customized managed files and other manual-review items have been resolved.
 - reconcile can now carry semantic diff evidence into migration reports so upgrade decisions remain reviewable after the run.
 - `reconcile-policy.json` lets operators define file-level hold / merge / replace behavior instead of relying only on global overwrite flags.
-- `native-executor-overrides.json` lets teams tune Codex CLI, Claude Code / Claude CLI, and Gemini CLI launch conventions without editing MCP code.
+- `native-executor-overrides.json` lets teams tune GitHub Copilot handoffs, Codex CLI, Claude Code / Claude CLI, and Gemini CLI launch conventions without editing MCP code.
   It now supports base replacement plus `prepend` / `append` command fragments for both bridge launch scripts and native executor args.
 - the managed file inventory lets newer initialized workspaces distinguish generated baseline files from later customization during reconcile.
 - `restore_reconcile_backup` can roll managed-file refreshes back from the backups stored under `docs/ai-harness/migrations/`.
 - reconcile reports and restores are constrained to workspace-local migration artifacts so upgrades stay reversible and bounded.
+
+## Version Compatibility And Agent Switching
+
+Version `4.1.2` adds a small compatibility layer under `docs/ai-harness/runtime/`:
+
+- `version-index.json` records which harness capabilities and files were introduced by each workspace-init-mcp release.
+- `compatibility-matrix.json` tells `@latest` sessions how to upgrade older workspaces safely before using newer runtime behavior.
+- `adapter-contract.json` defines the stable handoff fields every adapter should preserve across Copilot, Codex, Claude, Gemini, OpenHands, generic CLI, and file-based runtimes.
+- `session-continuity.md` describes the source-of-truth order and switching checklist so a task can move between agents without losing `sessionId`, `chunkId`, phase, lease, receipts, or evidence.
+
+If an agent enters an older workspace with a newer server, run `reconcile_workspace_initialization` first. Live dashboard and runtime state are merged, while generated compatibility contracts refresh to the latest baseline.
 
 ## Readiness Layer
 
@@ -177,7 +202,7 @@ Long-running governed delivery can accumulate many closed sessions. The runtime 
 | `audit_harness_runtime` | Audit runtime ledgers, queue state, and session file consistency |
 | `compact_harness_runtime` | Archive older closed runtime sessions into durable archive bundles |
 | `prepare_harness_work_packet` | Rebuild the durable per-session work packet and actor inbox handoff files |
-| `list_harness_runtime_adapters` | List the supported runtime adapters for Codex CLI, Claude Code, Gemini CLI, generic CLI agents, OpenHands, and generic file-based execution |
+| `list_harness_runtime_adapters` | List the supported runtime adapters for GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, generic CLI agents, OpenHands, and generic file-based execution |
 | `prepare_harness_adapter_handoff` | Generate a runtime-specific handoff bundle for a governed session |
 | `list_harness_execution_bridges` | List the concrete execution bridges that turn handoffs into launch bundles |
 | `list_harness_native_executors` | List the directly launchable native runtime integrations and local command detection |

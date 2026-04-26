@@ -233,6 +233,13 @@ assert.ok(
   Object.prototype.hasOwnProperty.call(parsedNativeExecutorOverrides.executors, "codex-cli"),
   "native executor overrides should expose a Codex launch profile slot"
 );
+assert.ok(
+  Object.prototype.hasOwnProperty.call(
+    parsedNativeExecutorOverrides.executors,
+    "github-copilot"
+  ),
+  "native executor overrides should expose a Copilot handoff profile slot"
+);
 
 const reviewLedger = byPath.get("docs/reviews/README.md");
 assert.ok(reviewLedger, "review ledger not generated");
@@ -305,6 +312,78 @@ assert.match(runtimeReadme, /prepare_harness_execution_bridge/);
 assert.match(runtimeReadme, /record_harness_execution_result/);
 assert.match(runtimeReadme, /list_harness_native_executors/);
 assert.match(runtimeReadme, /launch_harness_native_executor/);
+assert.match(runtimeReadme, /version-index\.json/);
+assert.match(runtimeReadme, /adapter-contract\.json/);
+
+const runtimeVersionIndex = byPath.get("docs/ai-harness/runtime/version-index.json");
+assert.ok(runtimeVersionIndex, "runtime version capability index not generated");
+const parsedRuntimeVersionIndex = JSON.parse(runtimeVersionIndex);
+assert.equal(parsedRuntimeVersionIndex.latestVersion, "4.1.2");
+assert.ok(
+  parsedRuntimeVersionIndex.versions.some(
+    (entry) =>
+      entry.version === "4.1.1" &&
+      entry.capabilities.includes("codex-exec-native-executor")
+  ),
+  "runtime version index should preserve the 4.1.1 Codex bridge capability"
+);
+assert.ok(
+  parsedRuntimeVersionIndex.versions.some(
+    (entry) =>
+      entry.version === "4.1.2" &&
+      entry.capabilities.includes("cross-agent-adapter-contract") &&
+      entry.capabilities.includes("github-copilot-runtime-adapter")
+  ),
+  "runtime version index should describe the 4.1.2 adapter contract capability"
+);
+
+const runtimeCompatibilityMatrix = byPath.get(
+  "docs/ai-harness/runtime/compatibility-matrix.json"
+);
+assert.ok(runtimeCompatibilityMatrix, "runtime compatibility matrix not generated");
+const parsedRuntimeCompatibilityMatrix = JSON.parse(runtimeCompatibilityMatrix);
+assert.equal(parsedRuntimeCompatibilityMatrix.currentVersion, "4.1.2");
+assert.ok(
+  parsedRuntimeCompatibilityMatrix.upgradePaths.some(
+    (entry) => entry.from === "4.1.1" && entry.to === "4.1.2"
+  ),
+  "runtime compatibility matrix should include the 4.1.1 to 4.1.2 upgrade path"
+);
+assert.ok(
+  parsedRuntimeCompatibilityMatrix.requiredRuntimeFiles.includes(
+    "docs/ai-harness/runtime/adapter-contract.json"
+  ),
+  "runtime compatibility matrix should require the adapter contract"
+);
+assert.ok(
+  parsedRuntimeCompatibilityMatrix.requiredRuntimeFiles.includes(
+    "docs/ai-harness/runtime/adapters/github-copilot.md"
+  ),
+  "runtime compatibility matrix should require the Copilot adapter profile"
+);
+
+const runtimeAdapterContract = byPath.get(
+  "docs/ai-harness/runtime/adapter-contract.json"
+);
+assert.ok(runtimeAdapterContract, "runtime adapter contract not generated");
+const parsedRuntimeAdapterContract = JSON.parse(runtimeAdapterContract);
+assert.equal(parsedRuntimeAdapterContract.contractVersion, "1.0.0");
+assert.ok(
+  ["copilot", "codex", "claude", "gemini", "openhands"].every((runtime) =>
+    parsedRuntimeAdapterContract.supportedRuntimes.includes(runtime)
+  ),
+  "runtime adapter contract should support the primary agent runtimes"
+);
+assert.ok(
+  parsedRuntimeAdapterContract.requiredHandoffFields.includes("compatibility"),
+  "runtime adapter contract should require compatibility metadata"
+);
+
+const runtimeSessionContinuity = byPath.get(
+  "docs/ai-harness/runtime/session-continuity.md"
+);
+assert.ok(runtimeSessionContinuity, "runtime session continuity contract not generated");
+assert.match(runtimeSessionContinuity, /Copilot <-> Codex <-> Claude <-> Gemini/);
 
 const runtimeStateMachine = byPath.get("docs/ai-harness/runtime/state-machine.md");
 assert.ok(runtimeStateMachine, "runtime state machine not generated");
@@ -356,6 +435,7 @@ assert.ok(
 const parsedRuntimeCurrentNativeExecution = JSON.parse(runtimeCurrentNativeExecution);
 assert.equal(parsedRuntimeCurrentNativeExecution.activeSessionId, null);
 assert.equal(parsedRuntimeCurrentNativeExecution.status, "idle");
+assert.equal(parsedRuntimeCurrentNativeExecution.lastMessageFile, null);
 
 const runtimeWorkPacketGuide = byPath.get(
   "docs/ai-harness/runtime/work-packets/README.md"
@@ -371,12 +451,20 @@ assert.match(runtimeAdaptersGuide, /Codex/i);
 assert.match(runtimeAdaptersGuide, /OpenHands/i);
 assert.match(runtimeAdaptersGuide, /gemini-cli/i);
 assert.match(runtimeAdaptersGuide, /generic-cli/i);
+assert.match(runtimeAdaptersGuide, /adapter-contract\.json/i);
+
+const runtimeCopilotAdapter = byPath.get(
+  "docs/ai-harness/runtime/adapters/github-copilot.md"
+);
+assert.ok(runtimeCopilotAdapter, "GitHub Copilot adapter profile not generated");
+assert.match(runtimeCopilotAdapter, /Adapter ID: `github-copilot`/);
 
 const runtimeCodexAdapter = byPath.get(
   "docs/ai-harness/runtime/adapters/codex-cli.md"
 );
 assert.ok(runtimeCodexAdapter, "codex adapter profile not generated");
 assert.match(runtimeCodexAdapter, /Adapter ID: `codex-cli`/);
+assert.match(runtimeCodexAdapter, /codex exec/i);
 
 const runtimeGeminiAdapter = byPath.get(
   "docs/ai-harness/runtime/adapters/gemini-cli.md"
@@ -396,6 +484,7 @@ assert.match(runtimeAdapterHandoffsGuide, /handoff\.json/);
 const runtimeBridgesGuide = byPath.get("docs/ai-harness/runtime/bridges/README.md");
 assert.ok(runtimeBridgesGuide, "runtime bridges guide not generated");
 assert.match(runtimeBridgesGuide, /prepare_harness_execution_bridge/);
+assert.match(runtimeBridgesGuide, /github-copilot/i);
 assert.match(runtimeBridgesGuide, /gemini-cli/i);
 assert.match(runtimeBridgesGuide, /generic-cli/i);
 
@@ -416,6 +505,7 @@ assert.ok(
   "runtime native executors guide not generated"
 );
 assert.match(runtimeNativeExecutorsGuide, /prepare_harness_native_executor/);
+assert.match(runtimeNativeExecutorsGuide, /github-copilot/i);
 assert.match(runtimeNativeExecutorsGuide, /gemini-cli/i);
 assert.match(runtimeNativeExecutorsGuide, /generic-cli/i);
 
@@ -427,6 +517,8 @@ assert.ok(
   "codex native executor profile not generated"
 );
 assert.match(runtimeNativeCodexExecutor, /Native executor ID: `codex-cli`/);
+assert.match(runtimeNativeCodexExecutor, /codex exec/i);
+assert.match(runtimeNativeCodexExecutor, /last message/i);
 
 const runtimeArchiveGuide = byPath.get("docs/ai-harness/runtime/archive/README.md");
 assert.ok(runtimeArchiveGuide, "runtime archive guide not generated");
@@ -532,6 +624,30 @@ assert.ok(
     (artifact) => artifact.id === "runtime-adapters-guide"
   ),
   "dashboard should include the runtime adapters guide artifact"
+);
+assert.ok(
+  parsedDashboardState.artifacts.some(
+    (artifact) => artifact.id === "runtime-version-index"
+  ),
+  "dashboard should include the runtime version index artifact"
+);
+assert.ok(
+  parsedDashboardState.artifacts.some(
+    (artifact) => artifact.id === "runtime-compatibility-matrix"
+  ),
+  "dashboard should include the runtime compatibility matrix artifact"
+);
+assert.ok(
+  parsedDashboardState.artifacts.some(
+    (artifact) => artifact.id === "runtime-adapter-contract"
+  ),
+  "dashboard should include the runtime adapter contract artifact"
+);
+assert.ok(
+  parsedDashboardState.artifacts.some(
+    (artifact) => artifact.id === "runtime-session-continuity"
+  ),
+  "dashboard should include the runtime session continuity artifact"
 );
 assert.ok(
   parsedDashboardState.artifacts.some(
@@ -947,6 +1063,10 @@ try {
   );
   const adapterCatalog = listHarnessRuntimeAdapters();
   assert.ok(
+    adapterCatalog.adapters.some((adapter) => adapter.id === "github-copilot"),
+    "runtime adapter catalog should include the GitHub Copilot adapter"
+  );
+  assert.ok(
     adapterCatalog.adapters.some((adapter) => adapter.id === "codex-cli"),
     "runtime adapter catalog should include the Codex adapter"
   );
@@ -960,6 +1080,10 @@ try {
   );
   const bridgeCatalog = listHarnessExecutionBridges();
   assert.ok(
+    bridgeCatalog.bridges.some((bridge) => bridge.id === "github-copilot"),
+    "execution bridge catalog should include the GitHub Copilot bridge"
+  );
+  assert.ok(
     bridgeCatalog.bridges.some((bridge) => bridge.id === "codex-cli"),
     "execution bridge catalog should include the Codex bridge"
   );
@@ -970,6 +1094,28 @@ try {
   assert.ok(
     bridgeCatalog.bridges.some((bridge) => bridge.id === "generic-cli"),
     "execution bridge catalog should include the generic CLI bridge"
+  );
+  const copilotHandoff = prepareHarnessAdapterHandoff(
+    fullWorkspace,
+    "github-copilot",
+    "session-runtime-002"
+  );
+  assert.match(copilotHandoff.summary, /GitHub Copilot Chat/);
+  const copilotExecutionBridge = prepareHarnessExecutionBridge(
+    fullWorkspace,
+    "github-copilot",
+    "session-runtime-002"
+  );
+  const copilotBridgeManifest = JSON.parse(
+    fs.readFileSync(
+      path.join(fullWorkspace, copilotExecutionBridge.bridgeManifestPath),
+      "utf-8"
+    )
+  );
+  assert.equal(copilotBridgeManifest.bridge.runtimeFamily, "copilot");
+  assert.equal(
+    copilotBridgeManifest.compatibility.adapterContractFile,
+    "docs/ai-harness/runtime/adapter-contract.json"
   );
   const codexHandoff = prepareHarnessAdapterHandoff(
     fullWorkspace,
@@ -991,6 +1137,21 @@ try {
   );
   assert.match(codexHandoffMarkdown, /Work packet JSON:/);
   assert.match(codexHandoffMarkdown, /Prompt Block/);
+  assert.match(codexHandoffMarkdown, /Adapter contract:/);
+  assert.match(codexHandoffMarkdown, /Version index:/);
+  assert.match(codexHandoffMarkdown, /Session continuity:/);
+  const codexHandoffJson = JSON.parse(
+    fs.readFileSync(path.join(fullWorkspace, codexHandoff.handoffPath), "utf-8")
+  );
+  assert.equal(codexHandoffJson.compatibility.mcpServerVersion, "4.1.2");
+  assert.equal(
+    codexHandoffJson.fileReferences.adapterContractFile,
+    "docs/ai-harness/runtime/adapter-contract.json"
+  );
+  assert.ok(
+    codexHandoffJson.compatibility.requiredInterfaceFields.includes("sessionId"),
+    "adapter handoff should declare the stable cross-agent interface fields"
+  );
   const codexExecutionBridge = prepareHarnessExecutionBridge(
     fullWorkspace,
     "codex-cli",
@@ -1014,9 +1175,18 @@ try {
   );
   assert.ok(
     codexBridgeManifest.launchCommands.powershell.some((command) =>
-      String(command).includes('codex "')
+      String(command).includes("codex exec") &&
+      String(command).includes("--output-last-message")
     ),
-    "Codex execution bridge should include a direct governed handoff instruction command"
+    "Codex execution bridge should include the governed codex exec command with durable final-message capture"
+  );
+  assert.equal(
+    codexBridgeManifest.resultArtifacts.nativeLastMessageFile,
+    "docs/ai-harness/runtime/execution-bridges/session-runtime-002/codex-cli/native-executor.last-message.md"
+  );
+  assert.equal(
+    codexBridgeManifest.compatibility.adapterContractFile,
+    "docs/ai-harness/runtime/adapter-contract.json"
   );
   const claudeHandoff = prepareHarnessAdapterHandoff(
     fullWorkspace,
@@ -1080,6 +1250,10 @@ try {
   );
   const nativeExecutorCatalog = listHarnessNativeExecutors();
   assert.ok(
+    nativeExecutorCatalog.executors.some((executor) => executor.id === "github-copilot"),
+    "native executor catalog should include the GitHub Copilot manual profile"
+  );
+  assert.ok(
     nativeExecutorCatalog.executors.some((executor) => executor.id === "codex-cli"),
     "native executor catalog should include the Codex executor"
   );
@@ -1097,7 +1271,6 @@ try {
     "session-runtime-002",
     {
       executableOverride: process.execPath,
-      argsOverride: ["-e", "console.log('native executor ok')"],
     }
   );
   assert.equal(preparedNativeExecutor.available, true);
@@ -1108,6 +1281,28 @@ try {
   assert.ok(
     fs.existsSync(path.join(fullWorkspace, preparedNativeExecutor.nativeExecutionStatePath)),
     "native executor preparation should write a state file"
+  );
+  assert.equal(
+    preparedNativeExecutor.lastMessagePath,
+    "docs/ai-harness/runtime/execution-bridges/session-runtime-002/codex-cli/native-executor.last-message.md"
+  );
+  const preparedNativePlan = JSON.parse(
+    fs.readFileSync(
+      path.join(fullWorkspace, preparedNativeExecutor.nativeExecutionPlanPath),
+      "utf-8"
+    )
+  );
+  assert.ok(
+    preparedNativePlan.launch.args.includes("exec"),
+    "Codex native executor plan should default to codex exec"
+  );
+  assert.ok(
+    preparedNativePlan.launch.args.includes("--output-last-message"),
+    "Codex native executor plan should capture the final message into a durable artifact"
+  );
+  assert.equal(
+    preparedNativePlan.launch.lastMessageFile,
+    "docs/ai-harness/runtime/execution-bridges/session-runtime-002/codex-cli/native-executor.last-message.md"
   );
   const launchedNativeExecutor = launchHarnessNativeExecutor({
     workspacePath: fullWorkspace,
@@ -1281,6 +1476,15 @@ try {
         )
     ),
     "dashboard should track the native execution plan artifact"
+  );
+  assert.ok(
+    postNativeDashboardState.artifacts.some(
+      (artifact) =>
+        String(artifact.id || "").startsWith(
+          "runtime-native-execution-last-message-session-runtime-002-codex-cli"
+        )
+    ),
+    "dashboard should track the Codex native executor last-message artifact"
   );
   assert.equal(
     postNativeDashboardState.runtimeOrchestration.nativeExecutorBridgeId,
@@ -1831,6 +2035,18 @@ try {
     ),
     "reconcile should scaffold the latest dashboard for a bare legacy repo"
   );
+  assert.ok(
+    fs.existsSync(
+      path.join(
+        bareLegacyWorkspace,
+        "docs",
+        "ai-harness",
+        "runtime",
+        "adapter-contract.json"
+      )
+    ),
+    "reconcile should scaffold the latest runtime adapter contract for a bare legacy repo"
+  );
   const bareValidation = validateWorkspace(bareLegacyWorkspace);
   assert.equal(
     bareValidation.isInitialized,
@@ -1865,6 +2081,39 @@ try {
     ),
     { recursive: true, force: true }
   );
+  for (const compatibilityFile of [
+    "version-index.json",
+    "compatibility-matrix.json",
+    "adapter-contract.json",
+    "session-continuity.md",
+  ]) {
+    fs.rmSync(
+      path.join(
+        upgradedWorkspace,
+        "docs",
+        "ai-harness",
+        "runtime",
+        compatibilityFile
+      ),
+      { force: true }
+    );
+  }
+  for (const compatibilityProfile of [
+    ["adapters", "github-copilot.md"],
+    ["bridges", "github-copilot.md"],
+  ]) {
+    fs.rmSync(
+      path.join(
+        upgradedWorkspace,
+        "docs",
+        "ai-harness",
+        "runtime",
+        compatibilityProfile[0],
+        compatibilityProfile[1]
+      ),
+      { force: true }
+    );
+  }
   fs.rmSync(
     path.join(
       upgradedWorkspace,
@@ -1922,6 +2171,10 @@ try {
   legacyDashboardState.artifacts = legacyDashboardState.artifacts.filter(
     (artifact) =>
       ![
+        "runtime-version-index",
+        "runtime-compatibility-matrix",
+        "runtime-adapter-contract",
+        "runtime-session-continuity",
         "runtime-native-executors-guide",
         "runtime-current-native-execution",
       ].includes(String(artifact.id || ""))
@@ -1987,6 +2240,22 @@ try {
         entry.status === "missing"
     ),
     "managed semantic diff should classify missing managed files"
+  );
+  assert.ok(
+    semanticDiff.entries.some(
+      (entry) =>
+        entry.path === "docs/ai-harness/runtime/adapter-contract.json" &&
+        entry.status === "missing"
+    ),
+    "managed semantic diff should classify missing 4.1.2 compatibility contract files"
+  );
+  assert.ok(
+    semanticDiff.entries.some(
+      (entry) =>
+        entry.path === "docs/ai-harness/runtime/adapters/github-copilot.md" &&
+        entry.status === "missing"
+    ),
+    "managed semantic diff should classify missing Copilot adapter files"
   );
   const preflightReport = exportReconcilePreflightReport(upgradedWorkspace);
   assert.ok(
@@ -2077,6 +2346,19 @@ try {
     false,
     "strict reconcile apply should not write missing files before the manual-review gate is cleared"
   );
+  assert.equal(
+    fs.existsSync(
+      path.join(
+        upgradedWorkspace,
+        "docs",
+        "ai-harness",
+        "runtime",
+        "adapter-contract.json"
+      )
+    ),
+    false,
+    "strict reconcile apply should not write missing compatibility files before the manual-review gate is cleared"
+  );
   const semanticDiffReportCountAfterStrictApply = fs
     .readdirSync(migrationsDir, { withFileTypes: true })
     .filter(
@@ -2099,6 +2381,18 @@ try {
       "docs/ai-harness/runtime/state/current-native-execution.json"
     ),
     "reconcile should restore missing runtime state files"
+  );
+  assert.ok(
+    reconcileResult.writtenFiles.includes(
+      "docs/ai-harness/runtime/adapter-contract.json"
+    ),
+    "reconcile should restore missing 4.1.2 adapter contract files"
+  );
+  assert.ok(
+    reconcileResult.writtenFiles.includes(
+      "docs/ai-harness/runtime/adapters/github-copilot.md"
+    ),
+    "reconcile should restore missing Copilot adapter files"
   );
   assert.ok(
     reconcileResult.importedLegacyResources.some((entry) =>
@@ -2180,6 +2474,12 @@ try {
       (artifact) => artifact.id === "runtime-native-executors-guide"
     ),
     "reconcile should restore missing dashboard artifacts"
+  );
+  assert.ok(
+    upgradedDashboardState.artifacts.some(
+      (artifact) => artifact.id === "runtime-adapter-contract"
+    ),
+    "reconcile should restore missing compatibility dashboard artifacts"
   );
   assert.ok(
     fs.existsSync(
