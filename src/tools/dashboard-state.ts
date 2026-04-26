@@ -142,6 +142,7 @@ export function validateDashboardStateShape(
     "timeline",
     "entities",
     "versionLedger",
+    "runtimeOrchestration",
   ];
 
   for (const key of requiredTopLevelKeys) {
@@ -967,6 +968,220 @@ export function validateDashboardStateShape(
         version,
         "progressPercent"
       );
+    }
+  }
+
+  const runtimeOrchestration = requireObject(
+    errors,
+    "dashboardState.runtimeOrchestration",
+    root.runtimeOrchestration
+  );
+  if (runtimeOrchestration != null) {
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "mode"
+    );
+    if (
+      runtimeOrchestration.activeSessionId != null &&
+      !isString(runtimeOrchestration.activeSessionId)
+    ) {
+      pushTypeError(
+        errors,
+        "dashboardState.runtimeOrchestration.activeSessionId",
+        "a string or null",
+        runtimeOrchestration.activeSessionId
+      );
+    }
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "activeChunkId"
+    );
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "currentPhase"
+    );
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "nextActor"
+    );
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "nextAction"
+    );
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "contextPolicy"
+    );
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "contractCoverageRule"
+    );
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "evaluatorRule"
+    );
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "lastEventAt"
+    );
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "stateFile"
+    );
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "sessionIndexFile"
+    );
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "sessionSummaryFile"
+    );
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "workPacketFile"
+    );
+    if (
+      runtimeOrchestration.nativeExecutionStateFile != null &&
+      !isString(runtimeOrchestration.nativeExecutionStateFile)
+    ) {
+      pushTypeError(
+        errors,
+        "dashboardState.runtimeOrchestration.nativeExecutionStateFile",
+        "a string or null",
+        runtimeOrchestration.nativeExecutionStateFile
+      );
+    }
+    if (
+      runtimeOrchestration.nativeExecutionPlanFile != null &&
+      !isString(runtimeOrchestration.nativeExecutionPlanFile)
+    ) {
+      pushTypeError(
+        errors,
+        "dashboardState.runtimeOrchestration.nativeExecutionPlanFile",
+        "a string or null",
+        runtimeOrchestration.nativeExecutionPlanFile
+      );
+    }
+    if (
+      runtimeOrchestration.nativeExecutorBridgeId != null &&
+      !isString(runtimeOrchestration.nativeExecutorBridgeId)
+    ) {
+      pushTypeError(
+        errors,
+        "dashboardState.runtimeOrchestration.nativeExecutorBridgeId",
+        "a string or null",
+        runtimeOrchestration.nativeExecutorBridgeId
+      );
+    }
+    requireStringField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "leaseStatus"
+    );
+    if (
+      runtimeOrchestration.leasedAt != null &&
+      !isString(runtimeOrchestration.leasedAt)
+    ) {
+      pushTypeError(
+        errors,
+        "dashboardState.runtimeOrchestration.leasedAt",
+        "a string or null",
+        runtimeOrchestration.leasedAt
+      );
+    }
+    requireNumberField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "queueDepth"
+    );
+    requireStringArrayField(
+      errors,
+      "dashboardState.runtimeOrchestration",
+      runtimeOrchestration,
+      "queuedSessionIds"
+    );
+
+    const recentEvents = requireArray(
+      errors,
+      "dashboardState.runtimeOrchestration.recentEvents",
+      runtimeOrchestration.recentEvents
+    );
+    if (recentEvents != null) {
+      for (const [index, item] of recentEvents.entries()) {
+        const event = requireObject(
+          errors,
+          `dashboardState.runtimeOrchestration.recentEvents[${index}]`,
+          item
+        );
+        if (event == null) {
+          continue;
+        }
+
+        requireStringField(
+          errors,
+          `dashboardState.runtimeOrchestration.recentEvents[${index}]`,
+          event,
+          "at"
+        );
+        requireStringField(
+          errors,
+          `dashboardState.runtimeOrchestration.recentEvents[${index}]`,
+          event,
+          "phase"
+        );
+        requireStringField(
+          errors,
+          `dashboardState.runtimeOrchestration.recentEvents[${index}]`,
+          event,
+          "actor"
+        );
+        requireStringField(
+          errors,
+          `dashboardState.runtimeOrchestration.recentEvents[${index}]`,
+          event,
+          "action"
+        );
+        requireStringField(
+          errors,
+          `dashboardState.runtimeOrchestration.recentEvents[${index}]`,
+          event,
+          "outcome"
+        );
+        requireStringField(
+          errors,
+          `dashboardState.runtimeOrchestration.recentEvents[${index}]`,
+          event,
+          "note"
+        );
+      }
     }
   }
 

@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 
 type HarnessActorRole = "planner" | "generator" | "evaluator" | "operator";
 type HarnessAction =
@@ -35,6 +36,81 @@ type HarnessPhaseStatus =
   | "blocked";
 type AdoptionTrack = "legacy-modernization" | "greenfield";
 type ContextPolicy = "balanced" | "prefer-reset" | "prefer-compaction";
+type HarnessLeaseStatus = "idle" | "active" | "queued" | "inactive";
+export const HARNESS_RUNTIME_ADAPTER_IDS = [
+  "codex-cli",
+  "claude-code",
+  "gemini-cli",
+  "generic-cli",
+  "openhands",
+  "generic-file-runtime",
+] as const;
+type HarnessRuntimeAdapterId = (typeof HARNESS_RUNTIME_ADAPTER_IDS)[number];
+const NATIVE_EXECUTOR_OVERRIDES_PATH =
+  ".github/ai-harness/native-executor-overrides.json";
+
+interface HarnessRuntimeAdapterDescriptor {
+  id: HarnessRuntimeAdapterId;
+  title: string;
+  runtimeFamily: string;
+  handoffMode: "file-first" | "workspace-agent" | "portable-bundle";
+  summary: string;
+  operatorChecklist: string[];
+  runtimeExpectations: string[];
+}
+
+interface HarnessExecutionBridgeDescriptor {
+  id: HarnessRuntimeAdapterId;
+  title: string;
+  adapterId: HarnessRuntimeAdapterId;
+  runtimeFamily: string;
+  launchMode: "guided-command" | "workspace-worker" | "portable-replay";
+  summary: string;
+  preferredCommands: {
+    powershell: string[];
+    bash: string[];
+  };
+  resultExpectations: string[];
+}
+
+interface HarnessNativeExecutorDescriptor {
+  id: HarnessRuntimeAdapterId;
+  title: string;
+  launchSupport: "native" | "manual-only";
+  commandCandidates: string[];
+  versionArgs: string[];
+  defaultArgsTemplate: string[];
+  summary: string;
+}
+
+interface NativeExecutorOverridesDocument {
+  schemaVersion: string;
+  generatedAt: string;
+  executors?: Partial<
+    Record<
+      HarnessRuntimeAdapterId,
+      {
+        commandCandidates?: string[];
+        defaultArgsTemplate?: string[];
+        prependArgsTemplate?: string[];
+        appendArgsTemplate?: string[];
+      }
+    >
+  >;
+  bridges?: Partial<
+    Record<
+      HarnessRuntimeAdapterId,
+      {
+        powershell?: string[];
+        bash?: string[];
+        prependPowershell?: string[];
+        appendPowershell?: string[];
+        prependBash?: string[];
+        appendBash?: string[];
+      }
+    >
+  >;
+}
 
 interface HarnessPhaseDefinition {
   id: HarnessPhaseId;
@@ -129,6 +205,13 @@ interface HarnessSessionIndex {
   schemaVersion: string;
   updatedAt: string;
   activeSessionId: string | null;
+  queuedSessionIds: string[];
+  lease: {
+    status: "idle" | "leased";
+    activeSessionId: string | null;
+    leasedAt: string | null;
+    queueDepth: number;
+  };
   sessions: Array<{
     id: string;
     title: string;
@@ -153,6 +236,7 @@ export interface StartHarnessSessionParams {
   chunkTitle?: string;
   adoptionTrack?: AdoptionTrack;
   contextPolicy?: ContextPolicy;
+  queueIfBusy?: boolean;
   force?: boolean;
 }
 
@@ -173,7 +257,174 @@ export interface HarnessRuntimeResult {
   sessionPath: string;
   summaryPath: string;
   activeArtifactPath: string | null;
+  workPacketPath: string;
+  workPacketMarkdownPath: string;
+  actorInboxPath: string;
   summary: string;
+}
+
+export interface AuditHarnessRuntimeResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  summary: string;
+}
+
+export interface HarnessRuntimeValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+export interface HarnessRuntimeAdapterCatalogResult {
+  adapters: Array<{
+    id: HarnessRuntimeAdapterId;
+    title: string;
+    runtimeFamily: string;
+    handoffMode: string;
+    summary: string;
+  }>;
+  summary: string;
+}
+
+export interface HarnessAdapterHandoffResult {
+  adapterId: HarnessRuntimeAdapterId;
+  sessionId: string;
+  handoffPath: string;
+  handoffMarkdownPath: string;
+  checklistPath: string;
+  summary: string;
+}
+
+export interface HarnessExecutionBridgeCatalogResult {
+  bridges: Array<{
+    id: HarnessRuntimeAdapterId;
+    title: string;
+    runtimeFamily: string;
+    launchMode: string;
+    summary: string;
+  }>;
+  summary: string;
+}
+
+export interface HarnessExecutionBridgeResult {
+  bridgeId: HarnessRuntimeAdapterId;
+  sessionId: string;
+  bridgeManifestPath: string;
+  launchPowershellPath: string;
+  launchBashPath: string;
+  resultTemplatePath: string;
+  resultGuidePath: string;
+  summary: string;
+}
+
+export interface RecordHarnessExecutionResultParams {
+  workspacePath: string;
+  bridgeId: HarnessRuntimeAdapterId;
+  sessionId?: string;
+  outcome: "completed" | "needs-review" | "blocked" | "failed";
+  summary: string;
+  artifactPaths?: string[];
+  nextStep?: string;
+}
+
+export interface HarnessExecutionReceiptResult {
+  bridgeId: HarnessRuntimeAdapterId;
+  sessionId: string;
+  receiptPath: string;
+  receiptMarkdownPath: string;
+  summary: string;
+}
+
+export interface HarnessNativeExecutorCatalogResult {
+  executors: Array<{
+    id: HarnessRuntimeAdapterId;
+    title: string;
+    launchSupport: "native" | "manual-only";
+    available: boolean;
+    detectedCommandPath: string | null;
+    version: string | null;
+    summary: string;
+  }>;
+  summary: string;
+}
+
+export interface PrepareHarnessNativeExecutorResult {
+  bridgeId: HarnessRuntimeAdapterId;
+  sessionId: string;
+  available: boolean;
+  nativeExecutionPlanPath: string;
+  nativeExecutionStatePath: string;
+  stdoutLogPath: string;
+  stderrLogPath: string;
+  summary: string;
+}
+
+export interface LaunchHarnessNativeExecutorParams {
+  workspacePath: string;
+  bridgeId: HarnessRuntimeAdapterId;
+  sessionId?: string;
+  executableOverride?: string;
+  argsOverride?: string[];
+  waitForExit?: boolean;
+  dryRun?: boolean;
+  env?: Record<string, string>;
+}
+
+export interface LaunchHarnessNativeExecutorResult {
+  bridgeId: HarnessRuntimeAdapterId;
+  sessionId: string;
+  status: string;
+  processId?: number;
+  exitCode?: number | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  nativeExecutionPlanPath: string;
+  nativeExecutionStatePath: string;
+  stdoutLogPath: string;
+  stderrLogPath: string;
+  summary: string;
+}
+
+export interface HarnessNativeExecutionStatusResult {
+  bridgeId: HarnessRuntimeAdapterId | null;
+  sessionId: string | null;
+  status: string;
+  nativeExecutionStatePath: string;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  summary: string;
+}
+
+export interface CompactHarnessRuntimeParams {
+  workspacePath: string;
+  keepRecentClosed?: number;
+  maxArchiveSessions?: number;
+  reason?: string;
+}
+
+export interface CompactHarnessRuntimeResult {
+  archivedSessionIds: string[];
+  archiveIndexPath: string;
+  archiveBundlePath?: string;
+  archiveSummaryPath?: string;
+  remainingRegisteredSessions: number;
+  summary: string;
+}
+
+interface HarnessRuntimeArchiveIndex {
+  schemaVersion: string;
+  updatedAt: string;
+  totalArchivedSessions: number;
+  bundles: Array<{
+    id: string;
+    archivedAt: string;
+    archivedSessionIds: string[];
+    keepRecentClosed: number;
+    reason: string;
+    bundlePath: string;
+    summaryPath: string;
+  }>;
+  note: string;
 }
 
 const PHASE_DEFINITIONS: HarnessPhaseDefinition[] = [
@@ -291,6 +542,338 @@ const CHECKLIST_STAGE_ORDER = [
   "governance-close",
 ] as const;
 
+const HARNESS_RUNTIME_ADAPTERS: HarnessRuntimeAdapterDescriptor[] = [
+  {
+    id: "codex-cli",
+    title: "Codex CLI / Desktop",
+    runtimeFamily: "codex",
+    handoffMode: "file-first",
+    summary:
+      "Optimized for file-first continuation in a shared workspace with strong patch, test, and review discipline.",
+    operatorChecklist: [
+      "Open the generated adapter handoff markdown first.",
+      "Load the actor inbox and work packet before editing code.",
+      "Keep all durable decisions in governed artifacts, not only in chat.",
+      "Use advance_harness_session after each meaningful governed phase change.",
+    ],
+    runtimeExpectations: [
+      "Read the packet and actor inbox before touching the codebase.",
+      "Prefer editing files and running tests over describing intended changes.",
+      "Refresh the governed artifacts whenever implementation meaningfully changes scope or evidence.",
+    ],
+  },
+  {
+    id: "claude-code",
+    title: "Claude Code / Claude CLI",
+    runtimeFamily: "claude",
+    handoffMode: "file-first",
+    summary:
+      "Optimized for Claude Code style repository execution with resumable file-system handoff artifacts and conservative CLI fallbacks.",
+    operatorChecklist: [
+      "Give Claude Code the handoff markdown plus the actor inbox file.",
+      "Keep the governed phase boundaries explicit so Claude Code does not widen scope.",
+      "Route any independent review step back through evaluator-owned artifacts.",
+    ],
+    runtimeExpectations: [
+      "Start from the generated handoff prompt instead of replaying long chat history.",
+      "Use context resets when the governed packet says drift risk is high.",
+      "Treat contract approval and evaluation verdicts as external gates, not suggestions.",
+    ],
+  },
+  {
+    id: "gemini-cli",
+    title: "Gemini CLI",
+    runtimeFamily: "gemini",
+    handoffMode: "file-first",
+    summary:
+      "Optimized for Gemini CLI style terminal execution using documented prompt and file-inclusion patterns from the official CLI reference.",
+    operatorChecklist: [
+      "Start from the generated handoff markdown and actor inbox before prompting Gemini CLI.",
+      "Prefer the dedicated Gemini adapter over the generic CLI adapter when the runtime is Gemini.",
+      "Record the exact Gemini command or wrapper used for the governed run.",
+    ],
+    runtimeExpectations: [
+      "Treat the handoff markdown as governed source of truth and keep the run in the workspace root.",
+      "Use the official prompt-style invocation patterns or file inclusion shortcuts instead of ad-hoc prompt reconstruction.",
+      "Return results through governed receipts and artifact paths, not only terminal output.",
+    ],
+  },
+  {
+    id: "generic-cli",
+    title: "Generic CLI Agent",
+    runtimeFamily: "cli",
+    handoffMode: "file-first",
+    summary:
+      "Portable CLI adapter for runtimes such as Gemini CLI or other prompt-file driven agents without a dedicated built-in bridge.",
+    operatorChecklist: [
+      "Open the governed handoff markdown and actor inbox before launching the CLI.",
+      "Translate the generated generic launch template into the target CLI's real flags if they differ.",
+      "Keep all outputs and decisions tied back to governed files and receipts.",
+    ],
+    runtimeExpectations: [
+      "Treat the handoff markdown as the single source of truth for session context.",
+      "Prefer prompt-file or stdin bootstrap over replaying long chat history manually.",
+      "Capture the effective command you used in durable artifacts so another operator can reproduce it.",
+    ],
+  },
+  {
+    id: "openhands",
+    title: "OpenHands",
+    runtimeFamily: "openhands",
+    handoffMode: "workspace-agent",
+    summary:
+      "Optimized for agent workers that operate directly in the repository with tool access and longer autonomous runs.",
+    operatorChecklist: [
+      "Attach the handoff bundle as the session bootstrap artifact for the worker.",
+      "Make the active chunk, expected writes, and stop conditions explicit.",
+      "Require the worker to persist evidence into the governed ledgers before phase completion.",
+    ],
+    runtimeExpectations: [
+      "Autonomy is bounded by the active chunk contract and expected write paths.",
+      "Do not treat queued sessions as implicitly available work.",
+      "Before closeout, surface tests, review evidence, and remediation notes in durable files.",
+    ],
+  },
+  {
+    id: "generic-file-runtime",
+    title: "Generic File-Based Runtime",
+    runtimeFamily: "portable",
+    handoffMode: "portable-bundle",
+    summary:
+      "Portable handoff bundle for any external LLM or AI runtime that can read files but does not integrate directly with the MCP.",
+    operatorChecklist: [
+      "Share the adapter handoff markdown together with the referenced work packet files.",
+      "Keep execution outputs in runtime/outbox when direct writes are constrained.",
+      "Manually link outbox artifacts back through advance_harness_session artifactPaths.",
+    ],
+    runtimeExpectations: [
+      "Follow the handoff bundle as the single source of truth for next actions.",
+      "Do not assume hidden context beyond the files referenced in the bundle.",
+      "Return outcomes in files so the governed runtime can audit them later.",
+    ],
+  },
+];
+
+const HARNESS_EXECUTION_BRIDGES: HarnessExecutionBridgeDescriptor[] = [
+  {
+    id: "codex-cli",
+    title: "Codex Execution Bridge",
+    adapterId: "codex-cli",
+    runtimeFamily: "codex",
+    launchMode: "guided-command",
+    summary:
+      "Guided launch bundle for Codex-style execution from a governed handoff and workspace packet.",
+    preferredCommands: {
+      powershell: [
+        'Set-Location "{workspacePath}"',
+        'codex',
+        'codex "{handoffInstruction}"',
+      ],
+      bash: [
+        'cd "{workspacePath}"',
+        'codex',
+        'codex "{handoffInstruction}"',
+      ],
+    },
+    resultExpectations: [
+      "Write durable outputs to the expected governed paths, not only to chat.",
+      "When the run finishes, capture a receipt before advancing the governed session.",
+      "If the task diverges from the approved chunk, stop and record the blocker instead of widening scope.",
+    ],
+  },
+  {
+    id: "claude-code",
+    title: "Claude Code / Claude CLI Execution Bridge",
+    adapterId: "claude-code",
+    runtimeFamily: "claude",
+    launchMode: "guided-command",
+    summary:
+      "Guided launch bundle for Claude Code style repository execution through governed handoff files, with documented Claude CLI fallbacks.",
+    preferredCommands: {
+      powershell: [
+        'Set-Location "{workspacePath}"',
+        'claude -p "{handoffInstruction}"',
+        'Get-Content "{handoffMarkdownPath}" | claude -p "Continue the governed session using the provided handoff context."',
+        'claude-code --cwd "{workspacePath}" --prompt-file "{handoffMarkdownPath}"',
+      ],
+      bash: [
+        'cd "{workspacePath}"',
+        'claude -p "{handoffInstruction}"',
+        'cat "{handoffMarkdownPath}" | claude -p "Continue the governed session using the provided handoff context."',
+        'claude-code --cwd "{workspacePath}" --prompt-file "{handoffMarkdownPath}"',
+      ],
+    },
+    resultExpectations: [
+      "Treat the handoff markdown as the boot prompt for the session.",
+      "Record implementation evidence in files before asking for governance advancement.",
+      "Persist blockers and change requests as governed receipts instead of ad-hoc comments.",
+    ],
+  },
+  {
+    id: "gemini-cli",
+    title: "Gemini CLI Execution Bridge",
+    adapterId: "gemini-cli",
+    runtimeFamily: "gemini",
+    launchMode: "guided-command",
+    summary:
+      "Guided launch bundle for Gemini CLI using official prompt and file-inclusion patterns with governed handoff files.",
+    preferredCommands: {
+      powershell: [
+        'Set-Location "{workspacePath}"',
+        'gemini -p "@{handoffMarkdownRelativePath}"',
+        'Get-Content "{handoffMarkdownPath}" | gemini -p "Continue the governed session using the provided handoff context."',
+      ],
+      bash: [
+        'cd "{workspacePath}"',
+        'gemini -p "@{handoffMarkdownRelativePath}"',
+        'cat "{handoffMarkdownPath}" | gemini -p "Continue the governed session using the provided handoff context."',
+      ],
+    },
+    resultExpectations: [
+      "Use the governed handoff markdown as the boot context rather than reconstructing state manually.",
+      "Keep the Gemini CLI run anchored to the workspace root so referenced files resolve consistently.",
+      "Return governed receipts and artifact paths after the run completes or blocks.",
+    ],
+  },
+  {
+    id: "generic-cli",
+    title: "Generic CLI Execution Bridge",
+    adapterId: "generic-cli",
+    runtimeFamily: "cli",
+    launchMode: "guided-command",
+    summary:
+      "Vendor-neutral launch bundle for CLI agents where the governed handoff should be reused across sandboxes and local environments.",
+    preferredCommands: {
+      powershell: [
+        'Write-Host "Edit the generic CLI template below to match your runtime syntax."',
+        'YOUR_CLI --cwd "{workspacePath}" --prompt-file "{handoffMarkdownPath}"',
+      ],
+      bash: [
+        'echo "Edit the generic CLI template below to match your runtime syntax."',
+        'YOUR_CLI --cwd "{workspacePath}" --prompt-file "{handoffMarkdownPath}"',
+      ],
+    },
+    resultExpectations: [
+      "Treat the bridge manifest and handoff markdown as the portable execution contract.",
+      "Record the real CLI command or wrapper script that was used for the run.",
+      "Return outcomes through governed receipts or runtime state artifacts, not only terminal history.",
+    ],
+  },
+  {
+    id: "openhands",
+    title: "OpenHands Execution Bridge",
+    adapterId: "openhands",
+    runtimeFamily: "openhands",
+    launchMode: "workspace-worker",
+    summary:
+      "Workspace-worker bridge for long autonomous runs that still return to governed runtime files.",
+    preferredCommands: {
+      powershell: [
+        'openhands run --workspace "{workspacePath}" --task-file "{handoffMarkdownPath}"',
+      ],
+      bash: [
+        'openhands run --workspace "{workspacePath}" --task-file "{handoffMarkdownPath}"',
+      ],
+    },
+    resultExpectations: [
+      "Keep autonomy bounded by the chunk and expected write paths in the bridge manifest.",
+      "Store any long-run evidence in runtime/outbox if direct writes are constrained.",
+      "Return a governed receipt before the evaluator phase resumes.",
+    ],
+  },
+  {
+    id: "generic-file-runtime",
+    title: "Generic File Runtime Bridge",
+    adapterId: "generic-file-runtime",
+    runtimeFamily: "portable",
+    launchMode: "portable-replay",
+    summary:
+      "Portable launch bundle for external AI runtimes that only accept file artifacts and operator-driven prompts.",
+    preferredCommands: {
+      powershell: [
+        'Write-Host "Open the handoff bundle and paste the prompt block into your external runtime."',
+      ],
+      bash: [
+        'echo "Open the handoff bundle and paste the prompt block into your external runtime."',
+      ],
+    },
+    resultExpectations: [
+      "Capture outputs in governed files or runtime/outbox paths that can be audited later.",
+      "Return a receipt with artifact paths so the governed session can resume safely.",
+      "Do not assume the external runtime has hidden repository context beyond the handoff bundle.",
+    ],
+  },
+];
+
+const HARNESS_NATIVE_EXECUTORS: HarnessNativeExecutorDescriptor[] = [
+  {
+    id: "codex-cli",
+    title: "Codex Native Executor",
+    launchSupport: "native",
+    commandCandidates: ["codex"],
+    versionArgs: ["--version"],
+    defaultArgsTemplate: ["{handoffInstruction}"],
+    summary:
+      "Launch Codex directly from the governed workspace using the handoff instruction as the boot prompt.",
+  },
+  {
+    id: "claude-code",
+    title: "Claude Code / Claude CLI Native Executor",
+    launchSupport: "native",
+    commandCandidates: ["claude", "claude-code"],
+    versionArgs: ["--version"],
+    defaultArgsTemplate: ["-p", "{handoffInstruction}"],
+    summary:
+      "Launch Claude Code or Claude CLI from the governed workspace with the handoff instruction as the boot prompt.",
+  },
+  {
+    id: "gemini-cli",
+    title: "Gemini CLI Native Executor",
+    launchSupport: "native",
+    commandCandidates: ["gemini"],
+    versionArgs: ["--version"],
+    defaultArgsTemplate: ["-p", "@{handoffMarkdownRelativePath}"],
+    summary:
+      "Launch Gemini CLI directly from the governed workspace using the documented prompt option and file-inclusion syntax.",
+  },
+  {
+    id: "generic-cli",
+    title: "Generic CLI Native Executor",
+    launchSupport: "manual-only",
+    commandCandidates: [],
+    versionArgs: [],
+    defaultArgsTemplate: [],
+    summary:
+      "Manual-only profile for vendor CLIs without a stable built-in contract. Customize the generated bridge commands and logs.",
+  },
+  {
+    id: "openhands",
+    title: "OpenHands Native Executor",
+    launchSupport: "native",
+    commandCandidates: ["openhands"],
+    versionArgs: ["--version"],
+    defaultArgsTemplate: [
+      "run",
+      "--workspace",
+      "{workspacePath}",
+      "--task-file",
+      "{handoffMarkdownPath}",
+    ],
+    summary:
+      "Launch OpenHands directly against the governed workspace and task file.",
+  },
+  {
+    id: "generic-file-runtime",
+    title: "Generic File Runtime",
+    launchSupport: "manual-only",
+    commandCandidates: [],
+    versionArgs: [],
+    defaultArgsTemplate: [],
+    summary:
+      "Portable file runtime with no single native executable. Use manual operator replay or a command override.",
+  },
+];
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -340,13 +923,37 @@ function buildRuntimePaths(workspacePath: string) {
   const runtimeRoot = path.join(workspacePath, "docs", "ai-harness", "runtime");
   const stateRoot = path.join(runtimeRoot, "state");
   const sessionsRoot = path.join(runtimeRoot, "sessions");
+  const workPacketsRoot = path.join(runtimeRoot, "work-packets");
+  const inboxRoot = path.join(runtimeRoot, "inbox");
+  const outboxRoot = path.join(runtimeRoot, "outbox");
+  const adaptersRoot = path.join(runtimeRoot, "adapters");
+  const adapterHandoffsRoot = path.join(runtimeRoot, "adapter-handoffs");
+  const bridgesRoot = path.join(runtimeRoot, "bridges");
+  const executionBridgesRoot = path.join(runtimeRoot, "execution-bridges");
+  const archiveRoot = path.join(runtimeRoot, "archive");
+  const archiveSessionsRoot = path.join(archiveRoot, "sessions");
+  const archiveBundlesRoot = path.join(archiveRoot, "bundles");
 
   return {
     runtimeRoot,
     stateRoot,
     sessionsRoot,
+    workPacketsRoot,
+    inboxRoot,
+    outboxRoot,
+    adaptersRoot,
+    adapterHandoffsRoot,
+    bridgesRoot,
+    executionBridgesRoot,
+    archiveRoot,
+    archiveSessionsRoot,
+    archiveBundlesRoot,
     sessionIndexPath: path.join(stateRoot, "session-index.json"),
     activeSessionPath: path.join(stateRoot, "active-session.json"),
+    currentWorkPacketPath: path.join(stateRoot, "current-work-packet.json"),
+    currentExecutionBridgePath: path.join(stateRoot, "current-execution-bridge.json"),
+    currentNativeExecutionPath: path.join(stateRoot, "current-native-execution.json"),
+    archiveIndexPath: path.join(archiveRoot, "archive-index.json"),
     dashboardStatePath: path.join(
       workspacePath,
       "docs",
@@ -368,12 +975,288 @@ function buildSessionSummaryPath(workspacePath: string, sessionId: string): stri
   return path.join(paths.sessionsRoot, `${sessionId}.md`);
 }
 
+function buildArchivedSessionStatePath(
+  workspacePath: string,
+  sessionId: string
+): string {
+  const paths = buildRuntimePaths(workspacePath);
+  return path.join(paths.archiveSessionsRoot, `${sessionId}.session.json`);
+}
+
+function buildArchivedSessionSummaryPath(
+  workspacePath: string,
+  sessionId: string
+): string {
+  const paths = buildRuntimePaths(workspacePath);
+  return path.join(paths.archiveSessionsRoot, `${sessionId}.md`);
+}
+
+function buildRuntimeArchiveBundlePaths(workspacePath: string, archiveId: string) {
+  const paths = buildRuntimePaths(workspacePath);
+  return {
+    bundlePath: path.join(paths.archiveBundlesRoot, `${archiveId}.json`),
+    summaryPath: path.join(paths.archiveBundlesRoot, `${archiveId}.md`),
+  };
+}
+
+function buildWorkPacketStatePath(workspacePath: string, sessionId: string): string {
+  const paths = buildRuntimePaths(workspacePath);
+  return path.join(paths.workPacketsRoot, `${sessionId}.work-packet.json`);
+}
+
+function buildWorkPacketMarkdownPath(workspacePath: string, sessionId: string): string {
+  const paths = buildRuntimePaths(workspacePath);
+  return path.join(paths.workPacketsRoot, `${sessionId}.md`);
+}
+
+function buildActorInboxPath(
+  workspacePath: string,
+  actor: HarnessActorRole,
+  sessionId: string
+): string {
+  const paths = buildRuntimePaths(workspacePath);
+  return path.join(paths.inboxRoot, actor, `${sessionId}.md`);
+}
+
+function buildAdapterProfilePath(
+  workspacePath: string,
+  adapterId: HarnessRuntimeAdapterId
+): string {
+  const paths = buildRuntimePaths(workspacePath);
+  return path.join(paths.adaptersRoot, `${adapterId}.md`);
+}
+
+function buildAdapterHandoffPaths(
+  workspacePath: string,
+  sessionId: string,
+  adapterId: HarnessRuntimeAdapterId
+): {
+  handoffDir: string;
+  handoffPath: string;
+  handoffMarkdownPath: string;
+  checklistPath: string;
+} {
+  const paths = buildRuntimePaths(workspacePath);
+  const handoffDir = path.join(paths.adapterHandoffsRoot, sessionId, adapterId);
+  return {
+    handoffDir,
+    handoffPath: path.join(handoffDir, "handoff.json"),
+    handoffMarkdownPath: path.join(handoffDir, "handoff.md"),
+    checklistPath: path.join(handoffDir, "launch-checklist.md"),
+  };
+}
+
+function buildBridgeProfilePath(
+  workspacePath: string,
+  bridgeId: HarnessRuntimeAdapterId
+): string {
+  const paths = buildRuntimePaths(workspacePath);
+  return path.join(paths.bridgesRoot, `${bridgeId}.md`);
+}
+
+function buildExecutionBridgePaths(
+  workspacePath: string,
+  sessionId: string,
+  bridgeId: HarnessRuntimeAdapterId
+): {
+  bridgeDir: string;
+  bridgeManifestPath: string;
+  launchPowershellPath: string;
+  launchBashPath: string;
+  resultTemplatePath: string;
+  resultGuidePath: string;
+  receiptPath: string;
+  receiptMarkdownPath: string;
+} {
+  const paths = buildRuntimePaths(workspacePath);
+  const bridgeDir = path.join(paths.executionBridgesRoot, sessionId, bridgeId);
+  return {
+    bridgeDir,
+    bridgeManifestPath: path.join(bridgeDir, "bridge-manifest.json"),
+    launchPowershellPath: path.join(bridgeDir, "launch.ps1"),
+    launchBashPath: path.join(bridgeDir, "launch.sh"),
+    resultTemplatePath: path.join(bridgeDir, "result-template.json"),
+    resultGuidePath: path.join(bridgeDir, "return-to-governance.md"),
+    receiptPath: path.join(bridgeDir, "result-receipt.json"),
+    receiptMarkdownPath: path.join(bridgeDir, "result-receipt.md"),
+  };
+}
+
+function buildNativeExecutionPaths(
+  workspacePath: string,
+  sessionId: string,
+  bridgeId: HarnessRuntimeAdapterId
+): {
+  nativeExecutionPlanPath: string;
+  nativeExecutionStatePath: string;
+  stdoutLogPath: string;
+  stderrLogPath: string;
+} {
+  const executionPaths = buildExecutionBridgePaths(workspacePath, sessionId, bridgeId);
+  return {
+    nativeExecutionPlanPath: path.join(
+      executionPaths.bridgeDir,
+      "native-execution-plan.json"
+    ),
+    nativeExecutionStatePath: path.join(
+      executionPaths.bridgeDir,
+      "native-execution-state.json"
+    ),
+    stdoutLogPath: path.join(executionPaths.bridgeDir, "native-executor.stdout.log"),
+    stderrLogPath: path.join(executionPaths.bridgeDir, "native-executor.stderr.log"),
+  };
+}
+
+function getHarnessRuntimeAdapter(
+  adapterId: HarnessRuntimeAdapterId
+): HarnessRuntimeAdapterDescriptor {
+  const adapter = HARNESS_RUNTIME_ADAPTERS.find((item) => item.id === adapterId);
+  if (adapter == null) {
+    throw new Error(`Unsupported harness runtime adapter "${adapterId}".`);
+  }
+  return adapter;
+}
+
+function getHarnessExecutionBridge(
+  bridgeId: HarnessRuntimeAdapterId
+): HarnessExecutionBridgeDescriptor {
+  const bridge = HARNESS_EXECUTION_BRIDGES.find((item) => item.id === bridgeId);
+  if (bridge == null) {
+    throw new Error(`Unsupported harness execution bridge "${bridgeId}".`);
+  }
+  return bridge;
+}
+
+function getHarnessNativeExecutor(
+  bridgeId: HarnessRuntimeAdapterId
+): HarnessNativeExecutorDescriptor {
+  const executor = HARNESS_NATIVE_EXECUTORS.find((item) => item.id === bridgeId);
+  if (executor == null) {
+    throw new Error(`Unsupported native executor "${bridgeId}".`);
+  }
+  return executor;
+}
+
+function loadNativeExecutorOverrides(
+  workspacePath: string
+): NativeExecutorOverridesDocument | null {
+  const parsed = readJsonIfExists<NativeExecutorOverridesDocument>(
+    path.join(workspacePath, NATIVE_EXECUTOR_OVERRIDES_PATH)
+  );
+  return isPlainObject(parsed) ? parsed : null;
+}
+
+function resolveBridgeCommands(
+  workspacePath: string,
+  bridge: HarnessExecutionBridgeDescriptor
+): {
+  powershell: string[];
+  bash: string[];
+} {
+  const overrides = loadNativeExecutorOverrides(workspacePath);
+  const bridgeOverride = overrides?.bridges?.[bridge.id];
+  const powershell = Array.isArray(bridgeOverride?.powershell)
+    ? bridgeOverride.powershell.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const bash = Array.isArray(bridgeOverride?.bash)
+    ? bridgeOverride.bash.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const prependPowershell = Array.isArray(bridgeOverride?.prependPowershell)
+    ? bridgeOverride.prependPowershell.filter(
+        (entry): entry is string => typeof entry === "string"
+      )
+    : [];
+  const appendPowershell = Array.isArray(bridgeOverride?.appendPowershell)
+    ? bridgeOverride.appendPowershell.filter(
+        (entry): entry is string => typeof entry === "string"
+      )
+    : [];
+  const prependBash = Array.isArray(bridgeOverride?.prependBash)
+    ? bridgeOverride.prependBash.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const appendBash = Array.isArray(bridgeOverride?.appendBash)
+    ? bridgeOverride.appendBash.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const basePowershell =
+    powershell.length > 0 ? powershell : bridge.preferredCommands.powershell;
+  const baseBash = bash.length > 0 ? bash : bridge.preferredCommands.bash;
+
+  return {
+    powershell: [...prependPowershell, ...basePowershell, ...appendPowershell],
+    bash: [...prependBash, ...baseBash, ...appendBash],
+  };
+}
+
+function resolveNativeExecutorLaunchProfile(
+  workspacePath: string,
+  executor: HarnessNativeExecutorDescriptor
+): {
+  commandCandidates: string[];
+  defaultArgsTemplate: string[];
+} {
+  const overrides = loadNativeExecutorOverrides(workspacePath);
+  const executorOverride = overrides?.executors?.[executor.id];
+  const commandCandidates = Array.isArray(executorOverride?.commandCandidates)
+    ? executorOverride.commandCandidates.filter(
+        (entry): entry is string => typeof entry === "string" && entry.trim().length > 0
+      )
+    : [];
+  const defaultArgsTemplate = Array.isArray(executorOverride?.defaultArgsTemplate)
+    ? executorOverride.defaultArgsTemplate.filter(
+        (entry): entry is string => typeof entry === "string"
+      )
+    : [];
+  const prependArgsTemplate = Array.isArray(executorOverride?.prependArgsTemplate)
+    ? executorOverride.prependArgsTemplate.filter(
+        (entry): entry is string => typeof entry === "string"
+      )
+    : [];
+  const appendArgsTemplate = Array.isArray(executorOverride?.appendArgsTemplate)
+    ? executorOverride.appendArgsTemplate.filter(
+        (entry): entry is string => typeof entry === "string"
+      )
+    : [];
+  const baseArgsTemplate =
+    defaultArgsTemplate.length > 0 ? defaultArgsTemplate : executor.defaultArgsTemplate;
+
+  return {
+    commandCandidates: commandCandidates.length > 0 ? commandCandidates : executor.commandCandidates,
+    defaultArgsTemplate: [
+      ...prependArgsTemplate,
+      ...baseArgsTemplate,
+      ...appendArgsTemplate,
+    ],
+  };
+}
+
 function ensureRuntimeIndex(workspacePath: string): HarnessSessionIndex {
   const paths = buildRuntimePaths(workspacePath);
   ensureDir(paths.stateRoot);
   ensureDir(paths.sessionsRoot);
+  ensureDir(paths.workPacketsRoot);
+  ensureDir(paths.inboxRoot);
+  ensureDir(paths.outboxRoot);
+  ensureDir(paths.adaptersRoot);
+  ensureDir(paths.adapterHandoffsRoot);
+  ensureDir(paths.bridgesRoot);
+  ensureDir(paths.executionBridgesRoot);
+  ensureDir(paths.archiveRoot);
+  ensureDir(paths.archiveSessionsRoot);
+  ensureDir(paths.archiveBundlesRoot);
 
   const existingIndex = readJsonIfExists<HarnessSessionIndex>(paths.sessionIndexPath);
+  const existingArchiveIndex =
+    readJsonIfExists<HarnessRuntimeArchiveIndex>(paths.archiveIndexPath);
+  if (existingArchiveIndex == null) {
+    writeJson(paths.archiveIndexPath, {
+      schemaVersion: "1.0.0",
+      updatedAt: "bootstrap",
+      totalArchivedSessions: 0,
+      bundles: [],
+      note: "Archive compacted runtime sessions here when ledgers grow large.",
+    });
+  }
+
   if (existingIndex != null) {
     return existingIndex;
   }
@@ -382,6 +1265,13 @@ function ensureRuntimeIndex(workspacePath: string): HarnessSessionIndex {
     schemaVersion: "1.0.0",
     updatedAt: "bootstrap",
     activeSessionId: null,
+    queuedSessionIds: [],
+    lease: {
+      status: "idle",
+      activeSessionId: null,
+      leasedAt: null,
+      queueDepth: 0,
+    },
     sessions: [],
     note: "Use the MCP harness runtime tools to manage governed sessions.",
   };
@@ -396,14 +1286,107 @@ function ensureRuntimeIndex(workspacePath: string): HarnessSessionIndex {
     nextActor: "planner",
     nextAction:
       "Start the first governed runtime session before implementation begins.",
+    leaseStatus: "idle",
+    leasedAt: null,
+    queueDepth: 0,
+    queuedSessionIds: [],
     lastUpdatedAt: "bootstrap",
   };
   writeJson(paths.activeSessionPath, activeSessionTemplate);
+  writeJson(paths.currentWorkPacketPath, {
+    schemaVersion: "1.0.0",
+    generatedAt: "bootstrap",
+    leaseStatus: "idle",
+    activeSessionId: null,
+    nextActor: "planner",
+    nextAction:
+      "Start the first governed runtime session before implementation begins.",
+    workPacketFile: null,
+    actorInboxFile: null,
+    summary:
+      "Open the first governed session before generating a planner work packet.",
+  });
+  writeJson(paths.currentExecutionBridgePath, {
+    schemaVersion: "1.0.0",
+    generatedAt: "bootstrap",
+    activeSessionId: null,
+    bridgeId: null,
+    launchMode: "idle",
+    bridgeManifestFile: null,
+    summary:
+      "Prepare an execution bridge after the first governed session and adapter handoff exist.",
+  });
+  writeJson(paths.currentNativeExecutionPath, buildIdleNativeExecutionSnapshot());
   return created;
 }
 
 function relativeToWorkspace(workspacePath: string, targetPath: string): string {
   return path.relative(workspacePath, targetPath).replace(/\\/g, "/");
+}
+
+function buildIdleNativeExecutionSnapshot() {
+  return {
+    schemaVersion: "1.0.0",
+    generatedAt: nowIso(),
+    activeSessionId: null,
+    bridgeId: null,
+    status: "idle",
+    launchMode: "idle",
+    nativeExecutionPlanFile: null,
+    nativeExecutionStateFile: null,
+    stdoutLogFile: null,
+    stderrLogFile: null,
+    processId: null,
+    executablePath: null,
+    summary: "No native executor launch is currently active.",
+  };
+}
+
+function buildIdleActiveSnapshot() {
+  return {
+    schemaVersion: "1.0.0",
+    mode: "planner-generator-evaluator",
+    activeSessionId: null,
+    status: "idle",
+    currentPhase: "awaiting-session-start",
+    nextActor: "planner",
+    nextAction:
+      "Start the first governed runtime session before implementation begins.",
+    leaseStatus: "idle",
+    leasedAt: null,
+    queueDepth: 0,
+    queuedSessionIds: [],
+    lastUpdatedAt: nowIso(),
+  };
+}
+
+function writeIdleActiveSnapshot(workspacePath: string): void {
+  const paths = buildRuntimePaths(workspacePath);
+  writeJson(paths.activeSessionPath, buildIdleActiveSnapshot());
+}
+
+function loadRuntimeIndex(workspacePath: string): HarnessSessionIndex {
+  return ensureRuntimeIndex(workspacePath);
+}
+
+function loadArchiveIndex(workspacePath: string): HarnessRuntimeArchiveIndex {
+  const paths = buildRuntimePaths(workspacePath);
+  ensureRuntimeIndex(workspacePath);
+  const archiveIndex = readJsonIfExists<HarnessRuntimeArchiveIndex>(
+    paths.archiveIndexPath
+  );
+  if (archiveIndex == null) {
+    throw new Error("Harness runtime archive index could not be loaded.");
+  }
+  return archiveIndex;
+}
+
+function loadActiveLeasedSession(workspacePath: string): HarnessRuntimeSessionState | null {
+  const index = loadRuntimeIndex(workspacePath);
+  if (index.activeSessionId == null) {
+    return null;
+  }
+  return loadSession(workspacePath, index.activeSessionId);
 }
 
 function phaseArtifactRelativePath(
@@ -523,6 +1506,684 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
+function lookupCommandPath(commandName: string): string | null {
+  try {
+    const locator = process.platform === "win32" ? "where" : "which";
+    const output = execFileSync(locator, [commandName], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0);
+    return output ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function detectNativeExecutor(
+  executor: HarnessNativeExecutorDescriptor
+): { commandPath: string | null; version: string | null } {
+  for (const candidate of executor.commandCandidates) {
+    const commandPath = lookupCommandPath(candidate);
+    if (commandPath == null) {
+      continue;
+    }
+
+    let version: string | null = null;
+    if (executor.versionArgs.length > 0) {
+      try {
+        version = execFileSync(commandPath, executor.versionArgs, {
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "ignore"],
+        })
+          .split(/\r?\n/)[0]
+          ?.trim() ?? null;
+      } catch {
+        version = null;
+      }
+    }
+
+    return { commandPath, version };
+  }
+
+  return { commandPath: null, version: null };
+}
+
+function applyArgumentTemplate(
+  template: string[],
+  replacements: Record<string, string>
+): string[] {
+  return template.map((value) =>
+    value.replace(/\{([a-zA-Z0-9]+)\}/g, (_, key: string) => replacements[key] ?? "")
+  );
+}
+
+function buildHandoffInstruction(handoffMarkdownRelativePath: string): string {
+  return `Open and follow ${handoffMarkdownRelativePath} and continue the governed session in this workspace.`;
+}
+
+function appendLogHeader(fullPath: string, lines: string[]): void {
+  ensureDir(path.dirname(fullPath));
+  fs.appendFileSync(fullPath, `${lines.join("\n")}\n`, "utf-8");
+}
+
+function isProcessRunning(processId: number): boolean {
+  try {
+    process.kill(processId, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === "boolean";
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function validateRuntimeIndexShape(value: unknown): HarnessRuntimeValidationResult {
+  const errors: string[] = [];
+  if (!isPlainObject(value)) {
+    return {
+      valid: false,
+      errors: ["runtime session index must be an object"],
+    };
+  }
+
+  if (!isString(value.schemaVersion)) {
+    errors.push("runtime session index.schemaVersion must be a string");
+  }
+  if (!isString(value.updatedAt)) {
+    errors.push("runtime session index.updatedAt must be a string");
+  }
+  if (value.activeSessionId != null && !isString(value.activeSessionId)) {
+    errors.push("runtime session index.activeSessionId must be a string or null");
+  }
+  if (!Array.isArray(value.queuedSessionIds) || value.queuedSessionIds.some((item) => !isString(item))) {
+    errors.push("runtime session index.queuedSessionIds must be an array of strings");
+  }
+  if (!isPlainObject(value.lease)) {
+    errors.push("runtime session index.lease must be an object");
+  } else {
+    if (!isString(value.lease.status)) {
+      errors.push("runtime session index.lease.status must be a string");
+    }
+    if (value.lease.activeSessionId != null && !isString(value.lease.activeSessionId)) {
+      errors.push("runtime session index.lease.activeSessionId must be a string or null");
+    }
+    if (value.lease.leasedAt != null && !isString(value.lease.leasedAt)) {
+      errors.push("runtime session index.lease.leasedAt must be a string or null");
+    }
+    if (!isFiniteNumber(value.lease.queueDepth)) {
+      errors.push("runtime session index.lease.queueDepth must be a number");
+    }
+  }
+  if (!Array.isArray(value.sessions)) {
+    errors.push("runtime session index.sessions must be an array");
+  } else {
+    for (const [index, entry] of value.sessions.entries()) {
+      if (!isPlainObject(entry)) {
+        errors.push(`runtime session index.sessions[${index}] must be an object`);
+        continue;
+      }
+      for (const field of [
+        "id",
+        "title",
+        "goal",
+        "status",
+        "currentPhase",
+        "nextActor",
+        "chunkId",
+        "sessionPath",
+        "summaryPath",
+        "updatedAt",
+      ]) {
+        if (!isString(entry[field])) {
+          errors.push(`runtime session index.sessions[${index}].${field} must be a string`);
+        }
+      }
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+
+function validateActiveRuntimeShape(value: unknown): HarnessRuntimeValidationResult {
+  const errors: string[] = [];
+  if (!isPlainObject(value)) {
+    return {
+      valid: false,
+      errors: ["active runtime session snapshot must be an object"],
+    };
+  }
+
+  for (const field of [
+    "schemaVersion",
+    "mode",
+    "status",
+    "currentPhase",
+    "nextActor",
+    "nextAction",
+    "leaseStatus",
+    "lastUpdatedAt",
+  ]) {
+    if (!isString(value[field])) {
+      errors.push(`active runtime session.${field} must be a string`);
+    }
+  }
+  if (value.leasedAt != null && !isString(value.leasedAt)) {
+    errors.push("active runtime session.leasedAt must be a string or null");
+  }
+  if (!isFiniteNumber(value.queueDepth)) {
+    errors.push("active runtime session.queueDepth must be a number");
+  }
+  if (
+    !Array.isArray(value.queuedSessionIds) ||
+    value.queuedSessionIds.some((item) => !isString(item))
+  ) {
+    errors.push("active runtime session.queuedSessionIds must be an array of strings");
+  }
+  if (value.activeSessionId != null && !isString(value.activeSessionId)) {
+    errors.push("active runtime session.activeSessionId must be a string or null");
+  }
+  if (value.activeSessionId == null) {
+    return {
+      valid: errors.length === 0,
+      errors,
+    };
+  }
+
+  if (!isPlainObject(value.session)) {
+    errors.push("active runtime session.session must be an object when activeSessionId is set");
+  } else {
+    const sessionValue = value.session;
+    if (!isPlainObject(sessionValue.session)) {
+      errors.push("active runtime session.session.session must be an object");
+    } else {
+      if (!isString(sessionValue.session.id)) {
+        errors.push("active runtime session.session.session.id must be a string");
+      } else if (sessionValue.session.id !== value.activeSessionId) {
+        errors.push("active runtime session.session.session.id must match activeSessionId");
+      }
+      if (!isString(sessionValue.session.currentPhase)) {
+        errors.push("active runtime session.session.session.currentPhase must be a string");
+      }
+      if (!isString(sessionValue.session.nextActor)) {
+        errors.push("active runtime session.session.session.nextActor must be a string");
+      }
+    }
+    if (!Array.isArray(sessionValue.phases)) {
+      errors.push("active runtime session.session.phases must be an array");
+    }
+    if (!Array.isArray(sessionValue.events)) {
+      errors.push("active runtime session.session.events must be an array");
+    }
+    if (
+      !isPlainObject(sessionValue.governance) ||
+      !isBoolean(sessionValue.governance.opened)
+    ) {
+      errors.push("active runtime session.session.governance.opened must be a boolean");
+    }
+    if (
+      !isPlainObject(sessionValue.context) ||
+      !isFiniteNumber(sessionValue.context.resetCount)
+    ) {
+      errors.push("active runtime session.session.context.resetCount must be a number");
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+
+function validateCurrentWorkPacketShape(
+  value: unknown
+): HarnessRuntimeValidationResult {
+  const errors: string[] = [];
+  if (!isPlainObject(value)) {
+    return {
+      valid: false,
+      errors: ["current runtime work packet must be an object"],
+    };
+  }
+
+  for (const field of [
+    "schemaVersion",
+    "generatedAt",
+    "leaseStatus",
+    "nextActor",
+    "nextAction",
+    "summary",
+  ]) {
+    if (!isString(value[field])) {
+      errors.push(`current runtime work packet.${field} must be a string`);
+    }
+  }
+  for (const nullableField of ["activeSessionId", "workPacketFile", "actorInboxFile"]) {
+    if (value[nullableField] != null && !isString(value[nullableField])) {
+      errors.push(`current runtime work packet.${nullableField} must be a string or null`);
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+
+function validateCurrentExecutionBridgeShape(
+  value: unknown
+): HarnessRuntimeValidationResult {
+  const errors: string[] = [];
+  if (!isPlainObject(value)) {
+    return {
+      valid: false,
+      errors: ["current execution bridge must be an object"],
+    };
+  }
+
+  for (const field of ["schemaVersion", "generatedAt", "launchMode", "summary"]) {
+    if (!isString(value[field])) {
+      errors.push(`current execution bridge.${field} must be a string`);
+    }
+  }
+  for (const nullableField of ["activeSessionId", "bridgeId", "bridgeManifestFile"]) {
+    if (value[nullableField] != null && !isString(value[nullableField])) {
+      errors.push(`current execution bridge.${nullableField} must be a string or null`);
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+
+function validateCurrentNativeExecutionShape(
+  value: unknown
+): HarnessRuntimeValidationResult {
+  const errors: string[] = [];
+  if (!isPlainObject(value)) {
+    return {
+      valid: false,
+      errors: ["current native execution state must be an object"],
+    };
+  }
+
+  for (const field of ["schemaVersion", "generatedAt", "status", "launchMode", "summary"]) {
+    if (!isString(value[field])) {
+      errors.push(`current native execution.${field} must be a string`);
+    }
+  }
+  for (const nullableField of [
+    "activeSessionId",
+    "bridgeId",
+    "nativeExecutionPlanFile",
+    "nativeExecutionStateFile",
+    "stdoutLogFile",
+    "stderrLogFile",
+    "executablePath",
+  ]) {
+    if (value[nullableField] != null && !isString(value[nullableField])) {
+      errors.push(`current native execution.${nullableField} must be a string or null`);
+    }
+  }
+  if (value.processId != null && !isFiniteNumber(value.processId)) {
+    errors.push("current native execution.processId must be a number or null");
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+
+export function auditHarnessRuntime(
+  workspacePath: string
+): AuditHarnessRuntimeResult {
+  const paths = buildRuntimePaths(workspacePath);
+  const indexValidation = validateRuntimeIndexShape(
+    readJsonIfExists(paths.sessionIndexPath)
+  );
+  const activeValidation = validateActiveRuntimeShape(
+    readJsonIfExists(paths.activeSessionPath)
+  );
+  const currentWorkPacketValidation = validateCurrentWorkPacketShape(
+    readJsonIfExists(paths.currentWorkPacketPath)
+  );
+  const currentExecutionBridgeValidation = validateCurrentExecutionBridgeShape(
+    readJsonIfExists(paths.currentExecutionBridgePath)
+  );
+  const currentNativeExecutionValidation = validateCurrentNativeExecutionShape(
+    readJsonIfExists(paths.currentNativeExecutionPath)
+  );
+  const errors = [
+    ...indexValidation.errors.map((error) => `session-index.json: ${error}`),
+    ...activeValidation.errors.map((error) => `active-session.json: ${error}`),
+    ...currentWorkPacketValidation.errors.map(
+      (error) => `current-work-packet.json: ${error}`
+    ),
+    ...currentExecutionBridgeValidation.errors.map(
+      (error) => `current-execution-bridge.json: ${error}`
+    ),
+    ...currentNativeExecutionValidation.errors.map(
+      (error) => `current-native-execution.json: ${error}`
+    ),
+  ];
+  const warnings: string[] = [];
+
+  if (!indexValidation.valid) {
+    return {
+      valid: false,
+      errors,
+      warnings,
+      summary: [
+        "Harness runtime audit failed.",
+        ...errors.map((error) => `  - ${error}`),
+      ].join("\n"),
+    };
+  }
+
+  const index = loadRuntimeIndex(workspacePath);
+  const sessionFiles = fs.existsSync(paths.sessionsRoot)
+    ? fs
+        .readdirSync(paths.sessionsRoot)
+        .filter((name) => name.endsWith(".session.json"))
+    : [];
+  const indexedIds = new Set(index.sessions.map((entry) => entry.id));
+  const queuedIds = new Set(index.queuedSessionIds);
+
+  if (
+    index.activeSessionId != null &&
+    !index.sessions.some((entry) => entry.id === index.activeSessionId)
+  ) {
+    errors.push(
+      `session-index.json: activeSessionId "${index.activeSessionId}" does not exist in sessions[]`
+    );
+  }
+  if (
+    index.lease.activeSessionId !== index.activeSessionId ||
+    index.lease.queueDepth !== index.queuedSessionIds.length
+  ) {
+    errors.push(
+      "session-index.json: lease metadata is not aligned with activeSessionId or queuedSessionIds"
+    );
+  }
+
+  for (const queuedId of queuedIds) {
+    if (!indexedIds.has(queuedId)) {
+      errors.push(`session-index.json: queued session "${queuedId}" is not registered in sessions[]`);
+    }
+  }
+
+  for (const entry of index.sessions) {
+    const fullPath = path.join(workspacePath, entry.sessionPath);
+    if (!fs.existsSync(fullPath)) {
+      errors.push(`session-index.json: session file missing for "${entry.id}" at ${entry.sessionPath}`);
+      continue;
+    }
+
+    const session = readJsonIfExists<HarnessRuntimeSessionState>(fullPath);
+    if (session == null) {
+      errors.push(`session-index.json: session file for "${entry.id}" could not be parsed`);
+      continue;
+    }
+    if (session.session.id !== entry.id) {
+      errors.push(`session-index.json: session "${entry.id}" does not match file payload id "${session.session.id}"`);
+    }
+    if (session.session.currentPhase !== entry.currentPhase) {
+      warnings.push(
+        `session-index.json: currentPhase for "${entry.id}" is "${entry.currentPhase}" but session file has "${session.session.currentPhase}"`
+      );
+    }
+    if (session.chunk.id !== entry.chunkId) {
+      warnings.push(
+        `session-index.json: chunkId for "${entry.id}" is "${entry.chunkId}" but session file has "${session.chunk.id}"`
+      );
+    }
+  }
+
+  for (const fileName of sessionFiles) {
+    const sessionId = fileName.replace(/\.session\.json$/, "");
+    if (!indexedIds.has(sessionId)) {
+      warnings.push(`runtime session file "${fileName}" exists but is not referenced by session-index.json`);
+    }
+  }
+
+  const activeSnapshot = readJsonIfExists<Record<string, unknown>>(paths.activeSessionPath);
+  const currentWorkPacket = readJsonIfExists<Record<string, unknown>>(
+    paths.currentWorkPacketPath
+  );
+  const currentExecutionBridge = readJsonIfExists<Record<string, unknown>>(
+    paths.currentExecutionBridgePath
+  );
+  if (index.activeSessionId == null) {
+    if (isPlainObject(activeSnapshot) && activeSnapshot.activeSessionId != null) {
+      errors.push("active-session.json: expected no activeSessionId while the index is idle");
+    }
+    if (
+      isPlainObject(currentWorkPacket) &&
+      currentWorkPacket.activeSessionId != null &&
+      currentWorkPacket.leaseStatus !== "idle"
+    ) {
+      errors.push(
+        "current-work-packet.json: expected an idle packet while the runtime lease is idle"
+      );
+    }
+    if (
+      isPlainObject(currentExecutionBridge) &&
+      (currentExecutionBridge.activeSessionId != null ||
+        currentExecutionBridge.bridgeManifestFile != null)
+    ) {
+      warnings.push(
+        "current-execution-bridge.json still points to a previous launch bundle while no runtime lease is active"
+      );
+    }
+  } else if (
+    !isPlainObject(activeSnapshot) ||
+    activeSnapshot.activeSessionId !== index.activeSessionId
+  ) {
+    errors.push(
+      `active-session.json: activeSessionId must match session-index.json (${index.activeSessionId})`
+    );
+  } else if (
+    !isPlainObject(currentWorkPacket) ||
+    currentWorkPacket.activeSessionId !== index.activeSessionId
+  ) {
+    errors.push(
+      `current-work-packet.json: activeSessionId must match session-index.json (${index.activeSessionId})`
+    );
+  } else if (
+    isPlainObject(currentExecutionBridge) &&
+    currentExecutionBridge.activeSessionId != null &&
+    currentExecutionBridge.activeSessionId !== index.activeSessionId
+  ) {
+    errors.push(
+      `current-execution-bridge.json: activeSessionId must match session-index.json (${index.activeSessionId}) when populated`
+    );
+  }
+
+  const valid = errors.length === 0;
+  return {
+    valid,
+    errors,
+    warnings,
+    summary: [
+      valid ? "Harness runtime audit passed." : "Harness runtime audit failed.",
+      `  - registered sessions: ${index.sessions.length}`,
+      `  - queued sessions: ${index.queuedSessionIds.length}`,
+      `  - active session: ${index.activeSessionId ?? "none"}`,
+      ...(errors.length > 0 ? errors.map((error) => `  - error: ${error}`) : []),
+      ...(warnings.length > 0 ? warnings.map((warning) => `  - warning: ${warning}`) : []),
+    ].join("\n"),
+  };
+}
+
+export function validateHarnessRuntimeFiles(
+  workspacePath: string
+): HarnessRuntimeValidationResult {
+  const audit = auditHarnessRuntime(workspacePath);
+
+  return {
+    valid: audit.valid,
+    errors: audit.errors,
+  };
+}
+
+export function compactHarnessRuntime(
+  params: CompactHarnessRuntimeParams
+): CompactHarnessRuntimeResult {
+  const keepRecentClosed = Math.max(0, params.keepRecentClosed ?? 10);
+  const maxArchiveSessions = Math.max(1, params.maxArchiveSessions ?? 25);
+  const workspacePath = params.workspacePath;
+  const paths = buildRuntimePaths(workspacePath);
+  const index = loadRuntimeIndex(workspacePath);
+  const archiveIndex = loadArchiveIndex(workspacePath);
+  const queuedIds = new Set(index.queuedSessionIds);
+  const closedEntries = index.sessions
+    .filter(
+      (entry) =>
+        entry.status === "closed" &&
+        entry.id !== index.activeSessionId &&
+        !queuedIds.has(entry.id)
+    )
+    .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+  const archiveableCount = Math.max(0, closedEntries.length - keepRecentClosed);
+
+  if (archiveableCount === 0) {
+    return {
+      archivedSessionIds: [],
+      archiveIndexPath: relativeToWorkspace(workspacePath, paths.archiveIndexPath),
+      remainingRegisteredSessions: index.sessions.length,
+      summary: [
+        "Harness runtime compaction not required.",
+        `Closed sessions eligible: ${closedEntries.length}`,
+        `Keep recent closed: ${keepRecentClosed}`,
+        "Archived sessions: 0",
+      ].join("\n"),
+    };
+  }
+
+  const entriesToArchive = closedEntries.slice(
+    0,
+    Math.min(archiveableCount, maxArchiveSessions)
+  );
+  const archivedAt = nowIso();
+  const archiveId = `archive-${archivedAt
+    .replace(/[-:TZ.]/g, "")
+    .slice(0, 14)}-${entriesToArchive.length}`;
+  const bundlePaths = buildRuntimeArchiveBundlePaths(workspacePath, archiveId);
+  const archivedSessionIds: string[] = [];
+  const archiveSessions = entriesToArchive.map((entry) => {
+    const sourceSessionPath = path.join(workspacePath, entry.sessionPath);
+    const sourceSummaryPath = path.join(workspacePath, entry.summaryPath);
+    const archivedSessionPath = buildArchivedSessionStatePath(workspacePath, entry.id);
+    const archivedSummaryPath = buildArchivedSessionSummaryPath(workspacePath, entry.id);
+    const session = readJsonIfExists<HarnessRuntimeSessionState>(sourceSessionPath);
+
+    ensureDir(path.dirname(archivedSessionPath));
+    ensureDir(path.dirname(archivedSummaryPath));
+
+    if (fs.existsSync(sourceSessionPath)) {
+      fs.renameSync(sourceSessionPath, archivedSessionPath);
+    }
+    if (fs.existsSync(sourceSummaryPath)) {
+      fs.renameSync(sourceSummaryPath, archivedSummaryPath);
+    }
+
+    archivedSessionIds.push(entry.id);
+
+    return {
+      id: entry.id,
+      title: entry.title,
+      goal: entry.goal,
+      updatedAt: entry.updatedAt,
+      currentPhase: entry.currentPhase,
+      archivedSessionFile: relativeToWorkspace(workspacePath, archivedSessionPath),
+      archivedSummaryFile: relativeToWorkspace(workspacePath, archivedSummaryPath),
+      eventCount: session?.events.length ?? 0,
+      artifactCount: session?.artifacts.length ?? 0,
+    };
+  });
+
+  index.sessions = index.sessions.filter(
+    (entry) => !archivedSessionIds.includes(entry.id)
+  );
+  index.updatedAt = archivedAt;
+  index.lease.queueDepth = index.queuedSessionIds.length;
+  index.note = `Runtime compacted at ${archivedAt}; archived ${archivedSessionIds.length} closed sessions.`;
+  writeJson(paths.sessionIndexPath, index);
+
+  const archiveBundle = {
+    schemaVersion: "1.0.0",
+    id: archiveId,
+    archivedAt,
+    archivedSessionIds,
+    keepRecentClosed,
+    reason:
+      params.reason?.trim() ||
+      "Archive older closed runtime sessions to keep active ledgers readable.",
+    sessions: archiveSessions,
+  };
+  writeJson(bundlePaths.bundlePath, archiveBundle);
+  fs.writeFileSync(
+    bundlePaths.summaryPath,
+    buildRuntimeArchiveSummaryMarkdown(archiveBundle),
+    "utf-8"
+  );
+
+  archiveIndex.updatedAt = archivedAt;
+  archiveIndex.totalArchivedSessions += archivedSessionIds.length;
+  archiveIndex.bundles.push({
+    id: archiveId,
+    archivedAt,
+    archivedSessionIds,
+    keepRecentClosed,
+    reason: archiveBundle.reason,
+    bundlePath: relativeToWorkspace(workspacePath, bundlePaths.bundlePath),
+    summaryPath: relativeToWorkspace(workspacePath, bundlePaths.summaryPath),
+  });
+  writeJson(paths.archiveIndexPath, archiveIndex);
+
+  syncDashboardRuntimeArchive(
+    workspacePath,
+    archiveId,
+    archivedSessionIds,
+    relativeToWorkspace(workspacePath, paths.archiveIndexPath),
+    relativeToWorkspace(workspacePath, bundlePaths.bundlePath),
+    relativeToWorkspace(workspacePath, bundlePaths.summaryPath)
+  );
+
+  return {
+    archivedSessionIds,
+    archiveIndexPath: relativeToWorkspace(workspacePath, paths.archiveIndexPath),
+    archiveBundlePath: relativeToWorkspace(workspacePath, bundlePaths.bundlePath),
+    archiveSummaryPath: relativeToWorkspace(workspacePath, bundlePaths.summaryPath),
+    remainingRegisteredSessions: index.sessions.length,
+    summary: [
+      "Harness runtime compaction complete.",
+      `Archive bundle: ${relativeToWorkspace(workspacePath, bundlePaths.bundlePath)}`,
+      `Archive summary: ${relativeToWorkspace(workspacePath, bundlePaths.summaryPath)}`,
+      `Archived sessions: ${archivedSessionIds.join(", ")}`,
+      `Remaining registered sessions: ${index.sessions.length}`,
+    ].join("\n"),
+  };
+}
+
 function buildSessionSummaryMarkdown(session: HarnessRuntimeSessionState): string {
   const recentEvents = session.events.slice(-8).reverse();
   const activePhase = session.phases.find(
@@ -574,6 +2235,40 @@ ${recentEvents
   .map(
     (event) =>
       `- ${event.at} | ${event.phase} | ${event.actor} | ${event.action} | ${event.outcome} | ${event.note}`
+  )
+  .join("\n") || "- none"}
+`;
+}
+
+function buildRuntimeArchiveSummaryMarkdown(archiveBundle: {
+  id: string;
+  archivedAt: string;
+  archivedSessionIds: string[];
+  keepRecentClosed: number;
+  reason: string;
+  sessions: Array<{
+    id: string;
+    title: string;
+    goal: string;
+    updatedAt: string;
+    currentPhase: string;
+    archivedSessionFile: string;
+    archivedSummaryFile: string;
+  }>;
+}): string {
+  return `# Runtime Archive ${archiveBundle.id}
+
+- Archived at: ${archiveBundle.archivedAt}
+- Sessions archived: ${archiveBundle.archivedSessionIds.length}
+- Keep recent closed sessions: ${archiveBundle.keepRecentClosed}
+- Reason: ${archiveBundle.reason}
+
+## Archived Sessions
+
+${archiveBundle.sessions
+  .map(
+    (session) =>
+      `- \`${session.id}\` | ${session.title} | phase=${session.currentPhase} | updated=${session.updatedAt}\n  - Goal: ${session.goal}\n  - Archived state: ${session.archivedSessionFile}\n  - Archived summary: ${session.archivedSummaryFile}`
   )
   .join("\n") || "- none"}
 `;
@@ -697,12 +2392,23 @@ function resolveSessionId(workspacePath: string, requestedSessionId?: string): s
 function saveSession(
   workspacePath: string,
   session: HarnessRuntimeSessionState,
-  setActive: boolean
-): { sessionPath: string; summaryPath: string } {
+  options: {
+    leaseMode: "assign-active" | "preserve-active" | "release-if-current";
+    queueSession?: boolean;
+    syncDashboard?: boolean;
+  }
+): {
+  sessionPath: string;
+  summaryPath: string;
+  workPacketPath: string;
+  workPacketMarkdownPath: string;
+  actorInboxPath: string;
+} {
   const sessionPath = buildSessionStatePath(workspacePath, session.session.id);
   const summaryPath = buildSessionSummaryPath(workspacePath, session.session.id);
   const index = ensureRuntimeIndex(workspacePath);
   const paths = buildRuntimePaths(workspacePath);
+  const previousActiveSessionId = index.activeSessionId;
 
   writeJson(sessionPath, session);
   fs.writeFileSync(summaryPath, buildSessionSummaryMarkdown(session), "utf-8");
@@ -726,27 +2432,100 @@ function saveSession(
   } else {
     index.sessions.push(sessionEntry);
   }
+
+  const queuedSessionIds = new Set(index.queuedSessionIds ?? []);
+  if (session.session.status === "closed") {
+    queuedSessionIds.delete(session.session.id);
+  } else if (options.queueSession === true) {
+    queuedSessionIds.add(session.session.id);
+  } else {
+    queuedSessionIds.delete(session.session.id);
+  }
+
+  let activeSessionId = index.activeSessionId;
+  if (options.leaseMode === "assign-active") {
+    activeSessionId = session.session.id;
+    queuedSessionIds.delete(session.session.id);
+  } else if (
+    options.leaseMode === "release-if-current" &&
+    index.activeSessionId === session.session.id
+  ) {
+    activeSessionId = null;
+  }
+
   index.updatedAt = session.session.updatedAt;
-  index.activeSessionId = setActive ? session.session.id : null;
+  index.activeSessionId = activeSessionId;
+  index.queuedSessionIds = [...queuedSessionIds];
+  index.lease = {
+    status: activeSessionId == null ? "idle" : "leased",
+    activeSessionId,
+    leasedAt: activeSessionId == null ? null : session.session.updatedAt,
+    queueDepth: index.queuedSessionIds.length,
+  };
   writeJson(paths.sessionIndexPath, index);
 
-  writeJson(paths.activeSessionPath, {
-    schemaVersion: "1.0.0",
-    mode: "planner-generator-evaluator",
-    activeSessionId: setActive ? session.session.id : null,
-    status: session.session.status,
-    currentPhase: session.session.currentPhase,
-    nextActor: session.session.nextActor,
-    nextAction: session.notes.current,
-    lastUpdatedAt: session.session.updatedAt,
-    session,
-  });
+  const packetPaths = writeWorkPacket(workspacePath, session, index);
 
-  syncDashboardFromSession(workspacePath, session, setActive);
+  if (activeSessionId === session.session.id) {
+    writeJson(paths.activeSessionPath, {
+      schemaVersion: "1.0.0",
+      mode: "planner-generator-evaluator",
+      activeSessionId: session.session.id,
+      status: session.session.status,
+      currentPhase: session.session.currentPhase,
+      nextActor: session.session.nextActor,
+      nextAction: session.notes.current,
+      lastUpdatedAt: session.session.updatedAt,
+      queueDepth: index.queuedSessionIds.length,
+      queuedSessionIds: index.queuedSessionIds,
+      leaseStatus: index.lease.status,
+      leasedAt: index.lease.leasedAt,
+      session,
+    });
+  } else if (activeSessionId == null) {
+    writeIdleActiveSnapshot(workspacePath);
+    writeIdleWorkPacket(workspacePath, index);
+    writeIdleExecutionBridge(workspacePath);
+  }
+
+  if (
+    previousActiveSessionId != null &&
+    previousActiveSessionId !== activeSessionId &&
+    previousActiveSessionId !== session.session.id
+  ) {
+    const previousActiveSession = readJsonIfExists<HarnessRuntimeSessionState>(
+      buildSessionStatePath(workspacePath, previousActiveSessionId)
+    );
+    if (previousActiveSession != null) {
+      writeWorkPacket(workspacePath, previousActiveSession, index);
+    }
+  }
+
+  if (activeSessionId !== session.session.id && activeSessionId != null) {
+    const leasedSession = readJsonIfExists<HarnessRuntimeSessionState>(
+      buildSessionStatePath(workspacePath, activeSessionId)
+    );
+    if (leasedSession != null) {
+      writeWorkPacket(workspacePath, leasedSession, index);
+    }
+  }
+
+  if (options.syncDashboard !== false) {
+    const activeSession =
+      activeSessionId == null ? null : loadSession(workspacePath, activeSessionId);
+    if (activeSession != null) {
+      syncDashboardFromSession(workspacePath, activeSession, true);
+    } else {
+      syncDashboardWithoutActiveLease(workspacePath);
+    }
+  }
 
   return {
     sessionPath: relativeToWorkspace(workspacePath, sessionPath),
     summaryPath: relativeToWorkspace(workspacePath, summaryPath),
+    workPacketPath: packetPaths.workPacketPath,
+    workPacketMarkdownPath: packetPaths.workPacketMarkdownPath,
+    actorInboxPath: packetPaths.actorInboxPath,
   };
 }
 
@@ -882,6 +2661,537 @@ function buildRoleBrief(session: HarnessRuntimeSessionState): string {
   }
 }
 
+function rolePromptRelativePath(actor: HarnessActorRole): string {
+  switch (actor) {
+    case "planner":
+      return "docs/ai-harness/runtime/prompts/planner-brief.md";
+    case "generator":
+      return "docs/ai-harness/runtime/prompts/generator-brief.md";
+    case "evaluator":
+      return "docs/ai-harness/runtime/prompts/evaluator-brief.md";
+    default:
+      return "docs/ai-harness/runtime/README.md";
+  }
+}
+
+function resolveLeaseStatus(
+  sessionId: string,
+  runtimeIndex: HarnessSessionIndex
+): HarnessLeaseStatus {
+  if (runtimeIndex.activeSessionId === sessionId) {
+    return "active";
+  }
+  if (runtimeIndex.queuedSessionIds.includes(sessionId)) {
+    return "queued";
+  }
+  return "inactive";
+}
+
+function buildPhaseReadPaths(session: HarnessRuntimeSessionState): string[] {
+  const activePhase = activePhaseRecord(session);
+  return uniqueStrings([
+    `docs/ai-harness/runtime/sessions/${session.session.id}.session.json`,
+    `docs/ai-harness/runtime/sessions/${session.session.id}.md`,
+    rolePromptRelativePath(session.session.nextActor),
+    activePhase?.artifactPath ?? null,
+    session.context.lastHandoverPath,
+    "docs/ai-harness/runtime/state/session-index.json",
+    "docs/ai-harness/runtime/state/active-session.json",
+  ]);
+}
+
+function buildPhaseWritePaths(session: HarnessRuntimeSessionState): string[] {
+  const activePhase = activePhaseRecord(session);
+  return uniqueStrings([
+    activePhase?.artifactPath ?? null,
+    `docs/ai-harness/runtime/sessions/${session.session.id}.session.json`,
+    `docs/ai-harness/runtime/sessions/${session.session.id}.md`,
+    `docs/ai-harness/runtime/work-packets/${session.session.id}.work-packet.json`,
+    `docs/ai-harness/runtime/work-packets/${session.session.id}.md`,
+    `docs/ai-harness/runtime/inbox/${session.session.nextActor}/${session.session.id}.md`,
+  ]);
+}
+
+function buildWorkPacketMarkdown(packet: Record<string, unknown>): string {
+  const requiredReads = Array.isArray(packet.requiredReads)
+    ? (packet.requiredReads as string[])
+    : [];
+  const expectedWrites = Array.isArray(packet.expectedWrites)
+    ? (packet.expectedWrites as string[])
+    : [];
+  const recentEvents = Array.isArray(packet.recentEvents)
+    ? (packet.recentEvents as Array<Record<string, unknown>>)
+    : [];
+
+  return `# Work Packet: ${String(packet.sessionId || "unknown")}
+
+- Generated at: ${String(packet.generatedAt || "unknown")}
+- Lease status: ${String(packet.leaseStatus || "idle")}
+- Next actor: ${String(packet.nextActor || "planner")}
+- Current phase: ${String(packet.currentPhase || "awaiting-session-start")}
+- Goal: ${String(packet.goal || "n/a")}
+- Chunk: ${String(packet.chunkId || "n/a")} (${String(packet.chunkTitle || "n/a")})
+
+## Current Instruction
+
+${String(packet.nextAction || "Start the first governed runtime session before implementation begins.")}
+
+## Role Brief
+
+${String(packet.roleBrief || "No role brief available.")}
+
+## Required Reads
+
+${requiredReads.map((item) => `- ${item}`).join("\n") || "- none"}
+
+## Expected Writes
+
+${expectedWrites.map((item) => `- ${item}`).join("\n") || "- none"}
+
+## Recent Events
+
+${recentEvents
+  .map(
+    (event) =>
+      `- ${String(event.at || "")} | ${String(event.phase || "")} | ${String(event.actor || "")} | ${String(event.action || "")} | ${String(event.outcome || "")} | ${String(event.note || "")}`
+  )
+  .join("\n") || "- none"}
+`;
+}
+
+function buildAdapterPromptBlock(
+  session: HarnessRuntimeSessionState,
+  adapter: HarnessRuntimeAdapterDescriptor,
+  packet: Record<string, unknown>
+): string {
+  const requiredReads = Array.isArray(packet.requiredReads)
+    ? (packet.requiredReads as string[])
+    : [];
+  const expectedWrites = Array.isArray(packet.expectedWrites)
+    ? (packet.expectedWrites as string[])
+    : [];
+
+  return [
+    `You are continuing governed AI delivery through the "${adapter.title}" adapter.`,
+    `Session ID: ${session.session.id}`,
+    `Current phase: ${session.session.currentPhase}`,
+    `Next actor: ${session.session.nextActor}`,
+    `Goal: ${session.session.goal}`,
+    `Chunk: ${session.chunk.id} (${session.chunk.title})`,
+    "",
+    "Follow these rules strictly:",
+    "- Treat the governed files as the source of truth over any hidden chat memory.",
+    "- Do not widen scope beyond the active chunk and approved contract.",
+    "- Persist decisions, evidence, and outcomes into the referenced durable files.",
+    "- If the work is blocked or ambiguous, stop and record the blocker instead of improvising.",
+    "",
+    `Current instruction: ${session.notes.current}`,
+    "",
+    "Read these files first:",
+    ...requiredReads.map((item) => `- ${item}`),
+    "",
+    "Write only within these durable paths unless the contract explicitly requires more:",
+    ...expectedWrites.map((item) => `- ${item}`),
+    "",
+    "Runtime-specific expectations:",
+    ...adapter.runtimeExpectations.map((item) => `- ${item}`),
+  ].join("\n");
+}
+
+function buildAdapterHandoffMarkdown(handoff: Record<string, unknown>): string {
+  const adapter = isPlainObject(handoff.adapter) ? handoff.adapter : {};
+  const packet = isPlainObject(handoff.packet) ? handoff.packet : {};
+  const fileReferences = isPlainObject(handoff.fileReferences)
+    ? handoff.fileReferences
+    : {};
+  const operatorChecklist = Array.isArray(handoff.operatorChecklist)
+    ? (handoff.operatorChecklist as string[])
+    : [];
+  const runtimeExpectations = Array.isArray(handoff.runtimeExpectations)
+    ? (handoff.runtimeExpectations as string[])
+    : [];
+
+  return `# Adapter Handoff: ${String(handoff.sessionId || "unknown")} -> ${String(
+    adapter.title || "adapter"
+  )}
+
+- Generated at: ${String(handoff.generatedAt || "unknown")}
+- Adapter ID: \`${String(adapter.id || "unknown")}\`
+- Runtime family: ${String(adapter.runtimeFamily || "unknown")}
+- Handoff mode: ${String(adapter.handoffMode || "unknown")}
+- Lease status: ${String(handoff.leaseStatus || "idle")}
+- Next actor: ${String(handoff.nextActor || "planner")}
+- Current phase: ${String(handoff.currentPhase || "awaiting-session-start")}
+- Goal: ${String(handoff.goal || "n/a")}
+- Chunk: ${String(handoff.chunkId || "n/a")} (${String(handoff.chunkTitle || "n/a")})
+
+## Source Files
+
+- Work packet JSON: ${String(fileReferences.workPacketFile || "n/a")}
+- Work packet Markdown: ${String(fileReferences.workPacketMarkdownFile || "n/a")}
+- Actor inbox: ${String(fileReferences.actorInboxFile || "n/a")}
+- Session state: ${String(fileReferences.sessionFile || "n/a")}
+- Session summary: ${String(fileReferences.sessionSummaryFile || "n/a")}
+- Runtime prompt: ${String(fileReferences.rolePromptFile || "n/a")}
+- Adapter profile: ${String(fileReferences.adapterProfileFile || "n/a")}
+
+## Operator Checklist
+
+${operatorChecklist.map((item) => `- ${item}`).join("\n") || "- none"}
+
+## Runtime Expectations
+
+${runtimeExpectations.map((item) => `- ${item}`).join("\n") || "- none"}
+
+## Prompt Block
+
+\`\`\`text
+${String(handoff.promptBlock || "")}
+\`\`\`
+
+## Packet Summary
+
+${String(packet.summary || "No packet summary available.")}
+`;
+}
+
+function buildAdapterChecklistMarkdown(handoff: Record<string, unknown>): string {
+  const operatorChecklist = Array.isArray(handoff.operatorChecklist)
+    ? (handoff.operatorChecklist as string[])
+    : [];
+  const packet = isPlainObject(handoff.packet) ? handoff.packet : {};
+
+  return `# Adapter Launch Checklist
+
+- Session: \`${String(handoff.sessionId || "unknown")}\`
+- Adapter: \`${String(handoff.adapterId || "unknown")}\`
+- Next actor: ${String(handoff.nextActor || "planner")}
+- Current phase: ${String(handoff.currentPhase || "awaiting-session-start")}
+
+## Before Launch
+
+${operatorChecklist.map((item) => `- ${item}`).join("\n") || "- none"}
+
+## Confirmed Scope
+
+- Goal: ${String(handoff.goal || "n/a")}
+- Chunk: ${String(handoff.chunkId || "n/a")} (${String(handoff.chunkTitle || "n/a")})
+- Next action: ${String(handoff.nextAction || "n/a")}
+- Packet summary: ${String(packet.summary || "n/a")}
+`;
+}
+
+function applyBridgeTemplate(
+  template: string,
+  replacements: Record<string, string>
+): string {
+  let output = template;
+  for (const [key, value] of Object.entries(replacements)) {
+    output = output.replaceAll(`{${key}}`, value);
+  }
+  return output;
+}
+
+function buildExecutionBridgeMarkdown(manifest: Record<string, unknown>): string {
+  const bridge = isPlainObject(manifest.bridge) ? manifest.bridge : {};
+  const handoff = isPlainObject(manifest.handoff) ? manifest.handoff : {};
+  const launchCommands = isPlainObject(manifest.launchCommands)
+    ? manifest.launchCommands
+    : {};
+  const resultExpectations = Array.isArray(manifest.resultExpectations)
+    ? (manifest.resultExpectations as string[])
+    : [];
+
+  return `# Execution Bridge: ${String(manifest.sessionId || "unknown")} -> ${String(
+    bridge.title || "bridge"
+  )}
+
+- Generated at: ${String(manifest.generatedAt || "unknown")}
+- Bridge ID: \`${String(manifest.bridgeId || "unknown")}\`
+- Launch mode: ${String(bridge.launchMode || "unknown")}
+- Runtime family: ${String(bridge.runtimeFamily || "unknown")}
+- Active session: ${String(manifest.sessionId || "unknown")}
+- Next actor: ${String(manifest.nextActor || "planner")}
+
+## Launch Inputs
+
+- Adapter handoff: ${String(handoff.handoffMarkdownFile || "n/a")}
+- Work packet: ${String(handoff.workPacketFile || "n/a")}
+- Actor inbox: ${String(handoff.actorInboxFile || "n/a")}
+- Result template: ${String(manifest.resultTemplateFile || "n/a")}
+
+## Suggested Commands
+
+### PowerShell
+
+${Array.isArray(launchCommands.powershell) && launchCommands.powershell.length > 0
+  ? (launchCommands.powershell as string[]).map((item) => `- ${item}`).join("\n")
+  : "- none"}
+
+### Bash
+
+${Array.isArray(launchCommands.bash) && launchCommands.bash.length > 0
+  ? (launchCommands.bash as string[]).map((item) => `- ${item}`).join("\n")
+  : "- none"}
+
+## Result Expectations
+
+${resultExpectations.map((item) => `- ${item}`).join("\n") || "- none"}
+`;
+}
+
+function buildExecutionBridgeGuide(manifest: Record<string, unknown>): string {
+  const resultExpectations = Array.isArray(manifest.resultExpectations)
+    ? (manifest.resultExpectations as string[])
+    : [];
+
+  return `# Return To Governance
+
+1. Run the external execution environment using the launch bundle files in this directory.
+2. Capture durable outputs in governed paths or runtime/outbox references.
+3. Fill out \`${String(manifest.resultTemplateFile || "result-template.json")}\`.
+4. Call \`record_harness_execution_result\` or manually persist the same receipt in this directory.
+5. Resume the governed phase with \`advance_harness_session\` once the receipt and evidence are in place.
+
+## Result Expectations
+
+${resultExpectations.map((item) => `- ${item}`).join("\n") || "- none"}
+`;
+}
+
+function buildExecutionResultTemplate(manifest: Record<string, unknown>): Record<string, unknown> {
+  return {
+    schemaVersion: "1.0.0",
+    generatedAt: nowIso(),
+    sessionId: manifest.sessionId,
+    bridgeId: manifest.bridgeId,
+    outcome: "completed",
+    summary: "Describe what the external runtime completed and what remains.",
+    artifactPaths: [],
+    nextStep: "Advance the governed session with the correct actor and action.",
+  };
+}
+
+function buildExecutionReceiptMarkdown(receipt: Record<string, unknown>): string {
+  const artifactPaths = Array.isArray(receipt.artifactPaths)
+    ? (receipt.artifactPaths as string[])
+    : [];
+
+  return `# Execution Receipt: ${String(receipt.sessionId || "unknown")} / ${String(
+    receipt.bridgeId || "bridge"
+  )}
+
+- Recorded at: ${String(receipt.recordedAt || "unknown")}
+- Outcome: ${String(receipt.outcome || "unknown")}
+- Summary: ${String(receipt.summary || "n/a")}
+- Next step: ${String(receipt.nextStep || "n/a")}
+
+## Artifact Paths
+
+${artifactPaths.map((item) => `- ${item}`).join("\n") || "- none"}
+`;
+}
+
+function buildLaunchPowershell(manifest: Record<string, unknown>): string {
+  const commands =
+    isPlainObject(manifest.launchCommands) &&
+    Array.isArray(manifest.launchCommands.powershell)
+      ? (manifest.launchCommands.powershell as string[])
+      : [];
+  const commandList =
+    commands.length > 0
+      ? commands.map((command) => `Write-Host "  ${command}"`).join("\n")
+      : 'Write-Host "  No direct command is defined for this bridge."';
+
+  return [
+    '$ErrorActionPreference = "Stop"',
+    `$manifestPath = Join-Path $PSScriptRoot "bridge-manifest.json"`,
+    '$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json',
+    'Write-Host "Harness execution bridge loaded."',
+    'Write-Host ("Session: " + $manifest.sessionId)',
+    'Write-Host ("Bridge: " + $manifest.bridge.title)',
+    'Write-Host "Suggested PowerShell launch commands:"',
+    commandList,
+    'Write-Host ""',
+    'Write-Host ("Handoff markdown: " + $manifest.handoff.handoffMarkdownFile)',
+    'Write-Host ("Actor inbox: " + $manifest.handoff.actorInboxFile)',
+    'Write-Host ("Result template: " + $manifest.resultTemplateFile)',
+  ].join("\n");
+}
+
+function buildLaunchBash(manifest: Record<string, unknown>): string {
+  const commands =
+    isPlainObject(manifest.launchCommands) &&
+    Array.isArray(manifest.launchCommands.bash)
+      ? (manifest.launchCommands.bash as string[])
+      : [];
+  const commandList =
+    commands.length > 0
+      ? commands.map((command) => `echo "  ${command}"`).join("\n")
+      : 'echo "  No direct command is defined for this bridge."';
+
+  return [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    'MANIFEST_PATH="$(cd "$(dirname "$0")" && pwd)/bridge-manifest.json"',
+    'echo "Harness execution bridge loaded."',
+    'echo "Suggested bash launch commands:"',
+    commandList,
+    'echo ""',
+    'echo "Review bridge-manifest.json, handoff.md, and result-template.json before launching the external runtime."',
+  ].join("\n");
+}
+
+function writeIdleWorkPacket(
+  workspacePath: string,
+  runtimeIndex: HarnessSessionIndex
+): void {
+  const paths = buildRuntimePaths(workspacePath);
+  const queuedSessionId = runtimeIndex.queuedSessionIds[0] ?? null;
+  const queuedSession =
+    queuedSessionId == null
+      ? null
+      : readJsonIfExists<HarnessRuntimeSessionState>(
+          buildSessionStatePath(workspacePath, queuedSessionId)
+        );
+  writeJson(paths.currentWorkPacketPath, {
+    schemaVersion: "1.0.0",
+    generatedAt: nowIso(),
+    leaseStatus: "idle",
+    activeSessionId: null,
+    nextActor: queuedSession?.session.nextActor ?? "planner",
+    nextAction:
+      queuedSessionId != null
+        ? `Activate the next queued session: ${queuedSessionId}`
+        : "Start the first governed runtime session before implementation begins.",
+    workPacketFile:
+      queuedSessionId != null
+        ? `docs/ai-harness/runtime/work-packets/${queuedSessionId}.work-packet.json`
+        : null,
+    actorInboxFile:
+      queuedSessionId != null
+        ? `docs/ai-harness/runtime/inbox/${queuedSession?.session.nextActor ?? "planner"}/${queuedSessionId}.md`
+        : null,
+    summary:
+      queuedSessionId != null
+        ? `No session currently holds the active lease. The next queued session is ${queuedSessionId}.`
+        : "No active harness session is currently leased.",
+  });
+}
+
+function writeIdleExecutionBridge(workspacePath: string): void {
+  const paths = buildRuntimePaths(workspacePath);
+  writeJson(paths.currentExecutionBridgePath, {
+    schemaVersion: "1.0.0",
+    generatedAt: nowIso(),
+    activeSessionId: null,
+    bridgeId: null,
+    launchMode: "idle",
+    bridgeManifestFile: null,
+    summary:
+      "No execution bridge is currently prepared for the active runtime lease.",
+  });
+}
+
+function writeWorkPacket(
+  workspacePath: string,
+  session: HarnessRuntimeSessionState,
+  runtimeIndex: HarnessSessionIndex
+): {
+  workPacketPath: string;
+  workPacketMarkdownPath: string;
+  actorInboxPath: string;
+} {
+  const sessionPath = buildSessionStatePath(workspacePath, session.session.id);
+  const summaryPath = buildSessionSummaryPath(workspacePath, session.session.id);
+  const workPacketPath = buildWorkPacketStatePath(workspacePath, session.session.id);
+  const workPacketMarkdownPath = buildWorkPacketMarkdownPath(
+    workspacePath,
+    session.session.id
+  );
+  const actorInboxPath = buildActorInboxPath(
+    workspacePath,
+    session.session.nextActor,
+    session.session.id
+  );
+  const leaseStatus = resolveLeaseStatus(session.session.id, runtimeIndex);
+  const activePhase = activePhaseRecord(session);
+  const packet = {
+    schemaVersion: "1.0.0",
+    generatedAt: nowIso(),
+    leaseStatus,
+    activeSessionId: runtimeIndex.activeSessionId,
+    sessionId: session.session.id,
+    title: session.session.title,
+    goal: session.session.goal,
+    status: session.session.status,
+    nextActor: session.session.nextActor,
+    currentPhase: session.session.currentPhase,
+    nextAction: session.notes.current,
+    contextPolicy: session.context.policy,
+    adoptionTrack: session.session.adoptionTrack,
+    chunkId: session.chunk.id,
+    chunkTitle: session.chunk.title,
+    chunkStatus: session.chunk.status,
+    chunkSummary: session.chunk.summary,
+    rolePromptFile: rolePromptRelativePath(session.session.nextActor),
+    stateFile: relativeToWorkspace(workspacePath, sessionPath),
+    summaryFile: relativeToWorkspace(workspacePath, summaryPath),
+    phaseArtifactFile: activePhase?.artifactPath ?? null,
+    lastHandoverFile: session.context.lastHandoverPath,
+    workPacketFile: relativeToWorkspace(workspacePath, workPacketPath),
+    workPacketMarkdownFile: relativeToWorkspace(workspacePath, workPacketMarkdownPath),
+    actorInboxFile: relativeToWorkspace(workspacePath, actorInboxPath),
+    queueDepth: runtimeIndex.queuedSessionIds.length,
+    queuedSessionIds: runtimeIndex.queuedSessionIds,
+    governance: session.governance,
+    verification: session.verification,
+    requiredReads: buildPhaseReadPaths(session),
+    expectedWrites: buildPhaseWritePaths(session),
+    roleBrief: buildRoleBrief(session),
+    summary: `${session.session.nextActor} should continue ${session.session.currentPhase} for ${session.session.id} using the active artifact and approved governance boundaries.`,
+    recentEvents: session.events.slice(-5).map((event) => ({
+      at: event.at,
+      phase: event.phase,
+      actor: event.actor,
+      action: event.action,
+      outcome: event.outcome,
+      note: event.note,
+    })),
+  };
+
+  writeJson(workPacketPath, packet);
+  fs.writeFileSync(workPacketMarkdownPath, buildWorkPacketMarkdown(packet), "utf-8");
+  ensureDir(path.dirname(actorInboxPath));
+  fs.writeFileSync(
+    actorInboxPath,
+    [
+      `# ${session.session.nextActor} Inbox`,
+      "",
+      `- Session: \`${session.session.id}\``,
+      `- Lease status: ${leaseStatus}`,
+      `- Current phase: \`${session.session.currentPhase}\``,
+      `- Next action: ${session.notes.current}`,
+      `- Packet JSON: ${relativeToWorkspace(workspacePath, workPacketPath)}`,
+      `- Packet Markdown: ${relativeToWorkspace(workspacePath, workPacketMarkdownPath)}`,
+      "",
+      buildRoleBrief(session),
+      "",
+    ].join("\n"),
+    "utf-8"
+  );
+
+  if (leaseStatus === "active") {
+    writeJson(buildRuntimePaths(workspacePath).currentWorkPacketPath, packet);
+  }
+
+  return {
+    workPacketPath: relativeToWorkspace(workspacePath, workPacketPath),
+    workPacketMarkdownPath: relativeToWorkspace(workspacePath, workPacketMarkdownPath),
+    actorInboxPath: relativeToWorkspace(workspacePath, actorInboxPath),
+  };
+}
+
 function ensureRuntimeArtifacts(
   workspacePath: string,
   session: HarnessRuntimeSessionState
@@ -996,6 +3306,8 @@ function syncDashboardFromSession(
   setActive: boolean
 ): void {
   const paths = buildRuntimePaths(workspacePath);
+  const runtimeIndex = loadRuntimeIndex(workspacePath);
+  const workPacketPath = `docs/ai-harness/runtime/work-packets/${session.session.id}.work-packet.json`;
   const dashboardState = readJsonIfExists<Record<string, unknown>>(
     paths.dashboardStatePath
   );
@@ -1090,6 +3402,11 @@ function syncDashboardFromSession(
     stateFile: "docs/ai-harness/runtime/state/active-session.json",
     sessionIndexFile: "docs/ai-harness/runtime/state/session-index.json",
     sessionSummaryFile: `docs/ai-harness/runtime/sessions/${session.session.id}.md`,
+    workPacketFile: workPacketPath,
+    leaseStatus: runtimeIndex.lease.status,
+    leasedAt: runtimeIndex.lease.leasedAt,
+    queueDepth: runtimeIndex.queuedSessionIds.length,
+    queuedSessionIds: runtimeIndex.queuedSessionIds,
     recentEvents: session.events.slice(-5).map((event) => ({
       at: event.at,
       phase: event.phase,
@@ -1121,11 +3438,26 @@ function syncDashboardFromSession(
     "docs/ai-harness/runtime/state/active-session.json",
     "harness-dashboard-operator"
   );
+  upsertDashboardArtifact(
+    dashboardState,
+    "runtime-current-work-packet",
+    "Current Runtime Work Packet",
+    "docs/ai-harness/runtime/state/current-work-packet.json",
+    "harness-dashboard-operator"
+  );
+  upsertDashboardArtifact(
+    dashboardState,
+    `runtime-work-packet-${session.session.id}`,
+    `Runtime Work Packet (${session.session.id})`,
+    workPacketPath,
+    "harness-dashboard-operator"
+  );
 
   const sessionOutputs = uniqueStrings([
     ...session.artifacts,
     `docs/ai-harness/runtime/sessions/${session.session.id}.md`,
     "docs/ai-harness/runtime/state/active-session.json",
+    workPacketPath,
   ]);
 
   const sessionLog = Array.isArray(dashboardState.sessionLog)
@@ -1259,19 +3591,439 @@ function syncDashboardFromSession(
   writeJson(paths.dashboardStatePath, dashboardState);
 }
 
+function syncDashboardWithoutActiveLease(workspacePath: string): void {
+  const paths = buildRuntimePaths(workspacePath);
+  const runtimeIndex = loadRuntimeIndex(workspacePath);
+  const nextQueuedId = runtimeIndex.queuedSessionIds[0] ?? null;
+  const nextQueuedSession =
+    nextQueuedId == null
+      ? null
+      : readJsonIfExists<HarnessRuntimeSessionState>(
+          buildSessionStatePath(workspacePath, nextQueuedId)
+        );
+  const dashboardState = readJsonIfExists<Record<string, unknown>>(
+    paths.dashboardStatePath
+  );
+  if (dashboardState == null) {
+    return;
+  }
+
+  const existing = isPlainObject(dashboardState.runtimeOrchestration)
+    ? dashboardState.runtimeOrchestration
+    : {};
+  dashboardState.runtimeOrchestration = {
+    mode: "planner-generator-evaluator",
+    activeSessionId: null,
+    activeChunkId: String(
+      nextQueuedSession?.chunk.id || existing.activeChunkId || "chunk-unset"
+    ),
+    currentPhase: String(
+      nextQueuedSession?.session.currentPhase || "awaiting-session-start"
+    ),
+    nextActor: String(nextQueuedSession?.session.nextActor || "planner"),
+    nextAction:
+      nextQueuedId != null
+        ? `Activate the next queued session: ${nextQueuedId}`
+        : "Start the first governed runtime session before implementation begins.",
+    contextPolicy: String(
+      nextQueuedSession?.context.policy || existing.contextPolicy || "balanced"
+    ),
+    contractCoverageRule:
+      "No generator implementation begins before the evaluator-approved chunk contract exists.",
+    evaluatorRule:
+      "The generator may not self-approve; an independent evaluator records the pass or change-request verdict.",
+    lastEventAt: runtimeIndex.updatedAt,
+    stateFile: "docs/ai-harness/runtime/state/active-session.json",
+    sessionIndexFile: "docs/ai-harness/runtime/state/session-index.json",
+    sessionSummaryFile:
+      nextQueuedId != null
+        ? `docs/ai-harness/runtime/sessions/${nextQueuedId}.md`
+        : "docs/ai-harness/runtime/sessions/",
+    workPacketFile:
+      nextQueuedId != null
+        ? `docs/ai-harness/runtime/work-packets/${nextQueuedId}.work-packet.json`
+        : "docs/ai-harness/runtime/state/current-work-packet.json",
+    leaseStatus: runtimeIndex.lease.status,
+    leasedAt: runtimeIndex.lease.leasedAt,
+    queueDepth: runtimeIndex.queuedSessionIds.length,
+    queuedSessionIds: runtimeIndex.queuedSessionIds,
+    recentEvents: [],
+  };
+  writeJson(paths.dashboardStatePath, dashboardState);
+}
+
+function syncDashboardAdapterHandoff(
+  workspacePath: string,
+  session: HarnessRuntimeSessionState,
+  adapterId: HarnessRuntimeAdapterId,
+  handoffMarkdownPath: string,
+  checklistPath: string
+): void {
+  const paths = buildRuntimePaths(workspacePath);
+  const dashboardState = readJsonIfExists<Record<string, unknown>>(
+    paths.dashboardStatePath
+  );
+  if (dashboardState == null) {
+    return;
+  }
+
+  const adapter = getHarnessRuntimeAdapter(adapterId);
+  upsertDashboardArtifact(
+    dashboardState,
+    `runtime-adapter-${adapterId}`,
+    `${adapter.title} Adapter Profile`,
+    `docs/ai-harness/runtime/adapters/${adapterId}.md`,
+    "harness-dashboard-operator"
+  );
+  upsertDashboardArtifact(
+    dashboardState,
+    `runtime-adapter-handoff-${session.session.id}-${adapterId}`,
+    `${adapter.title} Handoff (${session.session.id})`,
+    handoffMarkdownPath,
+    "harness-dashboard-operator"
+  );
+
+  const governedSessions = Array.isArray(dashboardState.governedSessions)
+    ? (dashboardState.governedSessions as Array<Record<string, unknown>>)
+    : [];
+  const governedIndex = governedSessions.findIndex(
+    (entry) => String(entry.id || "") === session.session.id
+  );
+  if (governedIndex >= 0) {
+    const existingOutputs = Array.isArray(governedSessions[governedIndex].outputs)
+      ? (governedSessions[governedIndex].outputs as string[])
+      : [];
+    governedSessions[governedIndex] = {
+      ...governedSessions[governedIndex],
+      outputs: uniqueStrings([
+        ...existingOutputs,
+        handoffMarkdownPath,
+        checklistPath,
+      ]),
+    };
+    dashboardState.governedSessions = governedSessions;
+  }
+
+  const sessionLog = Array.isArray(dashboardState.sessionLog)
+    ? (dashboardState.sessionLog as Array<Record<string, unknown>>)
+    : [];
+  const sessionLogIndex = sessionLog.findIndex(
+    (entry) => String(entry.id || "") === session.session.id
+  );
+  if (sessionLogIndex >= 0) {
+    const existingOutputs = Array.isArray(sessionLog[sessionLogIndex].outputs)
+      ? (sessionLog[sessionLogIndex].outputs as string[])
+      : [];
+    sessionLog[sessionLogIndex] = {
+      ...sessionLog[sessionLogIndex],
+      outputs: uniqueStrings([
+        ...existingOutputs,
+        handoffMarkdownPath,
+        checklistPath,
+      ]),
+    };
+    dashboardState.sessionLog = sessionLog;
+  }
+
+  writeJson(paths.dashboardStatePath, dashboardState);
+}
+
+function syncDashboardExecutionBridge(
+  workspacePath: string,
+  session: HarnessRuntimeSessionState,
+  bridgeId: HarnessRuntimeAdapterId,
+  bridgeManifestPath: string,
+  resultGuidePath: string
+): void {
+  const paths = buildRuntimePaths(workspacePath);
+  const dashboardState = readJsonIfExists<Record<string, unknown>>(
+    paths.dashboardStatePath
+  );
+  if (dashboardState == null) {
+    return;
+  }
+
+  const bridge = getHarnessExecutionBridge(bridgeId);
+  upsertDashboardArtifact(
+    dashboardState,
+    "runtime-current-execution-bridge",
+    "Current Execution Bridge State",
+    "docs/ai-harness/runtime/state/current-execution-bridge.json",
+    "harness-dashboard-operator"
+  );
+  upsertDashboardArtifact(
+    dashboardState,
+    `runtime-bridge-profile-${bridgeId}`,
+    `${bridge.title} Profile`,
+    `docs/ai-harness/runtime/bridges/${bridgeId}.md`,
+    "harness-dashboard-operator"
+  );
+  upsertDashboardArtifact(
+    dashboardState,
+    `runtime-execution-bridge-${session.session.id}-${bridgeId}`,
+    `${bridge.title} Launch Bundle (${session.session.id})`,
+    bridgeManifestPath,
+    "harness-dashboard-operator"
+  );
+
+  const governedSessions = Array.isArray(dashboardState.governedSessions)
+    ? (dashboardState.governedSessions as Array<Record<string, unknown>>)
+    : [];
+  const governedIndex = governedSessions.findIndex(
+    (entry) => String(entry.id || "") === session.session.id
+  );
+  if (governedIndex >= 0) {
+    const existingOutputs = Array.isArray(governedSessions[governedIndex].outputs)
+      ? (governedSessions[governedIndex].outputs as string[])
+      : [];
+    governedSessions[governedIndex] = {
+      ...governedSessions[governedIndex],
+      outputs: uniqueStrings([
+        ...existingOutputs,
+        bridgeManifestPath,
+        resultGuidePath,
+      ]),
+    };
+    dashboardState.governedSessions = governedSessions;
+  }
+
+  writeJson(paths.dashboardStatePath, dashboardState);
+}
+
+function syncDashboardExecutionReceipt(
+  workspacePath: string,
+  session: HarnessRuntimeSessionState,
+  bridgeId: HarnessRuntimeAdapterId,
+  receiptPath: string,
+  receiptMarkdownPath: string
+): void {
+  const paths = buildRuntimePaths(workspacePath);
+  const dashboardState = readJsonIfExists<Record<string, unknown>>(
+    paths.dashboardStatePath
+  );
+  if (dashboardState == null) {
+    return;
+  }
+
+  const bridge = getHarnessExecutionBridge(bridgeId);
+  upsertDashboardArtifact(
+    dashboardState,
+    `runtime-execution-receipt-${session.session.id}-${bridgeId}`,
+    `${bridge.title} Receipt (${session.session.id})`,
+    receiptMarkdownPath,
+    "harness-dashboard-operator"
+  );
+
+  const governedSessions = Array.isArray(dashboardState.governedSessions)
+    ? (dashboardState.governedSessions as Array<Record<string, unknown>>)
+    : [];
+  const governedIndex = governedSessions.findIndex(
+    (entry) => String(entry.id || "") === session.session.id
+  );
+  if (governedIndex >= 0) {
+    const existingOutputs = Array.isArray(governedSessions[governedIndex].outputs)
+      ? (governedSessions[governedIndex].outputs as string[])
+      : [];
+    governedSessions[governedIndex] = {
+      ...governedSessions[governedIndex],
+      outputs: uniqueStrings([
+        ...existingOutputs,
+        receiptPath,
+        receiptMarkdownPath,
+      ]),
+    };
+    dashboardState.governedSessions = governedSessions;
+  }
+
+  writeJson(paths.dashboardStatePath, dashboardState);
+}
+
+function syncDashboardNativeExecution(
+  workspacePath: string,
+  session: HarnessRuntimeSessionState,
+  bridgeId: HarnessRuntimeAdapterId,
+  nativeExecutionPlanPath: string,
+  nativeExecutionStatePath: string,
+  stdoutLogPath: string,
+  stderrLogPath: string
+): void {
+  const paths = buildRuntimePaths(workspacePath);
+  const dashboardState = readJsonIfExists<Record<string, unknown>>(
+    paths.dashboardStatePath
+  );
+  if (dashboardState == null) {
+    return;
+  }
+
+  const executor = getHarnessNativeExecutor(bridgeId);
+  upsertDashboardArtifact(
+    dashboardState,
+    "runtime-native-executors-guide",
+    "Native Executors Guide",
+    "docs/ai-harness/runtime/native-executors/README.md",
+    "harness-dashboard-operator"
+  );
+  upsertDashboardArtifact(
+    dashboardState,
+    "runtime-current-native-execution",
+    "Current Native Execution State",
+    "docs/ai-harness/runtime/state/current-native-execution.json",
+    "harness-dashboard-operator"
+  );
+  upsertDashboardArtifact(
+    dashboardState,
+    `runtime-native-execution-plan-${session.session.id}-${bridgeId}`,
+    `${executor.title} Plan (${session.session.id})`,
+    nativeExecutionPlanPath,
+    "harness-dashboard-operator"
+  );
+  upsertDashboardArtifact(
+    dashboardState,
+    `runtime-native-execution-state-${session.session.id}-${bridgeId}`,
+    `${executor.title} State (${session.session.id})`,
+    nativeExecutionStatePath,
+    "harness-dashboard-operator"
+  );
+  upsertDashboardArtifact(
+    dashboardState,
+    `runtime-native-execution-stdout-${session.session.id}-${bridgeId}`,
+    `${executor.title} Stdout (${session.session.id})`,
+    stdoutLogPath,
+    "harness-dashboard-operator"
+  );
+  upsertDashboardArtifact(
+    dashboardState,
+    `runtime-native-execution-stderr-${session.session.id}-${bridgeId}`,
+    `${executor.title} Stderr (${session.session.id})`,
+    stderrLogPath,
+    "harness-dashboard-operator"
+  );
+
+  if (
+    typeof dashboardState.runtimeOrchestration === "object" &&
+    dashboardState.runtimeOrchestration !== null
+  ) {
+    dashboardState.runtimeOrchestration = {
+      ...dashboardState.runtimeOrchestration,
+      nativeExecutionStateFile: nativeExecutionStatePath,
+      nativeExecutionPlanFile: nativeExecutionPlanPath,
+      nativeExecutorBridgeId: bridgeId,
+    };
+  }
+
+  const governedSessions = Array.isArray(dashboardState.governedSessions)
+    ? (dashboardState.governedSessions as Array<Record<string, unknown>>)
+    : [];
+  const governedIndex = governedSessions.findIndex(
+    (entry) => String(entry.id || "") === session.session.id
+  );
+  if (governedIndex >= 0) {
+    const existingOutputs = Array.isArray(governedSessions[governedIndex].outputs)
+      ? (governedSessions[governedIndex].outputs as string[])
+      : [];
+    governedSessions[governedIndex] = {
+      ...governedSessions[governedIndex],
+      outputs: uniqueStrings([
+        ...existingOutputs,
+        nativeExecutionPlanPath,
+        nativeExecutionStatePath,
+        stdoutLogPath,
+        stderrLogPath,
+      ]),
+    };
+    dashboardState.governedSessions = governedSessions;
+  }
+
+  writeJson(paths.dashboardStatePath, dashboardState);
+}
+
+function syncDashboardRuntimeArchive(
+  workspacePath: string,
+  archiveId: string,
+  archivedSessionIds: string[],
+  archiveIndexPath: string,
+  archiveBundlePath: string,
+  archiveSummaryPath: string
+): void {
+  const paths = buildRuntimePaths(workspacePath);
+  const dashboardState = readJsonIfExists<Record<string, unknown>>(
+    paths.dashboardStatePath
+  );
+  if (dashboardState == null) {
+    return;
+  }
+
+  upsertDashboardArtifact(
+    dashboardState,
+    "runtime-archive-guide",
+    "Runtime Archive Guide",
+    "docs/ai-harness/runtime/archive/README.md",
+    "harness-dashboard-operator"
+  );
+  upsertDashboardArtifact(
+    dashboardState,
+    "runtime-archive-index",
+    "Runtime Archive Index",
+    archiveIndexPath,
+    "harness-dashboard-operator"
+  );
+  upsertDashboardArtifact(
+    dashboardState,
+    `runtime-archive-bundle-${archiveId}`,
+    `Runtime Archive Bundle (${archiveId})`,
+    archiveSummaryPath,
+    "harness-dashboard-operator"
+  );
+
+  const shouldKeepSession = (item: Record<string, unknown>) =>
+    !archivedSessionIds.includes(String(item.id || ""));
+
+  if (Array.isArray(dashboardState.sessionLog)) {
+    dashboardState.sessionLog = (
+      dashboardState.sessionLog as Array<Record<string, unknown>>
+    ).filter(shouldKeepSession);
+  }
+
+  if (Array.isArray(dashboardState.governedSessions)) {
+    dashboardState.governedSessions = (
+      dashboardState.governedSessions as Array<Record<string, unknown>>
+    ).filter(shouldKeepSession);
+  }
+
+  if (
+    typeof dashboardState.runtimeOrchestration === "object" &&
+    dashboardState.runtimeOrchestration !== null
+  ) {
+    dashboardState.runtimeOrchestration = {
+      ...dashboardState.runtimeOrchestration,
+      archiveIndexFile: archiveIndexPath,
+      archivedSessionCount: archivedSessionIds.length,
+      lastArchiveAt: nowIso(),
+      lastArchiveBundle: archiveBundlePath,
+    };
+  }
+
+  writeJson(paths.dashboardStatePath, dashboardState);
+}
+
 export function startHarnessSession(
   params: StartHarnessSessionParams
 ): HarnessRuntimeResult {
   const workspacePath = params.workspacePath;
   const runtimeIndex = ensureRuntimeIndex(workspacePath);
+  const activeSession =
+    runtimeIndex.activeSessionId != null
+      ? loadSession(workspacePath, runtimeIndex.activeSessionId)
+      : null;
 
-  if (runtimeIndex.activeSessionId != null && params.force !== true) {
-    const activeSession = loadSession(workspacePath, runtimeIndex.activeSessionId);
-    if (activeSession.session.status !== "closed") {
-      throw new Error(
-        `Active session "${runtimeIndex.activeSessionId}" is still open. Close it or pass force: true to replace the active pointer.`
-      );
-    }
+  if (
+    activeSession != null &&
+    activeSession.session.status !== "closed" &&
+    params.queueIfBusy === false
+  ) {
+    throw new Error(
+      `Active session "${runtimeIndex.activeSessionId}" is still open. Activate queueing or close the current lease before starting a new session.`
+    );
   }
 
   const metadata = loadWorkspaceMetadata(workspacePath);
@@ -1384,8 +4136,20 @@ export function startHarnessSession(
     [planArtifact ?? ""]
   );
 
-  const saveResult = saveSession(workspacePath, session, true);
+  const shouldQueue =
+    activeSession != null && activeSession.session.status !== "closed";
+  if (shouldQueue) {
+    session.notes.current =
+      `Queued behind active session ${activeSession.session.id}. Activate this session when the current lease is released.`;
+  }
+
+  const saveResult = saveSession(workspacePath, session, {
+    leaseMode: shouldQueue ? "preserve-active" : "assign-active",
+    queueSession: shouldQueue,
+  });
   const activePhase = activePhaseRecord(session);
+  const effectivePhase = shouldQueue ? "queued" : session.session.currentPhase;
+  const effectiveActor = shouldQueue ? activeSession?.session.nextActor ?? "planner" : session.session.nextActor;
 
   return {
     sessionId,
@@ -1394,18 +4158,133 @@ export function startHarnessSession(
     sessionPath: saveResult.sessionPath,
     summaryPath: saveResult.summaryPath,
     activeArtifactPath: activePhase?.artifactPath ?? null,
+    workPacketPath: saveResult.workPacketPath,
+    workPacketMarkdownPath: saveResult.workPacketMarkdownPath,
+    actorInboxPath: saveResult.actorInboxPath,
     summary: [
-      `Harness session started: ${session.session.id}`,
+      shouldQueue
+        ? `Harness session queued: ${session.session.id}`
+        : `Harness session started: ${session.session.id}`,
       `Title: ${session.session.title}`,
       `Goal: ${session.session.goal}`,
       `Adoption track: ${session.session.adoptionTrack}`,
-      `Current phase: ${session.session.currentPhase}`,
-      `Next actor: ${session.session.nextActor}`,
+      `Current phase: ${effectivePhase}`,
+      `Next actor: ${effectiveActor}`,
       `Active artifact: ${activePhase?.artifactPath ?? "n/a"}`,
       `Session state: ${saveResult.sessionPath}`,
       `Session summary: ${saveResult.summaryPath}`,
+      `Work packet: ${saveResult.workPacketPath}`,
+      `Actor inbox: ${saveResult.actorInboxPath}`,
+      ...(shouldQueue
+        ? [`Queue depth: ${runtimeIndex.queuedSessionIds.length + 1}`, `Current lease holder: ${activeSession?.session.id ?? "none"}`]
+        : []),
       "",
-      buildRoleBrief(session),
+      shouldQueue
+        ? `Queued instruction:\n${session.notes.current}`
+        : buildRoleBrief(session),
+    ].join("\n"),
+  };
+}
+
+function promoteQueuedSessionIfAvailable(
+  workspacePath: string
+): {
+  session: HarnessRuntimeSessionState;
+  sessionPath: string;
+  summaryPath: string;
+  workPacketPath: string;
+  workPacketMarkdownPath: string;
+  actorInboxPath: string;
+} | null {
+  const index = loadRuntimeIndex(workspacePath);
+  const nextQueuedId = index.queuedSessionIds[0];
+  if (nextQueuedId == null) {
+    return null;
+  }
+
+  const nextSession = loadSession(workspacePath, nextQueuedId);
+  const saveResult = saveSession(workspacePath, nextSession, {
+    leaseMode: "assign-active",
+    queueSession: false,
+  });
+  return {
+    session: nextSession,
+    sessionPath: saveResult.sessionPath,
+    summaryPath: saveResult.summaryPath,
+    workPacketPath: saveResult.workPacketPath,
+    workPacketMarkdownPath: saveResult.workPacketMarkdownPath,
+    actorInboxPath: saveResult.actorInboxPath,
+  };
+}
+
+export function activateHarnessSession(
+  workspacePath: string,
+  sessionId: string,
+  reason?: string,
+  force?: boolean
+): HarnessRuntimeResult {
+  const index = loadRuntimeIndex(workspacePath);
+  const targetSession = loadSession(workspacePath, sessionId);
+  if (targetSession.session.status === "closed") {
+    throw new Error(`Harness session "${sessionId}" is already closed and cannot be activated.`);
+  }
+
+  if (index.activeSessionId === sessionId) {
+    return getHarnessSessionStatus(workspacePath, sessionId);
+  }
+
+  if (index.activeSessionId != null) {
+    const currentActive = loadSession(workspacePath, index.activeSessionId);
+    if (
+      currentActive.session.status !== "closed" &&
+      currentActive.session.status !== "blocked" &&
+      force !== true
+    ) {
+      throw new Error(
+        `Active lease is still held by "${currentActive.session.id}". Block, close, or force-switch it before activating another session.`
+      );
+    }
+
+    if (currentActive.session.status !== "closed") {
+      currentActive.notes.current =
+        reason?.trim() ||
+        `Lease moved to ${sessionId}. Resume this queued session when it becomes active again.`;
+      saveSession(workspacePath, currentActive, {
+        leaseMode: "preserve-active",
+        queueSession: true,
+      });
+    }
+  }
+
+  targetSession.notes.current =
+    reason?.trim() || targetSession.notes.current || nextActionForPhase(targetSession.session.currentPhase);
+  const saveResult = saveSession(workspacePath, targetSession, {
+    leaseMode: "assign-active",
+    queueSession: false,
+  });
+  const activePhase = activePhaseRecord(targetSession);
+
+  return {
+    sessionId: targetSession.session.id,
+    currentPhase: targetSession.session.currentPhase,
+    nextActor: targetSession.session.nextActor,
+    sessionPath: saveResult.sessionPath,
+    summaryPath: saveResult.summaryPath,
+    activeArtifactPath: activePhase?.artifactPath ?? null,
+    workPacketPath: saveResult.workPacketPath,
+    workPacketMarkdownPath: saveResult.workPacketMarkdownPath,
+    actorInboxPath: saveResult.actorInboxPath,
+    summary: [
+      `Harness session activated: ${targetSession.session.id}`,
+      `Current phase: ${targetSession.session.currentPhase}`,
+      `Next actor: ${targetSession.session.nextActor}`,
+      `Active artifact: ${activePhase?.artifactPath ?? "n/a"}`,
+      `Session state: ${saveResult.sessionPath}`,
+      `Session summary: ${saveResult.summaryPath}`,
+      `Work packet: ${saveResult.workPacketPath}`,
+      `Actor inbox: ${saveResult.actorInboxPath}`,
+      "",
+      buildRoleBrief(targetSession),
     ].join("\n"),
   };
 }
@@ -1618,7 +4497,13 @@ function applyActionToSession(
 export function advanceHarnessSession(
   params: AdvanceHarnessSessionParams
 ): HarnessRuntimeResult {
+  const index = loadRuntimeIndex(params.workspacePath);
   const sessionId = resolveSessionId(params.workspacePath, params.sessionId);
+  if (index.activeSessionId !== sessionId) {
+    throw new Error(
+      `Harness session "${sessionId}" does not currently hold the active lease. Activate it before advancing phases.`
+    );
+  }
   const session = loadSession(params.workspacePath, sessionId);
   const currentPhaseBefore = activePhaseRecord(session);
   const transition = applyActionToSession(session, params);
@@ -1666,32 +4551,58 @@ export function advanceHarnessSession(
     artifactPaths: eventArtifactPaths,
   });
   session.notes.lastOutcome = transition.outcome;
-
-  const saveResult = saveSession(
-    params.workspacePath,
-    session,
-    session.session.status !== "closed"
-  );
-  const activePhase = activePhaseRecord(session);
+  let saveResult;
+  let responseSession = session;
+  if (session.session.status === "closed") {
+    saveResult = saveSession(params.workspacePath, session, {
+      leaseMode: "release-if-current",
+      queueSession: false,
+      syncDashboard: false,
+    });
+    const promoted = promoteQueuedSessionIfAvailable(params.workspacePath);
+    if (promoted == null) {
+      syncDashboardWithoutActiveLease(params.workspacePath);
+    } else {
+      responseSession = promoted.session;
+      saveResult = {
+        sessionPath: promoted.sessionPath,
+        summaryPath: promoted.summaryPath,
+        workPacketPath: promoted.workPacketPath,
+        workPacketMarkdownPath: promoted.workPacketMarkdownPath,
+        actorInboxPath: promoted.actorInboxPath,
+      };
+    }
+  } else {
+    saveResult = saveSession(params.workspacePath, session, {
+      leaseMode: "assign-active",
+      queueSession: false,
+    });
+  }
+  const activePhase = activePhaseRecord(responseSession);
 
   return {
-    sessionId: session.session.id,
-    currentPhase: session.session.currentPhase,
-    nextActor: session.session.nextActor,
+    sessionId: responseSession.session.id,
+    currentPhase: responseSession.session.currentPhase,
+    nextActor: responseSession.session.nextActor,
     sessionPath: saveResult.sessionPath,
     summaryPath: saveResult.summaryPath,
     activeArtifactPath: activePhase?.artifactPath ?? null,
+    workPacketPath: saveResult.workPacketPath,
+    workPacketMarkdownPath: saveResult.workPacketMarkdownPath,
+    actorInboxPath: saveResult.actorInboxPath,
     summary: [
       `Harness session updated: ${session.session.id}`,
       `Action: ${params.action}`,
       `Outcome: ${transition.outcome}`,
-      `Current phase: ${session.session.currentPhase}`,
-      `Next actor: ${session.session.nextActor}`,
+      `Current phase: ${responseSession.session.currentPhase}`,
+      `Next actor: ${responseSession.session.nextActor}`,
       `Active artifact: ${activePhase?.artifactPath ?? "n/a"}`,
       `Session state: ${saveResult.sessionPath}`,
       `Session summary: ${saveResult.summaryPath}`,
+      `Work packet: ${saveResult.workPacketPath}`,
+      `Actor inbox: ${saveResult.actorInboxPath}`,
       "",
-      buildRoleBrief(session),
+      buildRoleBrief(responseSession),
     ].join("\n"),
   };
 }
@@ -1700,11 +4611,25 @@ export function getHarnessSessionStatus(
   workspacePath: string,
   requestedSessionId?: string
 ): HarnessRuntimeResult {
+  const runtimeIndex = loadRuntimeIndex(workspacePath);
   const sessionId = resolveSessionId(workspacePath, requestedSessionId);
   const session = loadSession(workspacePath, sessionId);
   const sessionPath = buildSessionStatePath(workspacePath, sessionId);
   const summaryPath = buildSessionSummaryPath(workspacePath, sessionId);
+  const workPacketPath = buildWorkPacketStatePath(workspacePath, sessionId);
+  const workPacketMarkdownPath = buildWorkPacketMarkdownPath(workspacePath, sessionId);
+  const actorInboxPath = buildActorInboxPath(
+    workspacePath,
+    session.session.nextActor,
+    sessionId
+  );
   const activePhase = activePhaseRecord(session);
+  const leaseStatus =
+    runtimeIndex.activeSessionId === sessionId
+      ? "active"
+      : runtimeIndex.queuedSessionIds.includes(sessionId)
+        ? "queued"
+        : "inactive";
 
   return {
     sessionId,
@@ -1713,20 +4638,862 @@ export function getHarnessSessionStatus(
     sessionPath: relativeToWorkspace(workspacePath, sessionPath),
     summaryPath: relativeToWorkspace(workspacePath, summaryPath),
     activeArtifactPath: activePhase?.artifactPath ?? null,
+    workPacketPath: relativeToWorkspace(workspacePath, workPacketPath),
+    workPacketMarkdownPath: relativeToWorkspace(workspacePath, workPacketMarkdownPath),
+    actorInboxPath: relativeToWorkspace(workspacePath, actorInboxPath),
     summary: [
       `Harness session: ${session.session.id}`,
       `Title: ${session.session.title}`,
       `Status: ${session.session.status}`,
+      `Lease status: ${leaseStatus}`,
       `Goal: ${session.session.goal}`,
       `Current phase: ${session.session.currentPhase}`,
       `Next actor: ${session.session.nextActor}`,
       `Chunk: ${session.chunk.id} (${session.chunk.title})`,
       `Context resets: ${session.context.resetCount}`,
+      `Queue depth: ${runtimeIndex.queuedSessionIds.length}`,
       `Verification: tests=${session.verification.testsStatus}, review=${session.verification.reviewStatus}, remediation=${session.verification.remediationStatus}`,
       `State file: ${relativeToWorkspace(workspacePath, sessionPath)}`,
       `Summary file: ${relativeToWorkspace(workspacePath, summaryPath)}`,
+      `Work packet: ${relativeToWorkspace(workspacePath, workPacketPath)}`,
+      `Actor inbox: ${relativeToWorkspace(workspacePath, actorInboxPath)}`,
       "",
       buildRoleBrief(session),
+    ].join("\n"),
+  };
+}
+
+export function listHarnessRuntimeAdapters(): HarnessRuntimeAdapterCatalogResult {
+  const adapters = HARNESS_RUNTIME_ADAPTERS.map((adapter) => ({
+    id: adapter.id,
+    title: adapter.title,
+    runtimeFamily: adapter.runtimeFamily,
+    handoffMode: adapter.handoffMode,
+    summary: adapter.summary,
+  }));
+
+  return {
+    adapters,
+    summary: [
+      "Available harness runtime adapters:",
+      ...HARNESS_RUNTIME_ADAPTERS.map(
+        (adapter) =>
+          `- ${adapter.id}: ${adapter.title} [${adapter.runtimeFamily} / ${adapter.handoffMode}] - ${adapter.summary}`
+      ),
+    ].join("\n"),
+  };
+}
+
+export function listHarnessExecutionBridges(): HarnessExecutionBridgeCatalogResult {
+  const bridges = HARNESS_EXECUTION_BRIDGES.map((bridge) => ({
+    id: bridge.id,
+    title: bridge.title,
+    runtimeFamily: bridge.runtimeFamily,
+    launchMode: bridge.launchMode,
+    summary: bridge.summary,
+  }));
+
+  return {
+    bridges,
+    summary: [
+      "Available harness execution bridges:",
+      ...HARNESS_EXECUTION_BRIDGES.map(
+        (bridge) =>
+          `- ${bridge.id}: ${bridge.title} [${bridge.runtimeFamily} / ${bridge.launchMode}] - ${bridge.summary}`
+      ),
+    ].join("\n"),
+  };
+}
+
+export function listHarnessNativeExecutors(): HarnessNativeExecutorCatalogResult {
+  const executors = HARNESS_NATIVE_EXECUTORS.map((executor) => {
+    const detected = detectNativeExecutor(executor);
+    return {
+      id: executor.id,
+      title: executor.title,
+      launchSupport: executor.launchSupport,
+      available:
+        executor.launchSupport === "native" ? detected.commandPath != null : false,
+      detectedCommandPath: detected.commandPath,
+      version: detected.version,
+      summary: executor.summary,
+    };
+  });
+
+  return {
+    executors,
+    summary: [
+      "Available native executor integrations:",
+      ...executors.map(
+        (executor) =>
+          `- ${executor.id}: ${executor.title} [${executor.launchSupport}] - available=${executor.available ? "yes" : "no"}${executor.detectedCommandPath != null ? ` | path=${executor.detectedCommandPath}` : ""}${executor.version != null ? ` | version=${executor.version}` : ""}`
+      ),
+    ].join("\n"),
+  };
+}
+
+export function prepareHarnessNativeExecutor(
+  workspacePath: string,
+  bridgeId: HarnessRuntimeAdapterId,
+  requestedSessionId?: string,
+  options?: {
+    executableOverride?: string;
+    argsOverride?: string[];
+  }
+): PrepareHarnessNativeExecutorResult {
+  const sessionId = resolveSessionId(workspacePath, requestedSessionId);
+  const session = loadSession(workspacePath, sessionId);
+  const bridge = getHarnessExecutionBridge(bridgeId);
+  const executor = getHarnessNativeExecutor(bridgeId);
+  const launchProfile = resolveNativeExecutorLaunchProfile(workspacePath, executor);
+  const adapterHandoff = prepareHarnessAdapterHandoff(
+    workspacePath,
+    bridge.adapterId,
+    sessionId
+  );
+  prepareHarnessExecutionBridge(workspacePath, bridgeId, sessionId);
+  const nativePaths = buildNativeExecutionPaths(workspacePath, sessionId, bridgeId);
+  const detected = detectNativeExecutor({
+    ...executor,
+    commandCandidates: launchProfile.commandCandidates,
+  });
+  const commandPath = options?.executableOverride?.trim() || detected.commandPath;
+  const handoffMarkdownRelativePath = adapterHandoff.handoffMarkdownPath;
+  const handoffMarkdownPath = path.join(workspacePath, handoffMarkdownRelativePath);
+  const actorInboxPath = buildActorInboxPath(
+    workspacePath,
+    session.session.nextActor,
+    sessionId
+  );
+  let args = options?.argsOverride?.length
+    ? options.argsOverride
+    : applyArgumentTemplate(launchProfile.defaultArgsTemplate, {
+        workspacePath,
+        handoffMarkdownPath,
+        handoffMarkdownRelativePath,
+        handoffInstruction: buildHandoffInstruction(handoffMarkdownRelativePath),
+        actorInboxPath,
+      });
+  if (
+    !options?.argsOverride?.length &&
+    bridgeId === "claude-code" &&
+    commandPath != null &&
+    path.basename(commandPath).toLowerCase().includes("claude-code")
+  ) {
+    args = ["--cwd", workspacePath, "--prompt-file", handoffMarkdownPath];
+  }
+  const available =
+    executor.launchSupport === "native"
+      ? commandPath != null && commandPath.trim().length > 0
+      : commandPath != null && commandPath.trim().length > 0;
+
+  const plan = {
+    schemaVersion: "1.0.0",
+    generatedAt: nowIso(),
+    sessionId,
+    bridgeId,
+    executor: {
+      id: executor.id,
+      title: executor.title,
+      launchSupport: executor.launchSupport,
+      summary: executor.summary,
+      commandCandidates: launchProfile.commandCandidates,
+      detectedCommandPath: detected.commandPath,
+      version: detected.version,
+    },
+    launch: {
+      available,
+      commandPath,
+      args,
+      cwd: workspacePath,
+      waitForExitRecommended: false,
+      stdoutLogFile: relativeToWorkspace(workspacePath, nativePaths.stdoutLogPath),
+      stderrLogFile: relativeToWorkspace(workspacePath, nativePaths.stderrLogPath),
+      stateFile: relativeToWorkspace(workspacePath, nativePaths.nativeExecutionStatePath),
+    },
+    sources: {
+      adapterHandoffMarkdownFile: adapterHandoff.handoffMarkdownPath,
+      bridgeManifestFile: relativeToWorkspace(
+        workspacePath,
+        buildExecutionBridgePaths(workspacePath, sessionId, bridgeId).bridgeManifestPath
+      ),
+    },
+  };
+
+  ensureDir(path.dirname(nativePaths.nativeExecutionPlanPath));
+  writeJson(nativePaths.nativeExecutionPlanPath, plan);
+  writeJson(nativePaths.nativeExecutionStatePath, {
+    schemaVersion: "1.0.0",
+    generatedAt: nowIso(),
+    activeSessionId: sessionId,
+    bridgeId,
+    status: "prepared",
+    launchMode: executor.launchSupport,
+    nativeExecutionPlanFile: relativeToWorkspace(
+      workspacePath,
+      nativePaths.nativeExecutionPlanPath
+    ),
+    nativeExecutionStateFile: relativeToWorkspace(
+      workspacePath,
+      nativePaths.nativeExecutionStatePath
+    ),
+    stdoutLogFile: relativeToWorkspace(workspacePath, nativePaths.stdoutLogPath),
+    stderrLogFile: relativeToWorkspace(workspacePath, nativePaths.stderrLogPath),
+    processId: null,
+    executablePath: commandPath ?? null,
+    summary: available
+      ? `${executor.title} is prepared for execution.`
+      : `${executor.title} requires installation or an explicit command override before launch.`,
+  });
+  writeJson(buildRuntimePaths(workspacePath).currentNativeExecutionPath, {
+    schemaVersion: "1.0.0",
+    generatedAt: nowIso(),
+    activeSessionId: sessionId,
+    bridgeId,
+    status: "prepared",
+    launchMode: executor.launchSupport,
+    nativeExecutionPlanFile: relativeToWorkspace(
+      workspacePath,
+      nativePaths.nativeExecutionPlanPath
+    ),
+    nativeExecutionStateFile: relativeToWorkspace(
+      workspacePath,
+      nativePaths.nativeExecutionStatePath
+    ),
+    stdoutLogFile: relativeToWorkspace(workspacePath, nativePaths.stdoutLogPath),
+    stderrLogFile: relativeToWorkspace(workspacePath, nativePaths.stderrLogPath),
+    processId: null,
+    executablePath: commandPath ?? null,
+    summary: available
+      ? `${executor.title} is prepared for execution.`
+      : `${executor.title} requires installation or an explicit command override before launch.`,
+  });
+
+  syncDashboardNativeExecution(
+    workspacePath,
+    session,
+    bridgeId,
+    relativeToWorkspace(workspacePath, nativePaths.nativeExecutionPlanPath),
+    relativeToWorkspace(workspacePath, nativePaths.nativeExecutionStatePath),
+    relativeToWorkspace(workspacePath, nativePaths.stdoutLogPath),
+    relativeToWorkspace(workspacePath, nativePaths.stderrLogPath)
+  );
+
+  return {
+    bridgeId,
+    sessionId,
+    available,
+    nativeExecutionPlanPath: relativeToWorkspace(
+      workspacePath,
+      nativePaths.nativeExecutionPlanPath
+    ),
+    nativeExecutionStatePath: relativeToWorkspace(
+      workspacePath,
+      nativePaths.nativeExecutionStatePath
+    ),
+    stdoutLogPath: relativeToWorkspace(workspacePath, nativePaths.stdoutLogPath),
+    stderrLogPath: relativeToWorkspace(workspacePath, nativePaths.stderrLogPath),
+    summary: [
+      `Native executor prepared: ${sessionId} -> ${executor.title}`,
+      `Available: ${available ? "yes" : "no"}`,
+      `Plan: ${relativeToWorkspace(workspacePath, nativePaths.nativeExecutionPlanPath)}`,
+      `State: ${relativeToWorkspace(workspacePath, nativePaths.nativeExecutionStatePath)}`,
+      `Stdout log: ${relativeToWorkspace(workspacePath, nativePaths.stdoutLogPath)}`,
+      `Stderr log: ${relativeToWorkspace(workspacePath, nativePaths.stderrLogPath)}`,
+    ].join("\n"),
+  };
+}
+
+export function launchHarnessNativeExecutor(
+  params: LaunchHarnessNativeExecutorParams
+): LaunchHarnessNativeExecutorResult {
+  const sessionId = resolveSessionId(params.workspacePath, params.sessionId);
+  const session = loadSession(params.workspacePath, sessionId);
+  const prepared = prepareHarnessNativeExecutor(
+    params.workspacePath,
+    params.bridgeId,
+    sessionId,
+    {
+      executableOverride: params.executableOverride,
+      argsOverride: params.argsOverride,
+    }
+  );
+  const executor = getHarnessNativeExecutor(params.bridgeId);
+  const nativePaths = buildNativeExecutionPaths(
+    params.workspacePath,
+    sessionId,
+    params.bridgeId
+  );
+  const plan = readJsonIfExists(nativePaths.nativeExecutionPlanPath) as Record<
+    string,
+    unknown
+  > | null;
+  if (plan == null) {
+    throw new Error("Native execution plan could not be loaded.");
+  }
+
+  const launch = isPlainObject(plan.launch) ? plan.launch : {};
+  const commandPath = String(launch.commandPath || "");
+  const args = Array.isArray(launch.args) ? launch.args.map((item) => String(item)) : [];
+  if (!commandPath) {
+    throw new Error(
+      `${executor.title} is not currently launchable. Install the runtime or pass executableOverride.`
+    );
+  }
+
+  if (params.dryRun === true) {
+    return {
+      bridgeId: params.bridgeId,
+      sessionId,
+      status: "dry-run",
+      nativeExecutionPlanPath: prepared.nativeExecutionPlanPath,
+      nativeExecutionStatePath: prepared.nativeExecutionStatePath,
+      stdoutLogPath: prepared.stdoutLogPath,
+      stderrLogPath: prepared.stderrLogPath,
+      summary: [
+        `Native executor dry run: ${executor.title}`,
+        `Command: ${commandPath}`,
+        `Args: ${args.join(" ")}`,
+        `Plan: ${prepared.nativeExecutionPlanPath}`,
+      ].join("\n"),
+    };
+  }
+
+  const env = {
+    ...process.env,
+    ...(params.env ?? {}),
+  } as Record<string, string>;
+
+  appendLogHeader(nativePaths.stdoutLogPath, [
+    `# ${nowIso()} | launch | ${executor.title}`,
+    `# command: ${commandPath} ${args.join(" ")}`,
+  ]);
+  appendLogHeader(nativePaths.stderrLogPath, [
+    `# ${nowIso()} | launch | ${executor.title}`,
+  ]);
+
+  if (params.waitForExit === true) {
+    const result = spawnSync(commandPath, args, {
+      cwd: params.workspacePath,
+      env,
+      encoding: "utf-8",
+      windowsHide: true,
+    });
+    fs.appendFileSync(
+      nativePaths.stdoutLogPath,
+      result.stdout ?? "",
+      "utf-8"
+    );
+    fs.appendFileSync(
+      nativePaths.stderrLogPath,
+      result.stderr ?? "",
+      "utf-8"
+    );
+
+    const status =
+      result.status === 0 && result.error == null ? "completed" : "failed";
+    const spawnError = result.error as NodeJS.ErrnoException | undefined;
+    const errorCode = spawnError?.code ?? null;
+    const errorMessage = spawnError?.message ?? null;
+    const state = {
+      schemaVersion: "1.0.0",
+      generatedAt: nowIso(),
+      activeSessionId: sessionId,
+      bridgeId: params.bridgeId,
+      status,
+      launchMode: "foreground",
+      nativeExecutionPlanFile: prepared.nativeExecutionPlanPath,
+      nativeExecutionStateFile: prepared.nativeExecutionStatePath,
+      stdoutLogFile: prepared.stdoutLogPath,
+      stderrLogFile: prepared.stderrLogPath,
+      processId: null,
+      executablePath: commandPath,
+      exitCode: result.status,
+      errorCode,
+      errorMessage,
+      summary:
+        status === "completed"
+          ? `${executor.title} completed in foreground mode.`
+          : `${executor.title} failed in foreground mode.${errorCode != null ? ` (${errorCode})` : ""}`,
+    };
+    writeJson(nativePaths.nativeExecutionStatePath, state);
+    writeJson(buildRuntimePaths(params.workspacePath).currentNativeExecutionPath, state);
+    syncDashboardNativeExecution(
+      params.workspacePath,
+      session,
+      params.bridgeId,
+      prepared.nativeExecutionPlanPath,
+      prepared.nativeExecutionStatePath,
+      prepared.stdoutLogPath,
+      prepared.stderrLogPath
+    );
+
+    return {
+      bridgeId: params.bridgeId,
+      sessionId,
+      status,
+      exitCode: result.status,
+      errorCode,
+      errorMessage,
+      nativeExecutionPlanPath: prepared.nativeExecutionPlanPath,
+      nativeExecutionStatePath: prepared.nativeExecutionStatePath,
+      stdoutLogPath: prepared.stdoutLogPath,
+      stderrLogPath: prepared.stderrLogPath,
+      summary: [
+        `Native executor launch finished: ${executor.title}`,
+        `Status: ${status}`,
+        `Exit code: ${String(result.status)}`,
+        `Error code: ${String(errorCode ?? "none")}`,
+        `State: ${prepared.nativeExecutionStatePath}`,
+      ].join("\n"),
+    };
+  }
+
+  const stdoutFd = fs.openSync(nativePaths.stdoutLogPath, "a");
+  const stderrFd = fs.openSync(nativePaths.stderrLogPath, "a");
+  const child = spawn(commandPath, args, {
+    cwd: params.workspacePath,
+    env,
+    detached: true,
+    windowsHide: true,
+    stdio: ["ignore", stdoutFd, stderrFd],
+  });
+  child.unref();
+  fs.closeSync(stdoutFd);
+  fs.closeSync(stderrFd);
+
+  const state = {
+    schemaVersion: "1.0.0",
+    generatedAt: nowIso(),
+    activeSessionId: sessionId,
+    bridgeId: params.bridgeId,
+    status: "launched",
+    launchMode: "background",
+    nativeExecutionPlanFile: prepared.nativeExecutionPlanPath,
+    nativeExecutionStateFile: prepared.nativeExecutionStatePath,
+    stdoutLogFile: prepared.stdoutLogPath,
+    stderrLogFile: prepared.stderrLogPath,
+    processId: child.pid ?? null,
+    executablePath: commandPath,
+    summary: `${executor.title} launched in background mode.`,
+  };
+  writeJson(nativePaths.nativeExecutionStatePath, state);
+  writeJson(buildRuntimePaths(params.workspacePath).currentNativeExecutionPath, state);
+  syncDashboardNativeExecution(
+    params.workspacePath,
+    session,
+    params.bridgeId,
+    prepared.nativeExecutionPlanPath,
+    prepared.nativeExecutionStatePath,
+    prepared.stdoutLogPath,
+    prepared.stderrLogPath
+  );
+
+  return {
+    bridgeId: params.bridgeId,
+    sessionId,
+    status: "launched",
+    processId: child.pid,
+    nativeExecutionPlanPath: prepared.nativeExecutionPlanPath,
+    nativeExecutionStatePath: prepared.nativeExecutionStatePath,
+    stdoutLogPath: prepared.stdoutLogPath,
+    stderrLogPath: prepared.stderrLogPath,
+    summary: [
+      `Native executor launched: ${executor.title}`,
+      `PID: ${String(child.pid ?? "unknown")}`,
+      `State: ${prepared.nativeExecutionStatePath}`,
+    ].join("\n"),
+  };
+}
+
+export function getHarnessNativeExecutionStatus(
+  workspacePath: string,
+  requestedSessionId?: string,
+  bridgeId?: HarnessRuntimeAdapterId
+): HarnessNativeExecutionStatusResult {
+  const paths = buildRuntimePaths(workspacePath);
+  let statePath = paths.currentNativeExecutionPath;
+
+  if (requestedSessionId != null && bridgeId != null) {
+    statePath = buildNativeExecutionPaths(
+      workspacePath,
+      requestedSessionId,
+      bridgeId
+    ).nativeExecutionStatePath;
+  }
+
+  const state = readJsonIfExists(statePath) as Record<string, unknown> | null;
+  if (state == null) {
+    throw new Error("Native execution state could not be loaded.");
+  }
+
+  const processId =
+    typeof state.processId === "number" ? state.processId : null;
+  let status = String(state.status || "unknown");
+  if (
+    processId != null &&
+    ["launched", "running"].includes(status) &&
+    !isProcessRunning(processId)
+  ) {
+    status = "exited";
+    state.status = status;
+    state.summary = `${String(state.bridgeId || "native executor")} exited without a recorded exit code.`;
+    writeJson(statePath, state);
+    if (statePath === paths.currentNativeExecutionPath) {
+      writeJson(paths.currentNativeExecutionPath, state);
+    }
+  }
+
+  return {
+    bridgeId: (state.bridgeId as HarnessRuntimeAdapterId | null) ?? null,
+    sessionId: (state.activeSessionId as string | null) ?? null,
+    status,
+    nativeExecutionStatePath: relativeToWorkspace(workspacePath, statePath),
+    errorCode: typeof state.errorCode === "string" ? state.errorCode : null,
+    errorMessage: typeof state.errorMessage === "string" ? state.errorMessage : null,
+    summary: [
+      `Native execution status: ${status}`,
+      `Session: ${String(state.activeSessionId || "none")}`,
+      `Bridge: ${String(state.bridgeId || "none")}`,
+      `Executable: ${String(state.executablePath || "n/a")}`,
+      `Process ID: ${String(state.processId ?? "n/a")}`,
+      `Error code: ${String(state.errorCode ?? "none")}`,
+      `State: ${relativeToWorkspace(workspacePath, statePath)}`,
+    ].join("\n"),
+  };
+}
+
+export function prepareHarnessWorkPacket(
+  workspacePath: string,
+  requestedSessionId?: string
+): HarnessRuntimeResult {
+  const runtimeIndex = loadRuntimeIndex(workspacePath);
+  const sessionId = resolveSessionId(workspacePath, requestedSessionId);
+  const session = loadSession(workspacePath, sessionId);
+  const packetPaths = writeWorkPacket(workspacePath, session, runtimeIndex);
+  if (runtimeIndex.activeSessionId == null) {
+    writeIdleWorkPacket(workspacePath, runtimeIndex);
+  }
+
+  const activePhase = activePhaseRecord(session);
+  const leaseStatus = resolveLeaseStatus(sessionId, runtimeIndex);
+
+  return {
+    sessionId,
+    currentPhase: session.session.currentPhase,
+    nextActor: session.session.nextActor,
+    sessionPath: relativeToWorkspace(workspacePath, buildSessionStatePath(workspacePath, sessionId)),
+    summaryPath: relativeToWorkspace(workspacePath, buildSessionSummaryPath(workspacePath, sessionId)),
+    activeArtifactPath: activePhase?.artifactPath ?? null,
+    workPacketPath: packetPaths.workPacketPath,
+    workPacketMarkdownPath: packetPaths.workPacketMarkdownPath,
+    actorInboxPath: packetPaths.actorInboxPath,
+    summary: [
+      `Harness work packet prepared: ${session.session.id}`,
+      `Lease status: ${leaseStatus}`,
+      `Current phase: ${session.session.currentPhase}`,
+      `Next actor: ${session.session.nextActor}`,
+      `Active artifact: ${activePhase?.artifactPath ?? "n/a"}`,
+      `Work packet: ${packetPaths.workPacketPath}`,
+      `Packet markdown: ${packetPaths.workPacketMarkdownPath}`,
+      `Actor inbox: ${packetPaths.actorInboxPath}`,
+      "",
+      buildRoleBrief(session),
+    ].join("\n"),
+  };
+}
+
+export function prepareHarnessExecutionBridge(
+  workspacePath: string,
+  bridgeId: HarnessRuntimeAdapterId,
+  requestedSessionId?: string
+): HarnessExecutionBridgeResult {
+  const runtimeIndex = loadRuntimeIndex(workspacePath);
+  const sessionId = resolveSessionId(workspacePath, requestedSessionId);
+  const session = loadSession(workspacePath, sessionId);
+  const bridge = getHarnessExecutionBridge(bridgeId);
+  const adapterHandoff = prepareHarnessAdapterHandoff(
+    workspacePath,
+    bridge.adapterId,
+    sessionId
+  );
+  const handoff = readJsonIfExists<Record<string, unknown>>(
+    path.join(workspacePath, adapterHandoff.handoffPath)
+  );
+  if (handoff == null) {
+    throw new Error(
+      `Adapter handoff for session "${sessionId}" and adapter "${bridge.adapterId}" could not be loaded.`
+    );
+  }
+
+  const executionPaths = buildExecutionBridgePaths(workspacePath, sessionId, bridgeId);
+  const handoffMarkdownRelativePath = adapterHandoff.handoffMarkdownPath;
+  const launchCommands = resolveBridgeCommands(workspacePath, bridge);
+  const replacements = {
+    workspacePath,
+    handoffMarkdownPath: adapterHandoff.handoffMarkdownPath,
+    handoffMarkdownRelativePath,
+    handoffInstruction: buildHandoffInstruction(handoffMarkdownRelativePath),
+    actorInboxPath: String(
+      (isPlainObject(handoff.fileReferences) ? handoff.fileReferences.actorInboxFile : "") || ""
+    ),
+    workPacketPath: String(
+      (isPlainObject(handoff.fileReferences) ? handoff.fileReferences.workPacketFile : "") || ""
+    ),
+  };
+  const manifest = {
+    schemaVersion: "1.0.0",
+    generatedAt: nowIso(),
+    bridgeId,
+    sessionId,
+    nextActor: session.session.nextActor,
+    currentPhase: session.session.currentPhase,
+    bridge: {
+      id: bridge.id,
+      title: bridge.title,
+      runtimeFamily: bridge.runtimeFamily,
+      launchMode: bridge.launchMode,
+      summary: bridge.summary,
+    },
+    handoff: {
+      handoffJsonFile: adapterHandoff.handoffPath,
+      handoffMarkdownFile: adapterHandoff.handoffMarkdownPath,
+      launchChecklistFile: adapterHandoff.checklistPath,
+      actorInboxFile: replacements.actorInboxPath,
+      workPacketFile: replacements.workPacketPath,
+    },
+    launchCommands: {
+      powershell: launchCommands.powershell.map((command) =>
+        applyBridgeTemplate(command, replacements)
+      ),
+      bash: launchCommands.bash.map((command) =>
+        applyBridgeTemplate(command, replacements)
+      ),
+    },
+    resultExpectations: bridge.resultExpectations,
+    resultTemplateFile: relativeToWorkspace(workspacePath, executionPaths.resultTemplatePath),
+    resultGuideFile: relativeToWorkspace(workspacePath, executionPaths.resultGuidePath),
+  };
+
+  ensureDir(executionPaths.bridgeDir);
+  writeJson(executionPaths.bridgeManifestPath, manifest);
+  fs.writeFileSync(
+    executionPaths.launchPowershellPath,
+    buildLaunchPowershell(manifest),
+    "utf-8"
+  );
+  fs.writeFileSync(
+    executionPaths.launchBashPath,
+    buildLaunchBash(manifest),
+    "utf-8"
+  );
+  writeJson(
+    executionPaths.resultTemplatePath,
+    buildExecutionResultTemplate(manifest)
+  );
+  fs.writeFileSync(
+    executionPaths.resultGuidePath,
+    buildExecutionBridgeGuide(manifest),
+    "utf-8"
+  );
+  if (runtimeIndex.activeSessionId === sessionId) {
+    writeJson(buildRuntimePaths(workspacePath).currentExecutionBridgePath, {
+      schemaVersion: "1.0.0",
+      generatedAt: nowIso(),
+      activeSessionId: sessionId,
+      bridgeId,
+      launchMode: bridge.launchMode,
+      bridgeManifestFile: relativeToWorkspace(
+        workspacePath,
+        executionPaths.bridgeManifestPath
+      ),
+      summary: `${bridge.title} is prepared for ${sessionId}.`,
+    });
+  }
+
+  syncDashboardExecutionBridge(
+    workspacePath,
+    session,
+    bridgeId,
+    relativeToWorkspace(workspacePath, executionPaths.bridgeManifestPath),
+    relativeToWorkspace(workspacePath, executionPaths.resultGuidePath)
+  );
+
+  return {
+    bridgeId,
+    sessionId,
+    bridgeManifestPath: relativeToWorkspace(
+      workspacePath,
+      executionPaths.bridgeManifestPath
+    ),
+    launchPowershellPath: relativeToWorkspace(
+      workspacePath,
+      executionPaths.launchPowershellPath
+    ),
+    launchBashPath: relativeToWorkspace(workspacePath, executionPaths.launchBashPath),
+    resultTemplatePath: relativeToWorkspace(
+      workspacePath,
+      executionPaths.resultTemplatePath
+    ),
+    resultGuidePath: relativeToWorkspace(workspacePath, executionPaths.resultGuidePath),
+    summary: [
+      `Harness execution bridge prepared: ${sessionId} -> ${bridge.title}`,
+      `Current phase: ${session.session.currentPhase}`,
+      `Next actor: ${session.session.nextActor}`,
+      `Bridge manifest: ${relativeToWorkspace(workspacePath, executionPaths.bridgeManifestPath)}`,
+      `PowerShell launcher: ${relativeToWorkspace(workspacePath, executionPaths.launchPowershellPath)}`,
+      `Bash launcher: ${relativeToWorkspace(workspacePath, executionPaths.launchBashPath)}`,
+      `Result template: ${relativeToWorkspace(workspacePath, executionPaths.resultTemplatePath)}`,
+    ].join("\n"),
+  };
+}
+
+export function prepareHarnessAdapterHandoff(
+  workspacePath: string,
+  adapterId: HarnessRuntimeAdapterId,
+  requestedSessionId?: string
+): HarnessAdapterHandoffResult {
+  const runtimeIndex = loadRuntimeIndex(workspacePath);
+  const adapter = getHarnessRuntimeAdapter(adapterId);
+  const sessionId = resolveSessionId(workspacePath, requestedSessionId);
+  const session = loadSession(workspacePath, sessionId);
+  const packetPaths = writeWorkPacket(workspacePath, session, runtimeIndex);
+  const handoffPaths = buildAdapterHandoffPaths(workspacePath, sessionId, adapterId);
+  const sessionPath = buildSessionStatePath(workspacePath, sessionId);
+  const summaryPath = buildSessionSummaryPath(workspacePath, sessionId);
+  const adapterProfilePath = buildAdapterProfilePath(workspacePath, adapterId);
+  const packet = readJsonIfExists<Record<string, unknown>>(
+    path.join(workspacePath, packetPaths.workPacketPath)
+  ) ?? {};
+  const handoff = {
+    schemaVersion: "1.0.0",
+    generatedAt: nowIso(),
+    adapterId,
+    sessionId,
+    leaseStatus: resolveLeaseStatus(sessionId, runtimeIndex),
+    nextActor: session.session.nextActor,
+    currentPhase: session.session.currentPhase,
+    nextAction: session.notes.current,
+    goal: session.session.goal,
+    chunkId: session.chunk.id,
+    chunkTitle: session.chunk.title,
+    adapter: {
+      id: adapter.id,
+      title: adapter.title,
+      runtimeFamily: adapter.runtimeFamily,
+      handoffMode: adapter.handoffMode,
+      summary: adapter.summary,
+    },
+    fileReferences: {
+      workPacketFile: packetPaths.workPacketPath,
+      workPacketMarkdownFile: packetPaths.workPacketMarkdownPath,
+      actorInboxFile: packetPaths.actorInboxPath,
+      sessionFile: relativeToWorkspace(workspacePath, sessionPath),
+      sessionSummaryFile: relativeToWorkspace(workspacePath, summaryPath),
+      rolePromptFile: rolePromptRelativePath(session.session.nextActor),
+      adapterProfileFile: relativeToWorkspace(workspacePath, adapterProfilePath),
+    },
+    operatorChecklist: adapter.operatorChecklist,
+    runtimeExpectations: adapter.runtimeExpectations,
+    packet,
+    promptBlock: buildAdapterPromptBlock(session, adapter, packet),
+  };
+
+  ensureDir(handoffPaths.handoffDir);
+  writeJson(handoffPaths.handoffPath, handoff);
+  fs.writeFileSync(
+    handoffPaths.handoffMarkdownPath,
+    buildAdapterHandoffMarkdown(handoff),
+    "utf-8"
+  );
+  fs.writeFileSync(
+    handoffPaths.checklistPath,
+    buildAdapterChecklistMarkdown(handoff),
+    "utf-8"
+  );
+
+  syncDashboardAdapterHandoff(
+    workspacePath,
+    session,
+    adapterId,
+    relativeToWorkspace(workspacePath, handoffPaths.handoffMarkdownPath),
+    relativeToWorkspace(workspacePath, handoffPaths.checklistPath)
+  );
+
+  return {
+    adapterId,
+    sessionId,
+    handoffPath: relativeToWorkspace(workspacePath, handoffPaths.handoffPath),
+    handoffMarkdownPath: relativeToWorkspace(
+      workspacePath,
+      handoffPaths.handoffMarkdownPath
+    ),
+    checklistPath: relativeToWorkspace(workspacePath, handoffPaths.checklistPath),
+    summary: [
+      `Harness adapter handoff prepared: ${sessionId} -> ${adapter.title}`,
+      `Lease status: ${resolveLeaseStatus(sessionId, runtimeIndex)}`,
+      `Current phase: ${session.session.currentPhase}`,
+      `Next actor: ${session.session.nextActor}`,
+      `Handoff JSON: ${relativeToWorkspace(workspacePath, handoffPaths.handoffPath)}`,
+      `Handoff Markdown: ${relativeToWorkspace(workspacePath, handoffPaths.handoffMarkdownPath)}`,
+      `Launch checklist: ${relativeToWorkspace(workspacePath, handoffPaths.checklistPath)}`,
+    ].join("\n"),
+  };
+}
+
+export function recordHarnessExecutionResult(
+  params: RecordHarnessExecutionResultParams
+): HarnessExecutionReceiptResult {
+  const sessionId = resolveSessionId(params.workspacePath, params.sessionId);
+  const session = loadSession(params.workspacePath, sessionId);
+  const bridge = getHarnessExecutionBridge(params.bridgeId);
+  const executionPaths = buildExecutionBridgePaths(
+    params.workspacePath,
+    sessionId,
+    params.bridgeId
+  );
+  ensureDir(executionPaths.bridgeDir);
+  const receipt = {
+    schemaVersion: "1.0.0",
+    recordedAt: nowIso(),
+    sessionId,
+    bridgeId: params.bridgeId,
+    outcome: params.outcome,
+    summary: params.summary,
+    artifactPaths: uniqueStrings(params.artifactPaths ?? []),
+    nextStep:
+      params.nextStep?.trim() ||
+      "Advance the governed session with the correct actor role and transition action.",
+  };
+
+  writeJson(executionPaths.receiptPath, receipt);
+  fs.writeFileSync(
+    executionPaths.receiptMarkdownPath,
+    buildExecutionReceiptMarkdown(receipt),
+    "utf-8"
+  );
+
+  syncDashboardExecutionReceipt(
+    params.workspacePath,
+    session,
+    params.bridgeId,
+    relativeToWorkspace(params.workspacePath, executionPaths.receiptPath),
+    relativeToWorkspace(params.workspacePath, executionPaths.receiptMarkdownPath)
+  );
+
+  return {
+    bridgeId: params.bridgeId,
+    sessionId,
+    receiptPath: relativeToWorkspace(params.workspacePath, executionPaths.receiptPath),
+    receiptMarkdownPath: relativeToWorkspace(
+      params.workspacePath,
+      executionPaths.receiptMarkdownPath
+    ),
+    summary: [
+      `Harness execution result recorded: ${sessionId} / ${bridge.title}`,
+      `Outcome: ${params.outcome}`,
+      `Receipt JSON: ${relativeToWorkspace(params.workspacePath, executionPaths.receiptPath)}`,
+      `Receipt Markdown: ${relativeToWorkspace(params.workspacePath, executionPaths.receiptMarkdownPath)}`,
     ].join("\n"),
   };
 }

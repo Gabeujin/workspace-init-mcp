@@ -26,3 +26,4 @@ export { generateHarnessFiles } from "./harness.js";
 export { generateDashboardFiles } from "./dashboard.js";
 export { generateDashboardOperationFiles } from "./dashboard-operations.js";
 export { generateRuntimeOrchestratorFiles } from "./runtime-orchestrator.js";
+export { generateReadinessFiles } from "./readiness.js";

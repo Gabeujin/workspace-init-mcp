@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { validateDashboardStateShape } from "./dashboard-state.js";
+import { validateHarnessRuntimeFiles } from "./harness-runtime.js";
 
 export interface ValidationItem {
   path: string;
@@ -77,6 +78,24 @@ const EXPECTED_FILES: Omit<ValidationItem, "status">[] = [
     severity: "required",
   },
   {
+    path: ".github/ai-harness/managed-file-inventory.json",
+    label: "Managed file inventory",
+    category: "governance",
+    severity: "recommended",
+  },
+  {
+    path: ".github/ai-harness/reconcile-policy.json",
+    label: "Reconcile policy",
+    category: "governance",
+    severity: "recommended",
+  },
+  {
+    path: ".github/ai-harness/native-executor-overrides.json",
+    label: "Native executor overrides",
+    category: "governance",
+    severity: "optional",
+  },
+  {
     path: ".github/ai-harness/operating-model.md",
     label: "AI harness operating model",
     category: "governance",
@@ -103,6 +122,30 @@ const EXPECTED_FILES: Omit<ValidationItem, "status">[] = [
   {
     path: "docs/ai-harness/adoption-paths.md",
     label: "DX/AX adoption playbook",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/readiness/README.md",
+    label: "Readiness guide",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/readiness/remaining-work-spec.md",
+    label: "Remaining work specification",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/readiness/scoring-model.md",
+    label: "Readiness scoring model",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/readiness/maturity-scorecard.template.json",
+    label: "Readiness scorecard template",
     category: "docs",
     severity: "recommended",
   },
@@ -185,6 +228,78 @@ const EXPECTED_FILES: Omit<ValidationItem, "status">[] = [
     severity: "recommended",
   },
   {
+    path: "docs/ai-harness/runtime/state/current-work-packet.json",
+    label: "Current runtime work packet snapshot",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/state/current-execution-bridge.json",
+    label: "Current execution bridge snapshot",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/state/current-native-execution.json",
+    label: "Current native execution snapshot",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/work-packets/README.md",
+    label: "Runtime work packet guide",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/inbox/README.md",
+    label: "Runtime inbox guide",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/adapters/README.md",
+    label: "Runtime adapters guide",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/adapter-handoffs/README.md",
+    label: "Runtime adapter handoff guide",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/bridges/README.md",
+    label: "Runtime execution bridges guide",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/execution-bridges/README.md",
+    label: "Execution bridge bundles guide",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/native-executors/README.md",
+    label: "Native executor integrations guide",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/archive/README.md",
+    label: "Runtime archive guide",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/runtime/archive/archive-index.json",
+    label: "Runtime archive index",
+    category: "docs",
+    severity: "recommended",
+  },
+  {
     path: "docs/ai-harness/dashboard/index.html",
     label: "Admin dashboard screen",
     category: "dashboard",
@@ -246,6 +361,20 @@ function inspectExpectedFile(
     }
   }
 
+  if (
+    expected.path === "docs/ai-harness/runtime/state/session-index.json" ||
+    expected.path === "docs/ai-harness/runtime/state/active-session.json" ||
+    expected.path === "docs/ai-harness/runtime/state/current-work-packet.json" ||
+    expected.path === "docs/ai-harness/runtime/state/current-execution-bridge.json" ||
+    expected.path === "docs/ai-harness/runtime/state/current-native-execution.json"
+  ) {
+    const validation = validateHarnessRuntimeFiles(workspacePath);
+    return {
+      ...expected,
+      status: validation.valid ? "present" : "outdated",
+    };
+  }
+
   return {
     ...expected,
     status: "present",
@@ -283,6 +412,20 @@ export function validateWorkspace(workspacePath: string): ValidationResult {
   if (outdated.some((item) => item.category === "dashboard")) {
     suggestions.push(
       "The dashboard state exists but is not valid against the strict dashboard shape. Refresh it with the generated dashboard operations script."
+    );
+  }
+
+  if (
+    outdated.some(
+      (item) =>
+        item.path === "docs/ai-harness/runtime/state/session-index.json" ||
+        item.path === "docs/ai-harness/runtime/state/active-session.json" ||
+        item.path === "docs/ai-harness/runtime/state/current-work-packet.json" ||
+        item.path === "docs/ai-harness/runtime/state/current-execution-bridge.json"
+    )
+  ) {
+    suggestions.push(
+      "Runtime orchestration state is present but invalid. Reconcile docs/ai-harness/runtime/state/*.json before continuing governed execution."
     );
   }
 

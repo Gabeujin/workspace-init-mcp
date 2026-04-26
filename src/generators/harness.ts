@@ -28,6 +28,14 @@ export function generateHarnessFiles(
       content: buildHarnessManifest(params, profile.id, domains),
     },
     {
+      relativePath: ".github/ai-harness/reconcile-policy.json",
+      content: buildReconcilePolicy(),
+    },
+    {
+      relativePath: ".github/ai-harness/native-executor-overrides.json",
+      content: buildNativeExecutorOverrides(),
+    },
+    {
       relativePath: ".github/ai-harness/operating-model.md",
       content: buildOperatingModel(params, profile.id, domains),
     },
@@ -72,6 +80,166 @@ export function generateHarnessFiles(
       content: buildPlansReadme(params),
     },
   ];
+}
+
+function buildReconcilePolicy(): string {
+  return `${JSON.stringify(
+    {
+      schemaVersion: "1.0.0",
+      generatedAt: "generated-at-runtime",
+      activePreset: "balanced",
+      defaults: {
+        managedJsonState: "merge",
+        managedFileRefresh: "replace",
+        modifiedManagedFile: "hold",
+      },
+      presets: {
+        conservative: {
+          description:
+            "Prefer manual review for drifted governed files while still allowing safe JSON state merges.",
+          defaults: {
+            managedJsonState: "merge",
+            managedFileRefresh: "hold",
+            modifiedManagedFile: "hold",
+          },
+        },
+        balanced: {
+          description:
+            "Refresh generated baselines, merge live JSON state, and hold customized governed files.",
+          defaults: {
+            managedJsonState: "merge",
+            managedFileRefresh: "replace",
+            modifiedManagedFile: "hold",
+          },
+        },
+        "refresh-heavy": {
+          description:
+            "Favor baseline refresh after an operator has reviewed preflight output and accepted stronger automation.",
+          defaults: {
+            managedJsonState: "merge",
+            managedFileRefresh: "replace",
+            modifiedManagedFile: "replace",
+          },
+        },
+      },
+      rules: [
+        {
+          id: "operating-model-hold",
+          matchType: "exact",
+          pattern: ".github/ai-harness/operating-model.md",
+          policy: "hold",
+          reason: "Operating model documents often carry approved local customizations and should not be auto-refreshed silently.",
+        },
+        {
+          id: "manifest-hold",
+          matchType: "exact",
+          pattern: ".github/ai-harness/harness-manifest.yaml",
+          policy: "hold",
+          reason: "Harness manifests can encode project-specific governance decisions that deserve manual review before replacement.",
+        },
+        {
+          id: "managed-inventory-replace",
+          matchType: "exact",
+          pattern: ".github/ai-harness/managed-file-inventory.json",
+          policy: "replace",
+          reason: "Managed inventory should refresh with the latest generated baseline when initialization evolves.",
+        },
+        {
+          id: "dashboard-state-merge",
+          matchType: "prefix",
+          pattern: "docs/ai-harness/dashboard/state/",
+          policy: "merge",
+          reason: "Dashboard state is live governed JSON and should be merged rather than replaced.",
+        },
+        {
+          id: "runtime-state-merge",
+          matchType: "prefix",
+          pattern: "docs/ai-harness/runtime/state/",
+          policy: "merge",
+          reason: "Runtime state is live session evidence and should be merged instead of blindly refreshed.",
+        },
+        {
+          id: "readiness-json-merge",
+          matchType: "glob",
+          pattern: "docs/ai-harness/readiness/*.json",
+          policy: "merge",
+          reason: "Readiness JSON is durable state and should be preserved through merge-oriented upgrades.",
+        },
+      ],
+      notes: [
+        "Policy values: replace, merge, hold.",
+        "Set activePreset to conservative, balanced, or refresh-heavy to change the default reconcile posture.",
+        "hold keeps drifted files in manual review even if overwriteManagedFiles is enabled.",
+        "merge is intended for JSON state ledgers and falls back to manual review if merging is unsafe.",
+      ],
+    },
+    null,
+    2
+  )}\n`;
+}
+
+function buildNativeExecutorOverrides(): string {
+  return `${JSON.stringify(
+    {
+      schemaVersion: "1.0.0",
+      generatedAt: "generated-at-runtime",
+      notes: [
+        "Use this file to tune bridge commands and native executor launch arguments for local CLI environments.",
+        "Leave arrays empty to keep the built-in safe defaults.",
+        "defaultArgsTemplate or powershell/bash replaces the built-in base command template.",
+        "prependArgsTemplate / appendArgsTemplate and prependPowerShell / appendPowerShell / prependBash / appendBash layer around the chosen base template.",
+        "Prefer workspace-relative prompt files and governed handoff instructions so runs stay reproducible.",
+      ],
+      executors: {
+        "codex-cli": {
+          commandCandidates: [],
+          defaultArgsTemplate: [],
+          prependArgsTemplate: [],
+          appendArgsTemplate: [],
+        },
+        "claude-code": {
+          commandCandidates: [],
+          defaultArgsTemplate: [],
+          prependArgsTemplate: [],
+          appendArgsTemplate: [],
+        },
+        "gemini-cli": {
+          commandCandidates: [],
+          defaultArgsTemplate: [],
+          prependArgsTemplate: [],
+          appendArgsTemplate: [],
+        },
+      },
+      bridges: {
+        "codex-cli": {
+          powershell: [],
+          bash: [],
+          prependPowershell: [],
+          appendPowershell: [],
+          prependBash: [],
+          appendBash: [],
+        },
+        "claude-code": {
+          powershell: [],
+          bash: [],
+          prependPowershell: [],
+          appendPowershell: [],
+          prependBash: [],
+          appendBash: [],
+        },
+        "gemini-cli": {
+          powershell: [],
+          bash: [],
+          prependPowershell: [],
+          appendPowershell: [],
+          prependBash: [],
+          appendBash: [],
+        },
+      },
+    },
+    null,
+    2
+  )}\n`;
 }
 
 function buildHarnessManifest(
@@ -138,6 +306,9 @@ function buildHarnessManifest(
     "core_artifacts:",
     "  mission_control: .github/ai-harness/operating-model.md",
     "  policy: .github/ai-harness/harness-manifest.yaml",
+    "  managed_inventory: .github/ai-harness/managed-file-inventory.json",
+    "  reconcile_policy: .github/ai-harness/reconcile-policy.json",
+    "  native_executor_overrides: .github/ai-harness/native-executor-overrides.json",
     "  context_strategy: .github/ai-harness/context-strategy.md",
     "  evaluation_rubrics: .github/ai-harness/evaluation-rubrics.md",
     "  context: docs/context/",
@@ -337,6 +508,9 @@ This directory family defines how AI work is governed for **${params.workspaceNa
 ## Core Files
 
 - \`.github/ai-harness/harness-manifest.yaml\`: execution policy and review loop
+- \`.github/ai-harness/managed-file-inventory.json\`: managed baseline used for safer reconcile and upgrade audits
+- \`.github/ai-harness/reconcile-policy.json\`: file-level reconcile policy for hold / merge / replace decisions
+- \`.github/ai-harness/native-executor-overrides.json\`: vendor-specific CLI launch overrides for Codex CLI, Claude Code, Gemini CLI, and future executor tuning
 - \`.github/ai-harness/operating-model.md\`: how humans and AI should operate
 - \`.github/ai-harness/context-strategy.md\`: when to compact vs reset context
 - \`.github/ai-harness/evaluation-rubrics.md\`: explicit grading criteria and quality thresholds

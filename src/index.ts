@@ -1,7 +1,7 @@
 ﻿#!/usr/bin/env node
 
 /**
- * workspace-init-mcp MCP Server v4.0.1
+ * workspace-init-mcp MCP Server v4.1.0
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -26,9 +26,36 @@ import { buildInitFormSchema } from "./tools/form-schema.js";
 import { validateWorkspace } from "./tools/validate.js";
 import { analyzeWorkspace } from "./tools/status.js";
 import {
+  exportReconcilePreflightReport,
+  reconcileWorkspaceInitialization,
+  restoreReconcileBackup,
+} from "./tools/reconcile.js";
+import {
+  auditWorkspaceManagedSemanticDiff,
+  auditWorkspaceUpgradeRisk,
+} from "./tools/managed-inventory.js";
+import {
+  assessWorkspaceReadiness,
+  auditWorkspaceReadinessSemantics,
+} from "./tools/readiness.js";
+import {
+  HARNESS_RUNTIME_ADAPTER_IDS,
   startHarnessSession,
   advanceHarnessSession,
   getHarnessSessionStatus,
+  activateHarnessSession,
+  auditHarnessRuntime,
+  listHarnessRuntimeAdapters,
+  listHarnessExecutionBridges,
+  listHarnessNativeExecutors,
+  prepareHarnessWorkPacket,
+  prepareHarnessAdapterHandoff,
+  prepareHarnessExecutionBridge,
+  prepareHarnessNativeExecutor,
+  launchHarnessNativeExecutor,
+  getHarnessNativeExecutionStatus,
+  recordHarnessExecutionResult,
+  compactHarnessRuntime,
 } from "./tools/harness-runtime.js";
 import {
   buildWorkspaceInitMessages,
@@ -215,13 +242,73 @@ const InitializeWorkspaceInputSchema = BaseWorkspaceInputSchema.extend({
     ),
 });
 
+const ReconcileWorkspaceInputSchema = BaseWorkspaceInputSchema.partial().extend({
+  workspacePath: z
+    .string()
+    .describe("Absolute path to the workspace root directory"),
+  applyChanges: z
+    .boolean()
+    .optional()
+    .describe(
+      "If true, apply the reconcile plan. If false (default), run a dry run and only report planned changes."
+    ),
+  archiveManagedFiles: z
+    .boolean()
+    .optional()
+    .describe(
+      "If true (default), archive replaced managed files under docs/ai-harness/migrations/ before refreshing them."
+    ),
+  importLegacyAgentResources: z
+    .boolean()
+    .optional()
+    .describe(
+      "If true (default), copy legacy skill and agent resources from old IDE-specific roots into canonical .github paths when missing."
+    ),
+  overwriteManagedFiles: z
+    .boolean()
+    .optional()
+    .describe(
+      "If true (default), refresh managed generated files to the latest version. If false, changed managed files are left for manual review."
+    ),
+  overwriteModifiedManagedFiles: z
+    .boolean()
+    .optional()
+    .describe(
+      "If true, allow reconcile to refresh managed files even when the managed inventory shows they were customized after initialization. Default: false."
+    ),
+  writeMigrationReport: z
+    .boolean()
+    .optional()
+    .describe(
+      "If true (default), write a durable reconcile report under docs/ai-harness/migrations/."
+    ),
+  writeSemanticDiffReport: z
+    .boolean()
+    .optional()
+    .describe(
+      "If true, also write a managed semantic diff report under docs/ai-harness/migrations/. Defaults to the reconcile-report behavior."
+    ),
+  requireCleanGitWhenPresent: z
+    .boolean()
+    .optional()
+    .describe(
+      "If true, refuse to apply reconcile when a git repository is present and the working tree is not clean."
+    ),
+  requireZeroManualReviewItemsForApply: z
+    .boolean()
+    .optional()
+    .describe(
+      "If true, block applyChanges whenever reconcile still finds manual-review items such as customized managed files."
+    ),
+});
+
 // ---------------------------------------------------------------------------
 // Server setup
 // ---------------------------------------------------------------------------
 
 const server = new McpServer({
   name: "workspace-init-mcp",
-  version: "4.0.1",
+  version: "4.1.0",
 });
 
 // ---------------------------------------------------------------------------
@@ -238,6 +325,10 @@ This tool creates a complete workspace setup including:
 - .github/copilot-instructions.md (global Copilot instructions)
 - .github/skills/ (Agent Skills - SKILL.md files per the agentskills.io standard)
 - .github/agents/ (Agent definitions - .agent.md files)
+- .github/ai-harness/managed-file-inventory.json (managed baseline for safer future upgrades and reconcile audits)
+- .github/ai-harness/reconcile-policy.json (file-level reconcile safety policy for hold / merge / replace decisions)
+- .github/ai-harness/native-executor-overrides.json (workspace-local launch tuning for Codex CLI, Claude Code, Gemini CLI, and similar runtimes)
+- docs/ai-harness/readiness/ (remaining-work spec, scoring model, and readiness scorecard template)
 - docs/ai-harness/dashboard/ (JSON-first admin dashboard with progress, KPI, issue, and git visibility)
 - docs/ai-harness/runtime/ (planner / generator / evaluator runtime state, prompts, and session ledgers)
 - docs/ai-harness/dashboard/scripts/dashboard-ops.mjs (dashboard refresh, strict validation, local preview server, and static export)
@@ -337,6 +428,238 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
       const msg = err instanceof Error ? err.message : String(err);
       return {
         content: [{ type: "text" as const, text: `Initialization failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: reconcile_workspace_initialization
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "reconcile_workspace_initialization",
+  {
+    title: "Reconcile Workspace Initialization",
+    description: `Upgrade an existing workspace to the latest workspace-init-mcp structure without discarding existing governed work.
+
+Use this when:
+- a legacy project needs the latest DX/AX harness architecture
+- an older workspace-init-mcp setup should be brought forward to the newest structure
+- real development has already happened and the workspace needs missing runtime, dashboard, readiness, or governance layers filled in safely
+
+This tool:
+- analyzes the existing repository and resolves a best-effort latest configuration
+- consults the managed file inventory when present so customized managed files can be held for manual review
+- writes missing latest-version files
+- merges live governed JSON state such as dashboard and runtime snapshots
+- refreshes managed generated files to the latest templates
+- archives replaced managed files under docs/ai-harness/migrations/
+- imports legacy skill and agent resources from older IDE-specific roots into canonical .github paths when missing
+
+By default this tool runs in dry-run mode. Set applyChanges: true after reviewing the plan when you are ready to modify the workspace.
+For safer upgrades, prefer requireCleanGitWhenPresent: true, keep overwriteModifiedManagedFiles: false unless you have reviewed the diff, enable requireZeroManualReviewItemsForApply when legacy safety matters most, and use restore_reconcile_backup if a managed-file refresh must be rolled back.`,
+    inputSchema: ReconcileWorkspaceInputSchema,
+  },
+  async (params) => {
+    try {
+      const result = reconcileWorkspaceInitialization({
+        workspaceName: params.workspaceName,
+        purpose: params.purpose,
+        workspacePath: params.workspacePath,
+        projectType: params.projectType as WorkspaceInitParams["projectType"],
+        techStack: params.techStack,
+        docLanguage: params.docLanguage,
+        codeCommentLanguage: params.codeCommentLanguage,
+        isMultiRepo: params.isMultiRepo,
+        additionalContext: params.additionalContext,
+        plannedTasks: params.plannedTasks,
+        includeAgentSkills: params.includeAgentSkills,
+        agentSkillsIntent: params.agentSkillsIntent,
+        includeHarnessEngineering: params.includeHarnessEngineering,
+        harnessProfile: params.harnessProfile,
+        governanceProfile: params.governanceProfile,
+        autonomyMode: params.autonomyMode,
+        tokenBudget: params.tokenBudget,
+        primaryDomains: params.primaryDomains,
+        fileEncoding: params.fileEncoding as WorkspaceInitParams["fileEncoding"],
+        targetIDEs: params.targetIDEs as WorkspaceInitParams["targetIDEs"],
+        lineEnding: params.lineEnding as WorkspaceInitParams["lineEnding"],
+        applyChanges: params.applyChanges,
+        archiveManagedFiles: params.archiveManagedFiles,
+        importLegacyAgentResources: params.importLegacyAgentResources,
+        overwriteManagedFiles: params.overwriteManagedFiles,
+        overwriteModifiedManagedFiles: params.overwriteModifiedManagedFiles,
+        writeMigrationReport: params.writeMigrationReport,
+        writeSemanticDiffReport: params.writeSemanticDiffReport,
+        requireCleanGitWhenPresent: params.requireCleanGitWhenPresent,
+        requireZeroManualReviewItemsForApply:
+          params.requireZeroManualReviewItemsForApply,
+      });
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Workspace reconcile failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: audit_workspace_upgrade_risk
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "audit_workspace_upgrade_risk",
+  {
+    title: "Audit Workspace Upgrade Risk",
+    description: `Audit a workspace before reconcile or legacy adoption to estimate upgrade risk.
+
+This tool:
+- inspects the managed file inventory when present
+- detects managed files that appear customized after initialization
+- reports missing managed artifacts, legacy IDE resource roots, and git cleanliness
+- recommends safe reconcile flags before applyChanges is considered
+
+Use this before large upgrades, legacy-project onboarding, or any reconcile run where safety matters more than speed.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = auditWorkspaceUpgradeRisk(params.workspacePath);
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Workspace upgrade risk audit failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: audit_workspace_managed_semantic_diff
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "audit_workspace_managed_semantic_diff",
+  {
+    title: "Audit Workspace Managed Semantic Diff",
+    description: `Generate a semantic diff between the managed baseline inventory and the current workspace state.
+
+This tool:
+- classifies managed files as unchanged, customized, missing, merge-unchanged, or merge-diverged
+- makes customized governed files easier to review before reconcile apply runs
+- can write durable JSON and Markdown reports under docs/ai-harness/migrations/
+
+Use this when you want a more readable preflight view of managed-file drift before upgrade work.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      writeReport: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, write a durable semantic diff report under docs/ai-harness/migrations/."
+        ),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = auditWorkspaceManagedSemanticDiff(
+        params.workspacePath,
+        params.writeReport ?? false
+      );
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Workspace managed semantic diff failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: export_reconcile_preflight_report
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "export_reconcile_preflight_report",
+  {
+    title: "Export Reconcile Preflight Report",
+    description: `Export a stakeholder-readable reconcile preflight report before a legacy upgrade or reconcile apply run.
+
+This tool:
+- runs the upgrade risk audit
+- captures the managed semantic diff snapshot
+- embeds a no-write dry-run reconcile plan
+- writes JSON, Markdown, and HTML reports under docs/ai-harness/migrations/
+- creates latest-report pointers so operators can share the newest preflight snapshot quickly
+
+Use this when you want a durable preflight artifact before touching a legacy or already-customized workspace.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = exportReconcilePreflightReport(params.workspacePath);
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Reconcile preflight export failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: restore_reconcile_backup
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "restore_reconcile_backup",
+  {
+    title: "Restore Reconcile Backup",
+    description: `Restore managed files from the latest or requested reconcile backup report.
+
+Use this when a reconcile apply run needs to be rolled back from the backups stored under docs/ai-harness/migrations/.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      reportJsonPath: z
+        .string()
+        .optional()
+        .describe("Optional workspace-relative or absolute path to a reconcile-report.json file. Defaults to the latest reconcile report."),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = restoreReconcileBackup(
+        params.workspacePath,
+        params.reportJsonPath
+      );
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Reconcile restore failed: ${msg}` }],
         isError: true,
       };
     }
@@ -538,6 +861,112 @@ Checks for the presence of all expected files (.github/copilot-instructions.md,
 );
 
 // ---------------------------------------------------------------------------
+// Tool: assess_workspace_readiness
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "assess_workspace_readiness",
+  {
+    title: "Assess Workspace Readiness",
+    description: `Assess how operationally ready an initialized workspace is against the generated readiness model.
+
+This tool scores the workspace across:
+- baseline initialization
+- governance and documentation
+- runtime orchestration
+- dashboard and stakeholder visibility
+- external runtime portability
+- quality and traceability
+- domain tailoring
+
+Use it after initialization, after major harness upgrades, or before handing the workspace to a broader team. Optionally write a machine-readable scorecard back into docs/ai-harness/readiness/.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      writeScorecard: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, write docs/ai-harness/readiness/maturity-scorecard.json with the assessment result"
+        ),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = assessWorkspaceReadiness(
+        params.workspacePath,
+        params.writeScorecard
+      );
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Workspace readiness assessment failed: ${msg}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: audit_workspace_readiness_semantics
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "audit_workspace_readiness_semantics",
+  {
+    title: "Audit Workspace Readiness Semantics",
+    description: `Audit whether an initialized workspace looks operationally real, not only structurally complete.
+
+This audit focuses on semantic signals such as:
+- placeholder pressure in core files
+- whether governance ledgers contain project-specific evidence
+- whether the dashboard looks populated with real signals
+- whether runtime handoffs and bridge evidence exist
+- whether version-control and documentary traceability are active
+
+Use it when you want a conservative operator-style judgment instead of a file-existence score alone.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      writeReport: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, write docs/ai-harness/readiness/semantic-audit.json with the audit result"
+        ),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = auditWorkspaceReadinessSemantics(
+        params.workspacePath,
+        params.writeReport
+      );
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Workspace readiness semantic audit failed: ${msg}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
 // Tool: start_harness_session
 // ---------------------------------------------------------------------------
 
@@ -585,10 +1014,14 @@ Use this before meaningful implementation begins. The session is file-system-bas
         .enum(["balanced", "prefer-reset", "prefer-compaction"])
         .optional()
         .describe('Context handling preference for long-running work. Default: "balanced".'),
+      queueIfBusy: z
+        .boolean()
+        .optional()
+        .describe("If true (default), create a queued governed session when another session already holds the active lease."),
       force: z
         .boolean()
         .optional()
-        .describe("If true, allow replacing the active session pointer when the previous active session is already closed."),
+        .describe("Reserved for stale-index recovery. Open governed sessions are never replaced automatically."),
     }),
   },
   async (params) => {
@@ -602,6 +1035,7 @@ Use this before meaningful implementation begins. The session is file-system-bas
         chunkTitle: params.chunkTitle,
         adoptionTrack: params.adoptionTrack,
         contextPolicy: params.contextPolicy,
+        queueIfBusy: params.queueIfBusy,
         force: params.force,
       });
       return { content: [{ type: "text" as const, text: result.summary }] };
@@ -714,6 +1148,594 @@ Use this when:
       const msg = err instanceof Error ? err.message : String(err);
       return {
         content: [{ type: "text" as const, text: `Failed to read harness session status: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: activate_harness_session
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "activate_harness_session",
+  {
+    title: "Activate Harness Session",
+    description: `Move the single active runtime lease to a queued, blocked, or otherwise resumable harness session.
+
+Use this when:
+- multiple governed sessions exist and the team wants to change focus
+- the current active lease is blocked and another session should proceed
+- a queued session is ready to become the main execution thread
+
+By default the MCP refuses to steal the lease from a still-active session unless force is true.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      sessionId: z
+        .string()
+        .describe("Session ID to activate as the current execution lease"),
+      reason: z
+        .string()
+        .optional()
+        .describe("Optional note explaining why execution focus is moving to this session"),
+      force: z
+        .boolean()
+        .optional()
+        .describe("If true, allow moving the lease away from a non-closed active session"),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = activateHarnessSession(
+        params.workspacePath,
+        params.sessionId,
+        params.reason,
+        params.force
+      );
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to activate harness session: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: audit_harness_runtime
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "audit_harness_runtime",
+  {
+    title: "Audit Harness Runtime",
+    description: `Audit the governed runtime ledgers under docs/ai-harness/runtime/.
+
+This audit checks:
+- session-index.json and active-session.json shape
+- lease metadata, queue depth, and active-session consistency
+- missing or mismatched session files
+- orphan session files not referenced by the index
+
+Use this before long pauses, handovers, or release checkpoints when you want strong confidence that the runtime ledger is still trustworthy.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = auditHarnessRuntime(params.workspacePath);
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to audit harness runtime: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: compact_harness_runtime
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "compact_harness_runtime",
+  {
+    title: "Compact Harness Runtime",
+    description: `Archive older closed runtime sessions into durable archive bundles so the active runtime ledgers stay readable.
+
+This tool:
+- keeps the newest closed sessions active in session-index.json
+- moves older closed session files into docs/ai-harness/runtime/archive/
+- writes an archive bundle and archive summary
+- removes archived sessions from the main dashboard session ledgers while preserving archive artifacts
+
+Use it when governed runtime history grows large and operators need a lighter day-to-day control surface.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      keepRecentClosed: z
+        .number()
+        .optional()
+        .describe(
+          "How many of the newest closed sessions should remain in the active runtime ledger. Default: 10"
+        ),
+      maxArchiveSessions: z
+        .number()
+        .optional()
+        .describe(
+          "Maximum number of closed sessions to compact in one run. Default: 25"
+        ),
+      reason: z
+        .string()
+        .optional()
+        .describe("Optional durable reason for the compaction run"),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = compactHarnessRuntime({
+        workspacePath: params.workspacePath,
+        keepRecentClosed: params.keepRecentClosed,
+        maxArchiveSessions: params.maxArchiveSessions,
+        reason: params.reason,
+      });
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to compact harness runtime: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: prepare_harness_work_packet
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "prepare_harness_work_packet",
+  {
+    title: "Prepare Harness Work Packet",
+    description: `Regenerate the durable work packet and actor inbox files for a governed runtime session.
+
+Use this when:
+- a fresh AI session needs a clean, file-based handoff packet
+- another IDE or runtime should pick up the next planner / generator / evaluator task
+- runtime notes, artifacts, or queue state changed and the packet should be refreshed explicitly
+
+The MCP also refreshes work packets automatically during session changes, but this tool gives operators an explicit way to rebuild them on demand.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      sessionId: z
+        .string()
+        .optional()
+        .describe("Optional session ID. If omitted, the MCP uses the active runtime session."),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = prepareHarnessWorkPacket(
+        params.workspacePath,
+        params.sessionId
+      );
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to prepare harness work packet: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: list_harness_runtime_adapters
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "list_harness_runtime_adapters",
+  {
+    title: "List Harness Runtime Adapters",
+    description: `List the supported runtime adapters that can consume governed harness work packets.
+
+Use this when:
+- an operator needs to choose between Codex CLI, Claude Code, Gemini CLI, generic CLI adapters, OpenHands, or a generic file-based runtime
+- you want to understand the handoff style before generating a runtime bundle
+- different stakeholders need different AI execution environments for the same governed session`,
+    inputSchema: z.object({}),
+  },
+  async () => {
+    try {
+      const result = listHarnessRuntimeAdapters();
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to list harness runtime adapters: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: prepare_harness_adapter_handoff
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "prepare_harness_adapter_handoff",
+  {
+    title: "Prepare Harness Adapter Handoff",
+    description: `Generate a runtime-specific handoff bundle for a governed harness session.
+
+This tool:
+- refreshes the durable work packet if needed
+- maps the governed session into a runtime-specific adapter bundle
+- writes portable handoff files under docs/ai-harness/runtime/adapter-handoffs/
+- gives operators a clean artifact set to pass to Codex CLI, Claude Code, Gemini CLI, generic CLI adapters, OpenHands, or a generic external runtime
+
+Use this whenever a governed session should continue in a concrete execution environment.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      adapterId: z
+        .enum(HARNESS_RUNTIME_ADAPTER_IDS)
+        .describe("Runtime adapter to prepare for the governed session"),
+      sessionId: z
+        .string()
+        .optional()
+        .describe("Optional session ID. If omitted, the MCP uses the active runtime session."),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = prepareHarnessAdapterHandoff(
+        params.workspacePath,
+        params.adapterId,
+        params.sessionId
+      );
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to prepare harness adapter handoff: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: list_harness_execution_bridges
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "list_harness_execution_bridges",
+  {
+    title: "List Harness Execution Bridges",
+    description: `List the concrete execution bridges that turn adapter handoffs into launch bundles and governed result receipts.`,
+    inputSchema: z.object({}),
+  },
+  async () => {
+    try {
+      const result = listHarnessExecutionBridges();
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to list harness execution bridges: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: list_harness_native_executors
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "list_harness_native_executors",
+  {
+    title: "List Harness Native Executors",
+    description: `List the directly launchable native executor integrations and report what is locally detectable on this machine.`,
+    inputSchema: z.object({}),
+  },
+  async () => {
+    try {
+      const result = listHarnessNativeExecutors();
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to list harness native executors: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: prepare_harness_native_executor
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "prepare_harness_native_executor",
+  {
+    title: "Prepare Harness Native Executor",
+    description: `Build the governed native execution plan, state file, and log targets for a supported runtime executor.
+
+Use this after preparing an execution bridge when you want a directly launchable command plan for Codex CLI, Claude Code, Gemini CLI, generic CLI adapters, OpenHands, or a portable file-based runtime.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      bridgeId: z
+        .enum(HARNESS_RUNTIME_ADAPTER_IDS)
+        .describe("Native executor / bridge ID to prepare"),
+      sessionId: z
+        .string()
+        .optional()
+        .describe("Optional session ID. If omitted, the MCP uses the active runtime session."),
+      executableOverride: z
+        .string()
+        .optional()
+        .describe("Optional explicit executable path to use instead of auto-detection."),
+      argsOverride: z
+        .array(z.string())
+        .optional()
+        .describe("Optional explicit argument list for the native executor launch plan."),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = prepareHarnessNativeExecutor(
+        params.workspacePath,
+        params.bridgeId,
+        params.sessionId,
+        {
+          executableOverride: params.executableOverride,
+          argsOverride: params.argsOverride,
+        }
+      );
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to prepare harness native executor: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: launch_harness_native_executor
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "launch_harness_native_executor",
+  {
+    title: "Launch Harness Native Executor",
+    description: `Launch a supported native executor from the governed workspace and record its direct execution state.
+
+Use foreground mode when you want an immediate result in the current tool call. Use background mode when an operator will supervise the run through the generated logs and status files.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      bridgeId: z
+        .enum(HARNESS_RUNTIME_ADAPTER_IDS)
+        .describe("Native executor / bridge ID to launch"),
+      sessionId: z
+        .string()
+        .optional()
+        .describe("Optional session ID. If omitted, the MCP uses the active runtime session."),
+      executableOverride: z
+        .string()
+        .optional()
+        .describe("Optional explicit executable path to use instead of auto-detection."),
+      argsOverride: z
+        .array(z.string())
+        .optional()
+        .describe("Optional explicit argument list for the native executor launch."),
+      waitForExit: z
+        .boolean()
+        .optional()
+        .describe("If true, run in foreground and wait for completion."),
+      dryRun: z
+        .boolean()
+        .optional()
+        .describe("If true, do not launch. Return the resolved command plan only."),
+      env: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe("Optional environment variable overrides for the native executor process."),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = launchHarnessNativeExecutor({
+        workspacePath: params.workspacePath,
+        bridgeId: params.bridgeId,
+        sessionId: params.sessionId,
+        executableOverride: params.executableOverride,
+        argsOverride: params.argsOverride,
+        waitForExit: params.waitForExit,
+        dryRun: params.dryRun,
+        env: params.env,
+      });
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to launch harness native executor: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: get_harness_native_execution_status
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "get_harness_native_execution_status",
+  {
+    title: "Get Harness Native Execution Status",
+    description: `Read the current or session-specific native executor state snapshot for a governed runtime.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      sessionId: z
+        .string()
+        .optional()
+        .describe("Optional session ID for session-specific state lookup."),
+      bridgeId: z
+        .enum(HARNESS_RUNTIME_ADAPTER_IDS)
+        .optional()
+        .describe("Optional bridge ID. Provide this with sessionId for session-specific state lookup."),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = getHarnessNativeExecutionStatus(
+        params.workspacePath,
+        params.sessionId,
+        params.bridgeId
+      );
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to read harness native execution status: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: prepare_harness_execution_bridge
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "prepare_harness_execution_bridge",
+  {
+    title: "Prepare Harness Execution Bridge",
+    description: `Generate a launch-ready execution bridge bundle for a governed harness session.
+
+This tool writes:
+- a bridge manifest
+- PowerShell and bash launch helper scripts
+- a result template
+- a governance return guide
+
+Use it after preparing an adapter handoff when the session is about to continue in a specific runtime.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      bridgeId: z
+        .enum(HARNESS_RUNTIME_ADAPTER_IDS)
+        .describe("Execution bridge to prepare for the governed session"),
+      sessionId: z
+        .string()
+        .optional()
+        .describe("Optional session ID. If omitted, the MCP uses the active runtime session."),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = prepareHarnessExecutionBridge(
+        params.workspacePath,
+        params.bridgeId,
+        params.sessionId
+      );
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to prepare harness execution bridge: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: record_harness_execution_result
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "record_harness_execution_result",
+  {
+    title: "Record Harness Execution Result",
+    description: `Record the result of an external runtime execution as a governed receipt.
+
+Use this after a Codex CLI, Claude Code, Gemini CLI, generic CLI runtime, OpenHands, or another external runtime finishes its launch bundle work. The receipt does not advance the governed state machine by itself, but it gives the next planner / generator / evaluator step a durable artifact to review.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      bridgeId: z
+        .enum(HARNESS_RUNTIME_ADAPTER_IDS)
+        .describe("Execution bridge that produced the external runtime result"),
+      sessionId: z
+        .string()
+        .optional()
+        .describe("Optional session ID. If omitted, the MCP uses the active runtime session."),
+      outcome: z
+        .enum(["completed", "needs-review", "blocked", "failed"])
+        .describe("Outcome of the external runtime execution"),
+      summary: z
+        .string()
+        .describe("Durable summary of what the external runtime completed or why it failed"),
+      artifactPaths: z
+        .array(z.string())
+        .optional()
+        .describe("Workspace-relative artifact paths produced by the external runtime"),
+      nextStep: z
+        .string()
+        .optional()
+        .describe("Optional explicit next-step guidance for the governed runtime"),
+    }),
+  },
+  async (params) => {
+    try {
+      const result = recordHarnessExecutionResult({
+        workspacePath: params.workspacePath,
+        bridgeId: params.bridgeId,
+        sessionId: params.sessionId,
+        outcome: params.outcome,
+        summary: params.summary,
+        artifactPaths: params.artifactPaths,
+        nextStep: params.nextStep,
+      });
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to record harness execution result: ${msg}` }],
         isError: true,
       };
     }
@@ -1284,7 +2306,7 @@ server.registerResource(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("workspace-init-mcp server v4.0.1 started on stdio");
+  console.error("workspace-init-mcp server v3.1.0 started on stdio");
 }
 
 main().catch((err) => {

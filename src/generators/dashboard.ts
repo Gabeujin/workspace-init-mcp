@@ -64,6 +64,27 @@ function buildDashboardState(params: WorkspaceInitParams) {
       owner: "harness-governance-manager",
     },
     {
+      id: "managed-file-inventory",
+      label: "Managed File Inventory",
+      path: ".github/ai-harness/managed-file-inventory.json",
+      status: "present",
+      owner: "legacy-reconcile-operator",
+    },
+    {
+      id: "reconcile-policy",
+      label: "Reconcile Policy",
+      path: ".github/ai-harness/reconcile-policy.json",
+      status: "present",
+      owner: "legacy-reconcile-operator",
+    },
+    {
+      id: "native-executor-overrides",
+      label: "Native Executor Overrides",
+      path: ".github/ai-harness/native-executor-overrides.json",
+      status: "present",
+      owner: "cli-runtime-bridge-operator",
+    },
+    {
       id: "context-ledger",
       label: "Context Ledger",
       path: "docs/context/",
@@ -127,6 +148,34 @@ function buildDashboardState(params: WorkspaceInitParams) {
       owner: "harness-doc-writer",
     },
     {
+      id: "readiness-guide",
+      label: "Readiness Guide",
+      path: "docs/ai-harness/readiness/README.md",
+      status: "present",
+      owner: "harness-doc-writer",
+    },
+    {
+      id: "remaining-work-spec",
+      label: "Remaining Work Specification",
+      path: "docs/ai-harness/readiness/remaining-work-spec.md",
+      status: "present",
+      owner: "harness-governance-manager",
+    },
+    {
+      id: "readiness-scoring-model",
+      label: "Readiness Scoring Model",
+      path: "docs/ai-harness/readiness/scoring-model.md",
+      status: "present",
+      owner: "harness-dashboard-operator",
+    },
+    {
+      id: "readiness-scorecard-template",
+      label: "Readiness Scorecard Template",
+      path: "docs/ai-harness/readiness/maturity-scorecard.template.json",
+      status: "present",
+      owner: "harness-dashboard-operator",
+    },
+    {
       id: "context-strategy",
       label: "Context Strategy",
       path: ".github/ai-harness/context-strategy.md",
@@ -165,6 +214,62 @@ function buildDashboardState(params: WorkspaceInitParams) {
       id: "runtime-active-session",
       label: "Active Runtime Session",
       path: "docs/ai-harness/runtime/state/active-session.json",
+      status: "present",
+      owner: "harness-dashboard-operator",
+    },
+    {
+      id: "runtime-current-work-packet",
+      label: "Current Runtime Work Packet",
+      path: "docs/ai-harness/runtime/state/current-work-packet.json",
+      status: "present",
+      owner: "harness-dashboard-operator",
+    },
+    {
+      id: "runtime-adapters-guide",
+      label: "Runtime Adapters Guide",
+      path: "docs/ai-harness/runtime/adapters/README.md",
+      status: "present",
+      owner: "harness-dashboard-operator",
+    },
+    {
+      id: "runtime-current-execution-bridge",
+      label: "Current Execution Bridge State",
+      path: "docs/ai-harness/runtime/state/current-execution-bridge.json",
+      status: "present",
+      owner: "harness-dashboard-operator",
+    },
+    {
+      id: "runtime-native-executors-guide",
+      label: "Native Executors Guide",
+      path: "docs/ai-harness/runtime/native-executors/README.md",
+      status: "present",
+      owner: "harness-dashboard-operator",
+    },
+    {
+      id: "runtime-current-native-execution",
+      label: "Current Native Execution State",
+      path: "docs/ai-harness/runtime/state/current-native-execution.json",
+      status: "present",
+      owner: "harness-dashboard-operator",
+    },
+    {
+      id: "runtime-bridges-guide",
+      label: "Runtime Bridges Guide",
+      path: "docs/ai-harness/runtime/bridges/README.md",
+      status: "present",
+      owner: "harness-dashboard-operator",
+    },
+    {
+      id: "runtime-archive-guide",
+      label: "Runtime Archive Guide",
+      path: "docs/ai-harness/runtime/archive/README.md",
+      status: "present",
+      owner: "harness-dashboard-operator",
+    },
+    {
+      id: "runtime-archive-index",
+      label: "Runtime Archive Index",
+      path: "docs/ai-harness/runtime/archive/archive-index.json",
       status: "present",
       owner: "harness-dashboard-operator",
     },
@@ -385,6 +490,15 @@ function buildDashboardState(params: WorkspaceInitParams) {
       stateFile: "docs/ai-harness/runtime/state/active-session.json",
       sessionIndexFile: "docs/ai-harness/runtime/state/session-index.json",
       sessionSummaryFile: "docs/ai-harness/runtime/sessions/",
+      workPacketFile: "docs/ai-harness/runtime/state/current-work-packet.json",
+      nativeExecutionStateFile:
+        "docs/ai-harness/runtime/state/current-native-execution.json",
+      nativeExecutionPlanFile: null,
+      nativeExecutorBridgeId: null,
+      leaseStatus: "idle",
+      leasedAt: null,
+      queueDepth: 0,
+      queuedSessionIds: [],
       recentEvents: [
         {
           at: "bootstrap",
@@ -753,6 +867,7 @@ function buildDashboardSchema(): string {
         "timeline",
         "entities",
         "versionLedger",
+        "runtimeOrchestration",
       ],
       properties: {
         meta: {
@@ -1217,6 +1332,73 @@ function buildDashboardSchema(): string {
             },
             additionalProperties: true,
           },
+        },
+        runtimeOrchestration: {
+          type: "object",
+          required: [
+            "mode",
+            "activeSessionId",
+            "activeChunkId",
+            "currentPhase",
+            "nextActor",
+            "nextAction",
+            "contextPolicy",
+            "contractCoverageRule",
+            "evaluatorRule",
+            "lastEventAt",
+            "stateFile",
+            "sessionIndexFile",
+            "sessionSummaryFile",
+            "workPacketFile",
+            "leaseStatus",
+            "leasedAt",
+            "queueDepth",
+            "queuedSessionIds",
+            "recentEvents",
+          ],
+          properties: {
+            mode: { type: "string" },
+            activeSessionId: { type: ["string", "null"] },
+            activeChunkId: { type: "string" },
+            currentPhase: { type: "string" },
+            nextActor: { type: "string" },
+            nextAction: { type: "string" },
+            contextPolicy: { type: "string" },
+            contractCoverageRule: { type: "string" },
+            evaluatorRule: { type: "string" },
+            lastEventAt: { type: "string" },
+            stateFile: { type: "string" },
+            sessionIndexFile: { type: "string" },
+            sessionSummaryFile: { type: "string" },
+            workPacketFile: { type: "string" },
+            nativeExecutionStateFile: { type: ["string", "null"] },
+            nativeExecutionPlanFile: { type: ["string", "null"] },
+            nativeExecutorBridgeId: { type: ["string", "null"] },
+            leaseStatus: { type: "string" },
+            leasedAt: { type: ["string", "null"] },
+            queueDepth: { type: "number" },
+            queuedSessionIds: {
+              type: "array",
+              items: { type: "string" },
+            },
+            recentEvents: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["at", "phase", "actor", "action", "outcome", "note"],
+                properties: {
+                  at: { type: "string" },
+                  phase: { type: "string" },
+                  actor: { type: "string" },
+                  action: { type: "string" },
+                  outcome: { type: "string" },
+                  note: { type: "string" },
+                },
+                additionalProperties: true,
+              },
+            },
+          },
+          additionalProperties: true,
         },
       },
       additionalProperties: true,
@@ -1760,6 +1942,13 @@ function deriveRuntimeOrchestration(state) {
     sessionSummaryFile: latestSession.id
       ? "docs/ai-harness/runtime/sessions/" + latestSession.id + ".md"
       : "docs/ai-harness/runtime/sessions/",
+    workPacketFile: latestSession.id
+      ? "docs/ai-harness/runtime/work-packets/" + latestSession.id + ".work-packet.json"
+      : "docs/ai-harness/runtime/state/current-work-packet.json",
+    leaseStatus: latestSession.id ? "leased" : "idle",
+    leasedAt: latestSession.endedAt || null,
+    queueDepth: 0,
+    queuedSessionIds: [],
     recentEvents: [],
   };
 }
@@ -1782,6 +1971,13 @@ function renderRuntimeOrchestration(state) {
       <div class="pill-note"><strong>State:</strong> \${escapeHtml(runtime.stateFile || "")}</div>
       <div class="pill-note"><strong>Index:</strong> \${escapeHtml(runtime.sessionIndexFile || "")}</div>
       <div class="pill-note"><strong>Summary:</strong> \${escapeHtml(runtime.sessionSummaryFile || "")}</div>
+      <div class="pill-note"><strong>Work Packet:</strong> \${escapeHtml(runtime.workPacketFile || "")}</div>
+      <div class="pill-note"><strong>Native Executor Bridge:</strong> \${escapeHtml(runtime.nativeExecutorBridgeId || "none")}</div>
+      <div class="pill-note"><strong>Native Execution State:</strong> \${escapeHtml(runtime.nativeExecutionStateFile || "n/a")}</div>
+      <div class="pill-note"><strong>Native Execution Plan:</strong> \${escapeHtml(runtime.nativeExecutionPlanFile || "n/a")}</div>
+      <div class="pill-note"><strong>Lease:</strong> \${escapeHtml(runtime.leaseStatus || "idle")} | <strong>Leased At:</strong> \${escapeHtml(runtime.leasedAt || "n/a")}</div>
+      <div class="pill-note"><strong>Queue Depth:</strong> \${escapeHtml(String(runtime.queueDepth ?? 0))}</div>
+      <div class="pill-note"><strong>Queued Sessions:</strong> \${escapeHtml((runtime.queuedSessionIds || []).join(", ") || "none")}</div>
       <div class="pill-note"><strong>Last Event:</strong> \${escapeHtml(runtime.lastEventAt || "unknown")}</div>
       \${recentEvents.length > 0 ? \`<ul class="list-reset">\${recentEvents
         .map(
