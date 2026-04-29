@@ -653,6 +653,16 @@ export const AGENT_REGISTRY: AgentEntry[] = [
     priority: 2,
   },
   {
+    id: "harness-orchestrator",
+    name: "Harness Orchestrator",
+    description: "Analyzes the full backlog, maps dependencies, splits independent chunks, assigns worker agents, and defines minimal context packets for parallel execution",
+    categories: ["meta", "planning"],
+    tags: ["orchestrator", "workflow", "multi-agent", "parallel", "chunking", "context-injection", "dependencies", "harness"],
+    relevantProjectTypes: ["*"],
+    techKeywords: ["AI", "LLM"],
+    priority: 1,
+  },
+  {
     id: "gem-implementer",
     name: "Implementer",
     description: "Code implementation from plans",

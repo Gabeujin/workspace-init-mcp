@@ -3,7 +3,7 @@ import {
   type WorkspaceInitParams,
 } from "../types.js";
 
-const RUNTIME_COMPATIBILITY_VERSION = "4.1.2";
+const RUNTIME_COMPATIBILITY_VERSION = "4.2.0";
 const ADAPTER_CONTRACT_VERSION = "1.0.0";
 const RUNTIME_COMPATIBILITY_FILES = [
   "docs/ai-harness/runtime/version-index.json",
@@ -338,7 +338,7 @@ function buildRuntimeVersionIndex(): string {
           ],
         },
         {
-          version: RUNTIME_COMPATIBILITY_VERSION,
+          version: "4.1.2",
           releaseTheme: "Cross-agent compatibility and version capability indexing",
           capabilities: [
             "version-capability-index",
@@ -358,6 +358,28 @@ function buildRuntimeVersionIndex(): string {
             "All adapter handoffs should include compatibility metadata and point to the stable adapter contract.",
             "Agents switching between Copilot, Codex, Claude, Gemini, OpenHands, or a portable runtime should read continuity files before chat history.",
             "Older workspaces should run reconcile_workspace_initialization to install missing compatibility files before starting @latest sessions.",
+          ],
+        },
+        {
+          version: RUNTIME_COMPATIBILITY_VERSION,
+          releaseTheme:
+            "Parallel orchestration, non-destructive adoption, and quality gates",
+          capabilities: [
+            "harness-orchestrator-agent",
+            "parallel-worker-context-injection",
+            "worker-context-packets",
+            "non-destructive-legacy-adoption",
+            "protected-source-root-guard",
+            "atomic-commit-quality-gate",
+          ],
+          introducedFiles: [
+            ".github/agents/harness-orchestrator.agent.md",
+            ".vscode/commit-message.instructions.md",
+          ],
+          upgradeNotes: [
+            "Parallel worker sessions should start from orchestrator dependency maps and minimal context packets.",
+            "Initialization and reconcile outputs must stay within governance, documentation, IDE, and harness roots unless a later explicit modernization contract expands ownership.",
+            "Generated work packets should name dependency status, expected write paths, verification commands, and integration ownership.",
           ],
         },
       ],
@@ -457,6 +479,22 @@ function buildRuntimeCompatibilityMatrix(): string {
             "native executor overrides",
             "current native execution state",
             "Codex last-message artifacts",
+          ],
+        },
+        {
+          from: "4.1.2",
+          to: RUNTIME_COMPATIBILITY_VERSION,
+          requiredActions: [
+            "Add the harness orchestrator agent for dependency mapping and parallel worker assignment.",
+            "Add generated file safety checks so initialization and reconcile stay out of protected legacy source roots.",
+            "Refresh work packet templates and runtime handoffs with dependency, context injection, expected write path, verification, and quality gate fields.",
+            "Refresh commit guidance so worker outputs stay traceable through atomic commits.",
+          ],
+          preserve: [
+            "cross-agent adapter contract",
+            "session continuity rules",
+            "existing runtime state",
+            "existing adapter handoff bundles",
           ],
         },
       ],
@@ -574,6 +612,18 @@ function buildRuntimeAdapterContract(): string {
         "The receiving runtime must not widen scope beyond the active chunk unless governance is advanced to a planning phase.",
         "If compatibility files are missing, run reconcile_workspace_initialization before starting governed execution.",
       ],
+      parallelExecutionRules: [
+        "An orchestrator must classify dependencies before launching parallel worker sessions.",
+        "Parallel workers require disjoint expected write paths, or an explicit merge owner and integration contract.",
+        "Only one runtime session may hold the active lease for a given chunk, but separate independent chunks may be queued or executed in separate supervised sessions.",
+        "Evaluator and reviewer agents stay read-only unless a remediation contract assigns them a write scope.",
+        "Worker outputs return through receipts, evaluations, dashboard updates, and atomic commits before integration is treated as complete.",
+      ],
+      contextInjectionRules: [
+        "Each worker receives only the relevant task contract, code snippets, DB schema fragments, API specs, logs, verification commands, and expected write paths.",
+        "Do not inject unrelated repository context, old chat history, or other workers' private scratch notes unless they are explicit dependencies.",
+        "If the worker discovers missing context, stop and update the context packet rather than silently expanding scope.",
+      ],
       receiptContract: {
         requiredFields: [
           "sessionId",
@@ -619,6 +669,10 @@ Before moving Copilot <-> Codex <-> Claude <-> Gemini <-> OpenHands, prepare a f
 - Read the work packet and actor inbox before touching project files.
 - Treat durable harness files as stronger evidence than prior chat context.
 - Return results through \`record_harness_execution_result\` or \`advance_harness_session\` with artifact paths.
+
+## Parallel Worker Rule
+
+Parallel work starts with an orchestrator-owned dependency map. A worker may run in parallel only when its context packet names an independent chunk, expected read paths, expected write paths, verification command, and integration owner. Workers must not coordinate through hidden chat state.
 
 ## Upgrade Rule
 
@@ -676,6 +730,12 @@ function buildSessionTemplate(params: WorkspaceInitParams): string {
         status: "planning",
         summary: "Describe the bounded chunk scope here.",
         outputs: [],
+        dependencyNotes:
+          "Classify as blocked, sequential, or parallel-ready with dependency rationale.",
+        contextInjectionNotes:
+          "List the relevant snippets, DB schema fragments, API specs, logs, commands, and expected write paths for the worker.",
+        expectedWritePaths: [],
+        verificationCommands: [],
       },
       phases: [],
       events: [],
@@ -695,6 +755,8 @@ function buildPlannerBrief(): string {
   return `# Planner Brief
 
 - Expand the approved goal into a chunked, testable plan.
+- Act as the orchestrator for multi-chunk work: classify dependencies, isolate parallel-ready chunks, and assign disjoint write scopes.
+- Prepare a context-injection packet for each worker with only relevant snippets, schemas, API specs, commands, and expected write paths.
 - Keep the plan ambitious at the product level and concrete at the verification level.
 - Avoid locking in fragile low-level implementation choices too early.
 - Treat every plan as resumable: document assumptions, open questions, and next steps explicitly.
@@ -706,8 +768,10 @@ function buildGeneratorBrief(): string {
   return `# Generator Brief
 
 - Implement only against the approved contract and current chunk scope.
+- Use only the injected context packet for the chunk unless the contract is updated.
 - Keep outputs traceable to the active session, chunk, and verification criteria.
-- Record test evidence and notable implementation tradeoffs as you work.
+- Record static analysis, boundary test, version compatibility, dependency audit, and notable implementation tradeoffs as you work.
+- Produce a self-correction note that names uncertainty or low-confidence areas before evaluator review.
 - If drift or context anxiety appears, request a context reset instead of guessing.
 - Do not self-approve. Finish with evidence that can be judged independently.
 `;
@@ -718,6 +782,7 @@ function buildEvaluatorBrief(): string {
 
 - Judge independently and skeptically against the contract, rubrics, and observed behavior.
 - Prefer concrete evidence over optimistic summaries.
+- Confirm static analysis, boundary testing, environment compatibility, dependency audit, maintainability, self-correction, and atomic commit evidence.
 - When quality is insufficient, request changes with actionable findings.
 - Keep generator progress separate from evaluator approval.
 - Verification ends only when the chunk is usable, reviewable, and safely handoff-ready.
@@ -733,6 +798,8 @@ Each governed session writes a durable execution packet here.
 - \`<session-id>.md\`: human-readable packet for quick handoff
 
 Use these files when a fresh AI session, another IDE, or an external stakeholder needs the exact next step without reading the full chat history.
+
+For parallel work, the work packet is the context-injection boundary. It should include the active contract, relevant snippets or specs, dependency status, expected write paths, verification command, and integration owner without dumping unrelated repository context.
 `;
 }
 

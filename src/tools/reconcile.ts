@@ -104,6 +104,11 @@ interface ReconcilePolicyDocument {
   schemaVersion: string;
   generatedAt: string;
   activePreset?: string;
+  nonDestructiveAdoption?: {
+    mode: string;
+    protectedIntent: string;
+    protectedSourceRoots: string[];
+  };
   defaults: ReconcilePolicyDefaults;
   presets?: Record<string, ReconcilePolicyPreset>;
   rules: ReconcilePolicyRule[];
@@ -147,7 +152,7 @@ export interface ReconcilePreflightExportResult {
   summary: string;
 }
 
-const RECONCILE_VERSION = "4.1.2";
+const RECONCILE_VERSION = "4.2.0";
 const RECONCILE_POLICY_PATH = ".github/ai-harness/reconcile-policy.json";
 
 const LEGACY_RESOURCE_ROOTS: Array<{
@@ -263,6 +268,26 @@ function buildDefaultReconcilePolicy(): ReconcilePolicyDocument {
     schemaVersion: "1.0.0",
     generatedAt: "generated-at-runtime",
     activePreset: "balanced",
+    nonDestructiveAdoption: {
+      mode: "harness-overlay",
+      protectedIntent:
+        "workspace-init-mcp adds governance, documentation, IDE, and runtime harness artifacts around an existing project. It must not delete, truncate, move, or replace legacy application source.",
+      protectedSourceRoots: [
+        "src/",
+        "app/",
+        "apps/",
+        "lib/",
+        "packages/",
+        "services/",
+        "server/",
+        "client/",
+        "frontend/",
+        "backend/",
+        "api/",
+        "web/",
+        "mobile/",
+      ],
+    },
     defaults: {
       managedJsonState: "merge",
       managedFileRefresh: "replace",
@@ -320,6 +345,30 @@ function buildDefaultReconcilePolicy(): ReconcilePolicyDocument {
         pattern: ".github/ai-harness/managed-file-inventory.json",
         policy: "replace",
         reason: "Managed inventory should refresh with the newest generated baseline.",
+      },
+      {
+        id: "legacy-source-src-hold",
+        matchType: "prefix",
+        pattern: "src/",
+        policy: "hold",
+        reason:
+          "Legacy application source is outside the harness ownership boundary and must never be refreshed by workspace-init-mcp.",
+      },
+      {
+        id: "legacy-source-app-hold",
+        matchType: "prefix",
+        pattern: "app/",
+        policy: "hold",
+        reason:
+          "Application source is outside the harness ownership boundary and must never be refreshed by workspace-init-mcp.",
+      },
+      {
+        id: "legacy-source-packages-hold",
+        matchType: "prefix",
+        pattern: "packages/",
+        policy: "hold",
+        reason:
+          "Package source is outside the harness ownership boundary and must never be refreshed by workspace-init-mcp.",
       },
       {
         id: "dashboard-state-merge",
@@ -1864,6 +1913,7 @@ export function reconcileWorkspaceInitialization(
     `Applied changes: ${applyChanges ? "yes" : "no (dry run)"}`,
     `Managed inventory: ${managedInventory.status}`,
     `Reconcile policy: ${reconcilePolicy.source}`,
+    "Legacy source safety: non-destructive harness overlay; application source roots are outside managed ownership.",
     `Semantic diff customized files: ${semanticDiff.totals.customized}`,
     `Semantic diff missing files: ${semanticDiff.totals.missing}`,
     `Semantic diff merge divergence: ${semanticDiff.totals.mergeDiverged}`,

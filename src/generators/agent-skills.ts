@@ -73,6 +73,7 @@ const HARNESS_CORE_SKILL_IDS = [
 
 const HARNESS_CORE_AGENT_IDS = [
   "plan",
+  "harness-orchestrator",
   "context-architect",
   "repo-architect",
   "harness-doc-writer",
@@ -350,13 +351,22 @@ ${skill.description}
 - Split the work when one review pass cannot evaluate the whole change clearly.
 - Split the work when interruption would force a future session to reconstruct hidden state.
 - Each chunk must have one verifiable outcome and one clear exit condition.
+- Classify every chunk as blocked, sequential, or parallel-ready before assigning workers.
+- Parallel-ready chunks must have disjoint write scopes, no shared DB/schema/API mutation, and a named merge owner when integration is required.
 
 ## Delegation Pattern
 
+- Use a harness orchestrator to assign independent chunks to separate worker sessions.
 - Use a focused implementer for the approved chunk.
 - Use a verifier for narrow checks and test coverage.
 - Use expert reviewers for specialist lenses only when needed.
 - Use a documentation writer to keep durable artifacts current.
+
+## Context Injection
+
+- Give each worker only the relevant contract, code snippets, DB schema fragments, API specs, logs, commands, and expected write paths.
+- Do not pass broad repo dumps, unrelated chat history, or another worker's private scratch context unless it is an explicit dependency.
+- If a worker needs more context, update the contract and context packet before continuing.
 `;
     case "harness-multi-expert-review":
       return `# ${skill.name}
@@ -411,9 +421,14 @@ ${skill.description}
    - linting when configured
    - targeted tests
    - UTF-8 integrity checks for changed text artifacts
-3. Review the implementation from an independent perspective.
-4. Call out coverage gaps and brittle verification.
-5. Re-run the affected checks after remediation.
+3. Validate boundary conditions and likely runtime exception paths.
+4. Check environment compatibility and audit any new or changed dependencies.
+5. Review maintainability: SOLID, duplication, abstraction level, constants, and business/data-access separation.
+6. Confirm generator self-correction includes uncertainty where evidence is weak.
+7. Confirm atomic commit scope for each chunk or remediation.
+8. Review the implementation from an independent perspective.
+9. Call out coverage gaps and brittle verification.
+10. Re-run the affected checks after remediation.
 
 ## Priorities
 
@@ -1111,9 +1126,34 @@ ${agent.description}
 
 - Implement only the approved chunk.
 - Read the latest plan, review notes, and constraints first.
+- Stay inside the expected write paths and context packet unless the contract is updated.
+- Do not delete or replace legacy source as part of harness adoption.
 - Add or update tests for changed behavior whenever practical.
 - Run narrow verification before returning.
-- Report files changed, checks run, and open risks.
+- Report files changed, checks run, self-correction, uncertainty, and open risks.
+`;
+    case "harness-orchestrator":
+      return `# ${agent.name}
+
+${agent.description}
+
+## Rules
+
+- Analyze the full backlog before assigning worker agents.
+- Classify each chunk as blocked, sequential, or parallel-ready.
+- Assign workers only to chunks with disjoint write scopes or an explicit merge owner.
+- Inject only the relevant contract, code snippets, DB schema fragments, API specs, logs, commands, and expected write paths.
+- Keep evaluator and reviewer roles read-only unless remediation is explicitly assigned.
+- Require atomic commit traceability for every completed worker output.
+
+## Output
+
+- dependency map
+- worker assignment table
+- context packet per worker
+- expected write paths
+- verification and integration plan
+- atomic commit plan
 `;
     case "harness-verifier":
       return `# ${agent.name}
@@ -1135,6 +1175,7 @@ ${agent.description}
 ## Rules
 
 - Run the post-work review flow before declaring completion.
+- Check static analysis, boundary tests, environment compatibility, dependency audit, maintainability, self-correction, and atomic commit evidence.
 - Remediate critical findings immediately.
 - Re-run verification after remediation.
 - Refresh governance artifacts last.

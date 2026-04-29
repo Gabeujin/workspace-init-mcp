@@ -12,6 +12,7 @@ const runtimeModule = await import("../dist/tools/harness-runtime.js");
 const readinessModule = await import("../dist/tools/readiness.js");
 const reconcileModule = await import("../dist/tools/reconcile.js");
 const managedInventoryModule = await import("../dist/tools/managed-inventory.js");
+const generatedFileSafetyModule = await import("../dist/tools/generated-file-safety.js");
 
 const { collectFiles } = initModule;
 const { validateWorkspace } = validateModule;
@@ -30,6 +31,10 @@ const {
   auditWorkspaceManagedSemanticDiff,
   auditWorkspaceUpgradeRisk,
 } = managedInventoryModule;
+const {
+  assertGeneratedFilesRespectNonDestructivePolicy,
+  isProtectedSourcePath,
+} = generatedFileSafetyModule;
 const {
   startHarnessSession,
   advanceHarnessSession,
@@ -139,6 +144,7 @@ for (const skillId of [
 
 for (const agentId of [
   "harness-doc-writer",
+  "harness-orchestrator",
   "harness-dashboard-operator",
   "legacy-reconcile-operator",
   "cli-runtime-bridge-operator",
@@ -153,6 +159,14 @@ for (const agentId of [
 }
 
 const files = collectFiles(createParams());
+assert.doesNotThrow(
+  () => assertGeneratedFilesRespectNonDestructivePolicy(files),
+  "generated initialization files should stay inside governance/docs/IDE harness roots"
+);
+assert.ok(
+  files.every((file) => !isProtectedSourcePath(file.relativePath)),
+  "workspace initialization must not generate files inside protected legacy source roots"
+);
 const byPath = new Map(files.map((file) => [file.relativePath, file.content]));
 
 const registryIndex = byPath.get(".github/AGENT-SKILLS.md");
@@ -162,22 +176,41 @@ assert.match(registryIndex, /AGENT-SKILLS-BY-ROLE\.md/);
 assert.match(registryIndex, /Foundation Bundle/);
 assert.match(registryIndex, /Canonical Registry/);
 
+const harnessOrchestratorAgent = byPath.get(
+  ".github/agents/harness-orchestrator.agent.md"
+);
+assert.ok(harnessOrchestratorAgent, "harness orchestrator agent not generated");
+assert.match(harnessOrchestratorAgent, /dependency map/i);
+assert.match(harnessOrchestratorAgent, /context packet per worker/i);
+
 const operatingModel = byPath.get(".github/ai-harness/operating-model.md");
 assert.ok(operatingModel, "operating model not generated");
 assert.match(operatingModel, /Plan 1 -> Review 1 -> Plan 2 -> Review 2 -> Plan 3 -> Review 3/);
 assert.match(operatingModel, /Add or update tests for changed behavior/);
 assert.match(operatingModel, /chunk contract/i);
 assert.match(operatingModel, /context reset/i);
+assert.match(operatingModel, /non-destructive harness overlay/i);
+assert.match(operatingModel, /orchestrator agent analyzes the backlog/i);
+assert.match(operatingModel, /Code Maturity Gate/);
+assert.match(operatingModel, /Atomic commit traceability/i);
 
 const contextStrategy = byPath.get(".github/ai-harness/context-strategy.md");
 assert.ok(contextStrategy, "context strategy not generated");
 assert.match(contextStrategy, /compaction/i);
 assert.match(contextStrategy, /context reset/i);
+assert.match(contextStrategy, /Context Injection For Parallel Agents/);
+
+const commitInstructions = byPath.get(".vscode/commit-message.instructions.md");
+assert.ok(commitInstructions, "commit instructions not generated");
+assert.match(commitInstructions, /Atomic Commit Rules/);
+assert.match(commitInstructions, /one logical change per commit/i);
 
 const evaluationRubrics = byPath.get(".github/ai-harness/evaluation-rubrics.md");
 assert.ok(evaluationRubrics, "evaluation rubrics not generated");
 assert.match(evaluationRubrics, /Contract Fidelity/);
 assert.match(evaluationRubrics, /generator self-approve/i);
+assert.match(evaluationRubrics, /Parallel Execution Discipline/);
+assert.match(evaluationRubrics, /Code Maturity/);
 
 const managedFileInventory = byPath.get(".github/ai-harness/managed-file-inventory.json");
 assert.ok(managedFileInventory, "managed file inventory not generated");
@@ -215,6 +248,11 @@ assert.ok(
   parsedReconcilePolicy.presets?.["refresh-heavy"],
   "reconcile policy should expose a refresh-heavy preset for reviewed automation-heavy upgrades"
 );
+assert.equal(
+  parsedReconcilePolicy.nonDestructiveAdoption?.mode,
+  "harness-overlay",
+  "reconcile policy should declare non-destructive legacy adoption"
+);
 assert.ok(
   parsedReconcilePolicy.rules.some(
     (rule) =>
@@ -222,6 +260,12 @@ assert.ok(
       rule.policy === "hold"
   ),
   "reconcile policy should protect operating model drift with a hold rule"
+);
+assert.ok(
+  parsedReconcilePolicy.rules.some(
+    (rule) => rule.pattern === "src/" && rule.policy === "hold"
+  ),
+  "reconcile policy should explicitly hold legacy source roots outside harness ownership"
 );
 
 const nativeExecutorOverrides = byPath.get(
@@ -249,10 +293,18 @@ assert.match(reviewLedger, /review-3/);
 const contractLedger = byPath.get("docs/contracts/README.md");
 assert.ok(contractLedger, "contract ledger not generated");
 assert.match(contractLedger, /done criteria/i);
+assert.match(contractLedger, /Dependency status/i);
+assert.match(contractLedger, /Worker context packet/i);
 
 const evaluationsLedger = byPath.get("docs/evaluations/README.md");
 assert.ok(evaluationsLedger, "evaluations ledger not generated");
 assert.match(evaluationsLedger, /independent evaluation/i);
+assert.match(evaluationsLedger, /Five-Step Maturity Gate/);
+
+const plansLedger = byPath.get("docs/plans/README.md");
+assert.ok(plansLedger, "plans ledger not generated");
+assert.match(plansLedger, /Orchestrator Checklist/);
+assert.match(plansLedger, /Context packet/i);
 
 const dashboardReadme = byPath.get("docs/ai-harness/dashboard/README.md");
 assert.ok(dashboardReadme, "dashboard README not generated");
@@ -318,7 +370,7 @@ assert.match(runtimeReadme, /adapter-contract\.json/);
 const runtimeVersionIndex = byPath.get("docs/ai-harness/runtime/version-index.json");
 assert.ok(runtimeVersionIndex, "runtime version capability index not generated");
 const parsedRuntimeVersionIndex = JSON.parse(runtimeVersionIndex);
-assert.equal(parsedRuntimeVersionIndex.latestVersion, "4.1.2");
+assert.equal(parsedRuntimeVersionIndex.latestVersion, "4.2.0");
 assert.ok(
   parsedRuntimeVersionIndex.versions.some(
     (entry) =>
@@ -336,18 +388,34 @@ assert.ok(
   ),
   "runtime version index should describe the 4.1.2 adapter contract capability"
 );
+assert.ok(
+  parsedRuntimeVersionIndex.versions.some(
+    (entry) =>
+      entry.version === "4.2.0" &&
+      entry.capabilities.includes("parallel-worker-context-injection") &&
+      entry.capabilities.includes("non-destructive-legacy-adoption") &&
+      entry.capabilities.includes("atomic-commit-quality-gate")
+  ),
+  "runtime version index should describe the 4.2.0 orchestration and safety capabilities"
+);
 
 const runtimeCompatibilityMatrix = byPath.get(
   "docs/ai-harness/runtime/compatibility-matrix.json"
 );
 assert.ok(runtimeCompatibilityMatrix, "runtime compatibility matrix not generated");
 const parsedRuntimeCompatibilityMatrix = JSON.parse(runtimeCompatibilityMatrix);
-assert.equal(parsedRuntimeCompatibilityMatrix.currentVersion, "4.1.2");
+assert.equal(parsedRuntimeCompatibilityMatrix.currentVersion, "4.2.0");
 assert.ok(
   parsedRuntimeCompatibilityMatrix.upgradePaths.some(
-    (entry) => entry.from === "4.1.1" && entry.to === "4.1.2"
+    (entry) => entry.from === "4.1.1" && entry.to === "4.2.0"
   ),
-  "runtime compatibility matrix should include the 4.1.1 to 4.1.2 upgrade path"
+  "runtime compatibility matrix should include the 4.1.1 to 4.2.0 upgrade path"
+);
+assert.ok(
+  parsedRuntimeCompatibilityMatrix.upgradePaths.some(
+    (entry) => entry.from === "4.1.2" && entry.to === "4.2.0"
+  ),
+  "runtime compatibility matrix should include the 4.1.2 to 4.2.0 upgrade path"
 );
 assert.ok(
   parsedRuntimeCompatibilityMatrix.requiredRuntimeFiles.includes(
@@ -378,17 +446,41 @@ assert.ok(
   parsedRuntimeAdapterContract.requiredHandoffFields.includes("compatibility"),
   "runtime adapter contract should require compatibility metadata"
 );
+assert.ok(
+  parsedRuntimeAdapterContract.parallelExecutionRules.some((rule) =>
+    /orchestrator/i.test(rule)
+  ),
+  "runtime adapter contract should define orchestrator rules for parallel workers"
+);
+assert.ok(
+  parsedRuntimeAdapterContract.contextInjectionRules.some((rule) =>
+    /DB schema fragments/i.test(rule)
+  ),
+  "runtime adapter contract should define minimal context injection rules"
+);
 
 const runtimeSessionContinuity = byPath.get(
   "docs/ai-harness/runtime/session-continuity.md"
 );
 assert.ok(runtimeSessionContinuity, "runtime session continuity contract not generated");
 assert.match(runtimeSessionContinuity, /Copilot <-> Codex <-> Claude <-> Gemini/);
+assert.match(runtimeSessionContinuity, /Parallel Worker Rule/);
 
 const runtimeStateMachine = byPath.get("docs/ai-harness/runtime/state-machine.md");
 assert.ok(runtimeStateMachine, "runtime state machine not generated");
 assert.match(runtimeStateMachine, /contract-review/);
 assert.match(runtimeStateMachine, /context_reset/);
+
+const runtimeSessionTemplate = byPath.get(
+  "docs/ai-harness/runtime/templates/harness-session.template.json"
+);
+assert.ok(runtimeSessionTemplate, "runtime session template not generated");
+const parsedRuntimeSessionTemplate = JSON.parse(runtimeSessionTemplate);
+assert.match(
+  parsedRuntimeSessionTemplate.chunk.dependencyNotes,
+  /parallel-ready/
+);
+assert.deepEqual(parsedRuntimeSessionTemplate.chunk.expectedWritePaths, []);
 
 const runtimeSessionIndex = byPath.get("docs/ai-harness/runtime/state/session-index.json");
 assert.ok(runtimeSessionIndex, "runtime session index not generated");
@@ -442,6 +534,7 @@ const runtimeWorkPacketGuide = byPath.get(
 );
 assert.ok(runtimeWorkPacketGuide, "runtime work packet guide not generated");
 assert.match(runtimeWorkPacketGuide, /execution packet/i);
+assert.match(runtimeWorkPacketGuide, /context-injection boundary/i);
 
 const runtimeAdaptersGuide = byPath.get(
   "docs/ai-harness/runtime/adapters/README.md"
@@ -847,6 +940,10 @@ const selectedInstallFiles = generateSelectedSkills(
   }
 );
 const selectedByPath = new Map(selectedInstallFiles.map((file) => [file.relativePath, file.content]));
+assert.doesNotThrow(
+  () => assertGeneratedFilesRespectNonDestructivePolicy(selectedInstallFiles),
+  "selected skill install files should stay inside supported agent/skill roots"
+);
 for (const requiredPath of [
   ".github/skills/polyglot-test-agent/SKILL.md",
   ".github/skills/polyglot-test-agent/unit-test-generation.prompt.md",
@@ -933,6 +1030,10 @@ try {
     sessionId: "session-runtime-001",
     chunkId: "chunk-runtime-001",
     chunkTitle: "First governed runtime slice",
+    dependencyNotes: "parallel-ready: no shared write paths with queued governance work",
+    contextInjectionNotes: "Inject runtime state files, adapter contract, and dashboard schema only.",
+    expectedWritePaths: ["docs/ai-harness/runtime/example-output.md"],
+    verificationCommands: ["npm test"],
   });
   assert.equal(startedSession.currentPhase, "plan-1");
   assert.equal(startedSession.nextActor, "planner");
@@ -943,6 +1044,25 @@ try {
   assert.ok(
     fs.existsSync(path.join(fullWorkspace, startedSession.actorInboxPath)),
     "starting a session should generate a role inbox handoff file"
+  );
+  const startedWorkPacket = JSON.parse(
+    fs.readFileSync(path.join(fullWorkspace, startedSession.workPacketPath), "utf-8")
+  );
+  assert.match(
+    startedWorkPacket.parallelExecution.dependencyStatus,
+    /parallel-ready/
+  );
+  assert.match(startedWorkPacket.contextInjection.rule, /runtime state files/);
+  assert.ok(
+    startedWorkPacket.expectedWrites.includes(
+      "docs/ai-harness/runtime/example-output.md"
+    ),
+    "work packet should carry expected write paths for worker isolation"
+  );
+  assert.deepEqual(startedWorkPacket.verificationCommands, ["npm test"]);
+  assert.match(
+    fs.readFileSync(path.join(fullWorkspace, startedSession.workPacketMarkdownPath), "utf-8"),
+    /Quality Gate Checklist/
   );
 
   const queuedSession = startHarnessSession({
@@ -1143,7 +1263,7 @@ try {
   const codexHandoffJson = JSON.parse(
     fs.readFileSync(path.join(fullWorkspace, codexHandoff.handoffPath), "utf-8")
   );
-  assert.equal(codexHandoffJson.compatibility.mcpServerVersion, "4.1.2");
+  assert.equal(codexHandoffJson.compatibility.mcpServerVersion, "4.2.0");
   assert.equal(
     codexHandoffJson.fileReferences.adapterContractFile,
     "docs/ai-harness/runtime/adapter-contract.json"
@@ -2016,6 +2136,11 @@ try {
     applyChanges: true,
   });
   assert.match(bareReconcile.summary, /Workspace reconcile complete/);
+  assert.equal(
+    fs.readFileSync(path.join(bareLegacyWorkspace, "src", "server.js"), "utf-8"),
+    "console.log('legacy service');\n",
+    "legacy source files must remain untouched during harness reconcile"
+  );
   assert.equal(bareReconcile.resolvedConfig.workspaceName, "legacy-service");
   assert.equal(
     bareReconcile.resolvedConfig.purpose,
@@ -2247,7 +2372,7 @@ try {
         entry.path === "docs/ai-harness/runtime/adapter-contract.json" &&
         entry.status === "missing"
     ),
-    "managed semantic diff should classify missing 4.1.2 compatibility contract files"
+    "managed semantic diff should classify missing 4.2.0 compatibility contract files"
   );
   assert.ok(
     semanticDiff.entries.some(
@@ -2386,7 +2511,7 @@ try {
     reconcileResult.writtenFiles.includes(
       "docs/ai-harness/runtime/adapter-contract.json"
     ),
-    "reconcile should restore missing 4.1.2 adapter contract files"
+    "reconcile should restore missing 4.2.0 adapter contract files"
   );
   assert.ok(
     reconcileResult.writtenFiles.includes(

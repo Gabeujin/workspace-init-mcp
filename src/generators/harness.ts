@@ -88,6 +88,26 @@ function buildReconcilePolicy(): string {
       schemaVersion: "1.0.0",
       generatedAt: "generated-at-runtime",
       activePreset: "balanced",
+      nonDestructiveAdoption: {
+        mode: "harness-overlay",
+        protectedIntent:
+          "workspace-init-mcp adds governance, documentation, IDE, and runtime harness artifacts around an existing project. It must not delete, truncate, move, or replace legacy application source.",
+        protectedSourceRoots: [
+          "src/",
+          "app/",
+          "apps/",
+          "lib/",
+          "packages/",
+          "services/",
+          "server/",
+          "client/",
+          "frontend/",
+          "backend/",
+          "api/",
+          "web/",
+          "mobile/",
+        ],
+      },
       defaults: {
         managedJsonState: "merge",
         managedFileRefresh: "replace",
@@ -145,6 +165,27 @@ function buildReconcilePolicy(): string {
           reason: "Managed inventory should refresh with the latest generated baseline when initialization evolves.",
         },
         {
+          id: "legacy-source-src-hold",
+          matchType: "prefix",
+          pattern: "src/",
+          policy: "hold",
+          reason: "Legacy application source is outside the harness ownership boundary and must never be refreshed by workspace-init-mcp.",
+        },
+        {
+          id: "legacy-source-app-hold",
+          matchType: "prefix",
+          pattern: "app/",
+          policy: "hold",
+          reason: "Application source is outside the harness ownership boundary and must never be refreshed by workspace-init-mcp.",
+        },
+        {
+          id: "legacy-source-packages-hold",
+          matchType: "prefix",
+          pattern: "packages/",
+          policy: "hold",
+          reason: "Package source is outside the harness ownership boundary and must never be refreshed by workspace-init-mcp.",
+        },
+        {
           id: "dashboard-state-merge",
           matchType: "prefix",
           pattern: "docs/ai-harness/dashboard/state/",
@@ -196,6 +237,7 @@ function buildReconcilePolicy(): string {
       ],
       notes: [
         "Policy values: replace, merge, hold.",
+        "Non-destructive adoption is mandatory: generated harness upgrades may add/merge governance artifacts, but must not delete or overwrite legacy application source.",
         "Set activePreset to conservative, balanced, or refresh-heavy to change the default reconcile posture.",
         "hold keeps drifted files in manual review even if overwriteManagedFiles is enabled.",
         "merge is intended for JSON state ledgers and falls back to manual review if merging is unsafe.",
@@ -348,6 +390,46 @@ function buildHarnessManifest(
     "  chunk_large_work: true",
     "  max_chunk_goal: one-verifiable-outcome",
     "  prefer_context_resets_for_drift: true",
+    "legacy_adoption:",
+    "  mode: non_destructive_harness_overlay",
+    "  ownership_boundary: governance_docs_ide_and_runtime_artifacts_only",
+    "  protected_source_roots:",
+    "    - src/",
+    "    - app/",
+    "    - apps/",
+    "    - lib/",
+    "    - packages/",
+    "    - services/",
+    "    - server/",
+    "    - client/",
+    "  prohibited_actions:",
+    "    - delete_existing_application_source",
+    "    - replace_existing_application_source_without_explicit_task_contract",
+    "    - move_or_rename_legacy_modules_during_harness_adoption",
+    "  allowed_actions:",
+    "    - add_missing_harness_artifacts",
+    "    - merge_live_governed_json_state",
+    "    - hold_customized_managed_files_for_review",
+    "parallel_execution:",
+    "  orchestrator_agent: required_for_multi_chunk_work",
+    "  dependency_rule: parallelize_only_chunks_without_write_runtime_or_schema_dependencies",
+    "  worker_assignment: one_worker_per_disjoint_chunk",
+    "  write_scope_required: true",
+    "  evaluator_independence_required: true",
+    "  context_injection: task_relevant_snippets_db_schema_api_specs_only",
+    "  merge_rule: reconcile_worker_outputs_through_contracts_evaluations_and_atomic_commits",
+    "quality_gate:",
+    "  - static_analysis_and_runtime_exception_scan",
+    "  - boundary_testing",
+    "  - environment_version_compatibility_check",
+    "  - dependency_audit",
+    "  - clean_code_and_abstraction_review",
+    "  - self_correction_uncertainty_report",
+    "  - atomic_commit_traceability",
+    "atomic_commits:",
+    "  required: true",
+    "  format: conventional_commits_with_chunk_or_session_reference",
+    "  scope: one_logical_change_per_commit",
     "core_artifacts:",
     "  mission_control: .github/ai-harness/operating-model.md",
     "  policy: .github/ai-harness/harness-manifest.yaml",
@@ -412,6 +494,9 @@ This workspace uses the **${profileId}** harness profile to keep long-running AI
 
 ## Hard Rules
 
+- Treat workspace-init-mcp as a non-destructive harness overlay for existing and legacy projects.
+- Do not delete, truncate, move, or replace existing application source during harness adoption.
+- Keep generated harness ownership bounded to governance, documentation, IDE configuration, runtime state, dashboard, skills, agents, and related managed artifacts.
 - Every meaningful agent task starts with governance documentation.
 - Every meaningful agent task ends with governance documentation.
 - Before implementation, complete Plan 1 -> Review 1 -> Plan 2 -> Review 2 -> Plan 3 -> Review 3.
@@ -419,9 +504,13 @@ This workspace uses the **${profileId}** harness profile to keep long-running AI
 - Do not code until the goal is explicit, review-backed, and frozen.
 - Before implementation, create or refresh the relevant context, plan, and review artifacts.
 - Keep generator and evaluator roles separate whenever quality, taste, or correctness judgment matters.
+- For multi-chunk work, the orchestrator must identify independent chunks, assign disjoint write scopes, and record dependencies before workers start.
+- Worker agents receive only the relevant snippets, schemas, API specs, contracts, and file paths for their chunk.
 - If the work is too large to complete safely in one uninterrupted session, split it into chunks before coding.
 - Each chunk must leave enough review and handover evidence for another session to resume without guessing.
 - Any programming change must include matching test coverage or an explicit documented gap with justification.
+- Every completed implementation chunk must pass the code maturity gate or report uncertainty before closure.
+- Keep commits atomic: one logical chunk/remediation per commit with traceable session or chunk references.
 - After implementation, run verification, code review, remediation, and a final governance refresh before closure.
 - Refresh the admin dashboard state at governance open, after each meaningful chunk, and at governance close.
 
@@ -501,6 +590,32 @@ This workspace uses the **${profileId}** harness profile to keep long-running AI
 - For subjective work such as design, weight originality and coherence more heavily than default-safe polish.
 - For programming work, use the evaluator plus tests, code review, and operational checks as the final gate.
 
+## Non-Destructive Legacy Adoption
+
+- Legacy adoption means adding the harness around an existing codebase, not replacing the codebase.
+- Source roots such as \`src/\`, \`app/\`, \`packages/\`, \`services/\`, \`server/\`, and \`client/\` are protected unless a later explicit implementation contract names them as the approved work scope.
+- Reconcile runs may add missing harness files, merge governed JSON state, import legacy agent assets, and hold customized managed files for review.
+- Reconcile runs must not delete application source or silently rewrite business logic as part of setup.
+- When source modernization is required, create a separate chunk contract with tests, rollback notes, and an atomic commit boundary.
+
+## Parallel Orchestration And Context Injection
+
+- The orchestrator agent analyzes the backlog, maps dependencies, and separates independent chunks before worker sessions begin.
+- Parallel chunks are allowed only when their write scopes, runtime side effects, database changes, and API contracts do not conflict.
+- Each worker receives a minimal context packet: task contract, relevant code snippets, affected schemas, API specs, verification command, and expected write paths.
+- Workers must not read broadly or widen scope just because another worker is active.
+- Integration happens through contracts, evaluator records, receipts, dashboard updates, and atomic commits rather than hidden chat coordination.
+
+## Code Maturity Gate
+
+Every completed implementation chunk must pass this gate before governance close:
+
+1. Critical error and stability validation: static analysis, syntax checks, likely runtime exception scan, and boundary testing.
+2. Version compatibility validation: framework/runtime environment sync, Java/JDK or equivalent version checks, and dependency audit for newly added libraries.
+3. Maintainability and extensibility review: SOLID, duplication, abstraction level, constants instead of hardcoding, and separation between business logic and data access.
+4. Self-correction: the generator records its own evaluation, known uncertainty, and any low-confidence area before the independent evaluator reviews it.
+5. Atomic commit traceability: commits are scoped to one logical chunk or remediation and reference the session, chunk, plan, or issue when available.
+
 ## Contract-First Chunk Execution
 
 - Before each implementation chunk, write a contract in \`docs/contracts/\` that states:
@@ -523,10 +638,13 @@ This workspace uses the **${profileId}** harness profile to keep long-running AI
 1. Open governance artifacts
 2. Run Plan 1 / Review 1 / Plan 2 / Review 2 / Plan 3 / Review 3
 3. Freeze the goal and refresh governance
-4. Negotiate and record the chunk contract
-5. Execute one chunk with tests, evaluation, review, and remediation
-6. Refresh the dashboard, session log, and git snapshot
-7. Close governance artifacts
+4. Have the orchestrator split the backlog into dependent and independent chunks
+5. Inject only task-relevant context into each worker packet
+6. Negotiate and record the chunk contract
+7. Execute one chunk or a set of independent chunks with tests, evaluation, review, and remediation
+8. Refresh the dashboard, session log, and git snapshot
+9. Commit atomically with traceable chunk or session references
+10. Close governance artifacts
 
 ## Escalate When
 
@@ -552,6 +670,8 @@ This directory family defines how AI work is governed for **${params.workspaceNa
 - Keep context durable across long-running work
 - Prevent uncontrolled token growth
 - Preserve direction across planning, implementation, review, and handoff
+- Add governance, dashboard, runtime, and agent artifacts without deleting or replacing legacy application source
+- Coordinate parallel agent work through dependency-aware chunks and minimal context injection
 - Support scale-up across domains: ${domains.join(", ")}
 
 ## Core Files
@@ -579,10 +699,13 @@ This directory family defines how AI work is governed for **${params.workspaceNa
 2. Complete Plan 1 -> Review 1 -> Plan 2 -> Review 2 -> Plan 3 -> Review 3
 3. Freeze the goal and refresh governance before implementation
 4. Split large work into chunks that each end in one verifiable outcome
-5. Write a chunk contract and agree on evaluator thresholds before coding
-6. Execute one chunk, validate it, review it, remediate it, and update the review ledger
-7. Refresh the dashboard snapshot so operators can see progress, KPIs, issues, session governance, and git state
-8. Close governance artifacts last: work log, review state, handover, contracts, evaluations, and dashboard state
+5. For parallel work, have the orchestrator classify dependencies and assign only independent chunks to workers
+6. Inject only task-relevant code snippets, DB schemas, API specs, and expected write paths into each worker context
+7. Write a chunk contract and agree on evaluator thresholds before coding
+8. Execute one chunk or independent chunk set, validate it, review it, remediate it, and update the review ledger
+9. Run the maturity gate: static analysis, boundary tests, version compatibility, dependency audit, maintainability review, self-correction, and atomic commit traceability
+10. Refresh the dashboard snapshot so operators can see progress, KPIs, issues, session governance, and git state
+11. Close governance artifacts last: work log, review state, handover, contracts, evaluations, and dashboard state
 
 ## Profile
 
@@ -607,11 +730,17 @@ This workspace is designed so both **existing legacy projects** and **new greenf
 - JSON-first dashboard visibility for operators and non-developers
 - Git-backed traceability for progress, issues, and decisions
 - Chunked delivery so sessions remain resumable
+- Non-destructive adoption so existing project source remains intact while the harness layer is added
+- Parallel execution through dependency-aware chunking, isolated worker context, and atomic commits
 
 ## Legacy Project Adoption Track
 
 Use this track when AI is entering an existing codebase, client system, or operational environment.
 
+0. Preserve the existing source tree:
+   - do not delete, truncate, move, or replace application source as part of workspace initialization
+   - treat \`src/\`, \`app/\`, \`packages/\`, \`services/\`, \`server/\`, \`client/\`, and similar roots as protected until a later explicit modernization contract names them
+   - use \`.github/\`, \`.vscode/\`, \`docs/\`, and IDE agent roots for harness artifacts
 1. Analyze the AS-IS landscape:
    - major modules or services
    - integration boundaries
@@ -625,8 +754,10 @@ Use this track when AI is entering an existing codebase, client system, or opera
    - blockers, risks, and verification state
    - governed session coverage and contract coverage
 4. Introduce tests incrementally with each approved chunk.
-5. Use context resets when legacy exploration causes drift or context anxiety, but only after writing a durable handover.
-6. Treat the harness as the stable operating layer even if the product architecture is still evolving.
+5. When multiple teams or agent sessions are available, split modernization work by independent modules, APIs, screens, or documentation streams only after dependency mapping is explicit.
+6. Inject each worker with only the relevant snippets, schema fragments, API specs, logs, and verification commands for that chunk.
+7. Use context resets when legacy exploration causes drift or context anxiety, but only after writing a durable handover.
+8. Treat the harness as the stable operating layer even if the product architecture is still evolving.
 
 ## New Project Track
 
@@ -636,8 +767,9 @@ Use this track when the project starts fresh and the harness can shape the archi
 2. Bootstrap the dashboard before implementation starts.
 3. Define version or release ledgers from the first delivery milestone.
 4. Keep implementation chunked, contract-backed, test-backed, and review-backed.
-5. Use the evaluator and quality gate as independent sign-off, not as generator self-praise.
-6. Export static dashboard snapshots for stakeholders whenever direct access is limited.
+5. Parallelize only chunks with no dependency or write-scope conflict.
+6. Use the evaluator and quality gate as independent sign-off, not as generator self-praise.
+7. Export static dashboard snapshots for stakeholders whenever direct access is limited.
 
 ## Dashboard Operations
 
@@ -655,7 +787,9 @@ The operating rule is consistent regardless of domain:
 - plan clearly
 - review deeply
 - implement in chunks
+- parallelize only dependency-free chunks with isolated context
 - test and remediate
+- commit atomically with traceable work history
 - refresh governance and dashboard state last
 `;
 }
@@ -674,6 +808,7 @@ Use this directory to store the minimum durable context needed to continue work 
 - Active constraints, assumptions, and unresolved questions
 - Domain-specific notes for: ${domains.join(", ")}
 - External dependencies that affect execution
+- Context-injection packets that give a worker only the snippets, schemas, API specs, commands, and expected write paths needed for one chunk
 
 ## Suggested Files
 
@@ -691,6 +826,7 @@ Use this directory to store the minimum durable context needed to continue work 
 - Link to source artifacts when possible
 - Open or update this ledger before starting large work
 - Close it with the final state after each chunk ends
+- For parallel work, keep worker contexts isolated and name the dependency assumptions that make the chunk safe to run concurrently
 
 ## Owner
 
@@ -716,6 +852,8 @@ This workspace uses a three-plan and three-review model before major implementat
 
 - the frozen goal
 - chunk boundaries
+- dependency map for chunks that may run in parallel
+- context-injection scope for each worker agent
 - test and verification strategy
 - code review expectations
 - resumability and handover readiness
@@ -746,6 +884,8 @@ Use this directory to make paused work resumable without reconstructing context 
 - What changed
 - What is verified
 - What is still risky or unresolved
+- Parallel dependencies or worker outputs that still need integration
+- Atomic commit or work-history references
 - Recommended next step
 
 ## File Naming
@@ -784,6 +924,9 @@ Use this directory for explicit agreements between the planner, generator, and e
 - Done criteria
 - Verification method
 - Evaluator threshold
+- Dependency status: blocked-by, unlocks, or independent
+- Worker context packet: relevant snippets, schemas, API specs, commands, and expected write paths
+- Parallel safety statement when the chunk is assigned alongside other work
 - Related plan, review, and handover artifacts
 
 ## File Naming
@@ -811,6 +954,15 @@ Use this directory for evaluator, QA, and quality-gate records that stay separat
 - Grade against explicit criteria, thresholds, and contract scope.
 - Record failures in enough detail that remediation can proceed without rediscovery.
 - Keep findings evidence-backed and tied to files, routes, behaviors, or outputs.
+- Require a generator self-correction note that states checks run, uncertainty, and low-confidence areas before independent approval.
+
+## Five-Step Maturity Gate
+
+1. Critical errors and stability: static analysis, syntax checks, runtime exception scan, and boundary testing.
+2. Version compatibility: environment sync, framework/runtime compatibility, and dependency audit.
+3. Maintainability and extensibility: SOLID, duplication, abstraction level, constants, and layer separation.
+4. Self-correction: generator-side evaluation plus explicit uncertainty report.
+5. Atomic commits: one logical chunk or remediation per commit with traceable session, chunk, or issue references.
 
 ## Suggested Records
 
@@ -844,6 +996,9 @@ Use this directory for durable plans that can survive session interruption, envi
 - Each chunk should target one verifiable outcome
 - Each chunk must reference its related review note and handover note
 - Each chunk must define its tests, code review trigger, and remediation path
+- For multi-agent execution, an orchestrator must map dependencies before workers start
+- Parallel chunks must have disjoint write scopes or an explicit merge owner
+- Worker plans must include the exact context-injection packet instead of broad repository context
 
 ## Chunking Heuristics
 
@@ -853,14 +1008,26 @@ Split the work when any of these are true:
 - The review would otherwise become too broad to evaluate well
 - The work cannot be validated with one clear test or verification step
 - A session interruption would force someone to reconstruct hidden state
+- Two chunks can run independently without sharing mutable files, schema changes, runtime state, or deployment order
 
 ## Suggested Structure
 
 - \`<feature>/plan.md\`
 - \`<feature>/goal-freeze.md\`
+- \`<feature>/dependency-map.md\`
+- \`<feature>/context-packets/<worker-id>.md\`
 - \`<feature>/chunks/chunk-01.md\`
 - \`<feature>/chunks/chunk-02.md\`
 - \`<feature>/contract.md\`
+
+## Orchestrator Checklist
+
+- Classify backlog items as blocked, sequential, or parallel-ready.
+- Record dependencies, shared files, DB/schema/API impacts, and merge owner.
+- Assign one worker per independent chunk with expected read and write paths.
+- Inject only relevant code snippets, DB schema fragments, API specs, command outputs, and verification commands.
+- Reserve evaluator or reviewer agents for read-only judgment unless remediation is explicitly assigned.
+- Require atomic commits so parallel work history remains traceable.
 
 ## Chunk Template
 
@@ -869,8 +1036,14 @@ Split the work when any of these are true:
 
 - Goal:
 - Scope boundary:
+- Dependency status:
+- Parallel safety:
+- Assigned worker:
+- Context packet:
 - Files expected to change:
 - Verification:
+- Self-correction:
+- Atomic commit scope:
 - Code review:
 - Remediation loop:
 - Related review note:
@@ -909,6 +1082,14 @@ This workspace uses a deliberate context strategy for ${params.workspaceName}.
 - link the exact files and verification evidence the next session needs
 - leave enough state that another agent can continue without chat history
 
+## Context Injection For Parallel Agents
+
+- Give each worker the smallest context that can safely complete its chunk.
+- Include the chunk contract, relevant code snippets, DB schema fragments, API specs, logs, commands, and expected write paths.
+- Exclude unrelated repository areas, old chat history, and other workers' implementation details unless they are an explicit dependency.
+- Record the injected context packet under \`docs/context/\` or \`docs/plans/<feature>/context-packets/\` so the evaluator can audit what the worker saw.
+- If the worker needs broader context, stop and update the contract instead of silently expanding the packet.
+
 ## Why This Matters
 
 Compaction preserves continuity, but resets can restore discipline when long sessions start to lose coherence. The harness should choose the simplest strategy that still protects correctness and continuity.
@@ -945,6 +1126,20 @@ Use these criteria to keep evaluation independent, skeptical, and useful for **$
 - Were tests, checks, or QA paths strong enough for the claimed outcome?
 - Is any coverage gap documented explicitly?
 
+### Parallel Execution Discipline
+
+- Did the orchestrator correctly classify dependencies before assigning parallel work?
+- Did each worker stay inside its injected context and expected write paths?
+- Were integration conflicts, shared files, and merge ownership handled explicitly?
+
+### Code Maturity
+
+- Did static analysis, syntax checks, runtime exception review, and boundary testing pass?
+- Were framework/runtime versions, Java/JDK or equivalent environment assumptions, and dependencies checked for compatibility?
+- Does the code follow SOLID, avoid unnecessary duplication, separate layers clearly, and avoid hardcoded business values?
+- Did the generator produce a self-correction note with uncertainty rather than claiming unsupported confidence?
+- Are commits atomic and traceable to the chunk, session, issue, or plan?
+
 ## Domain Notes
 
 - Active domains: ${domains.join(", ")}
@@ -957,6 +1152,7 @@ Use these criteria to keep evaluation independent, skeptical, and useful for **$
 - Prefer skeptical, evidence-backed findings over generous approval.
 - Do not let the generator self-approve quality-critical work.
 - Fail the chunk if any blocking criterion falls below the agreed threshold.
+- Fail or mark uncertain when self-correction, dependency audit, boundary testing, or atomic commit evidence is missing.
 
 ## Planner Guidance
 

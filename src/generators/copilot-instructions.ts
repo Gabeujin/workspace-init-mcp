@@ -37,12 +37,21 @@ ${renderPlannedTasks(params)}
 ${renderAdditionalContext(params)}
 ## Governance First
 
+- Treat workspace initialization and reconcile as a non-destructive harness overlay for legacy projects.
+- Do not delete, truncate, move, or replace existing application source while adopting workspace-init-mcp artifacts.
 - Governance documentation comes first and last for every meaningful task.
 - Before any implementation, refresh the active context, plan, and review artifacts.
 - Do not start coding until the goal is explicit, review-backed, and frozen.
 - If work is too large for one safe session, split it into resumable chunks before coding.
 - Every chunk must end with updated review, verification, and handover state.
 - Keep the admin dashboard JSON current so non-developers can see progress, KPIs, issues, and git visibility.
+
+## Parallel Agent Work
+
+- The orchestrator agent analyzes the backlog, maps dependencies, and separates parallel-ready chunks from sequential or blocked work.
+- Run workers in parallel only when their write scopes, DB/schema impacts, API contracts, and runtime side effects do not conflict.
+- Inject each worker with only task-relevant context: approved contract, relevant code snippets, schemas, API specs, logs, verification commands, and expected write paths.
+- Workers must not widen scope or coordinate through hidden chat state; integration returns through contracts, evaluations, receipts, dashboard updates, and atomic commits.
 
 ## Delivery Workflow
 
@@ -71,6 +80,16 @@ Follow this sequence for meaningful work:
 - Review 3 should confirm resumability, validation order, and readiness to execute.
 - Programming work must include matching tests or an explicit documented test gap with rationale.
 - After implementation, run verification, code review, and immediate remediation before closure.
+
+## Post-Work Maturity Gate
+
+After AI-generated code changes, verify:
+
+1. Static analysis, syntax checks, likely runtime exception paths, and boundary tests.
+2. Framework/runtime compatibility, environment sync such as Java/JDK version, and dependency audit for added libraries.
+3. Maintainability: SOLID, duplication, abstraction level, constants instead of hardcoding, and business/data-access separation.
+4. Generator self-correction with an uncertainty report when confidence is low or evidence is incomplete.
+5. Atomic commit traceability: one logical chunk or remediation per commit with a session, chunk, plan, or issue reference when available.
 
 ## Documentation Governance
 
@@ -167,11 +186,14 @@ ${isMulti ? "|-- <project-a>/\n|-- <project-b>/\n" : "|-- src/\n"}\`-- ${params.
 
 ## Harness Overrides
 
+- workspace-init-mcp is a harness engineering, artifacts, and governance layer; legacy source remains owned by the project unless a later explicit code-change contract names it.
 - Governance documentation comes first and last for every meaningful agent task.
 - Before implementation, create or refresh the relevant context, plan, and review artifacts.
 - Complete Plan 1 -> Review 1 -> Plan 2 -> Review 2 -> Plan 3 -> Review 3 before broad coding starts.
 - If the work is too large to complete safely in one uninterrupted session, split it into chunks before coding.
 - Each chunk must end with updated work-log, review, verification, and handover state so the task remains resumable.
+- For parallel work, assign independent chunks through an orchestrator and inject only the context each worker needs.
+- Require self-correction, independent evaluation, and atomic commits before closure.
 - Do not treat a task as complete until documentation, verification, and handover all agree on the final state.
 `;
 

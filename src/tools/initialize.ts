@@ -31,6 +31,7 @@ import {
   generateTestInstructions,
 } from "../generators/index.js";
 import { buildManagedFileInventoryFile } from "./managed-inventory.js";
+import { assertGeneratedFilesRespectNonDestructivePolicy } from "./generated-file-safety.js";
 
 /**
  * Collect all files to be generated for the workspace.
@@ -85,6 +86,8 @@ export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
   );
   files.push(buildManagedFileInventoryFile(files));
 
+  assertGeneratedFilesRespectNonDestructivePolicy(files);
+
   return files;
 }
 
@@ -129,7 +132,7 @@ export function buildSummary(
     "",
     "Suggested next steps:",
     "  1. Review .github/copilot-instructions.md and the AI harness files.",
-    "  2. Review .github/ai-harness/context-strategy.md and evaluation-rubrics.md before long-running work begins.",
+    "  2. Review .github/ai-harness/context-strategy.md and evaluation-rubrics.md before long-running work begins, especially the context-injection and post-work maturity gate rules.",
     "  3. Review .github/ai-harness/managed-file-inventory.json and .github/ai-harness/reconcile-policy.json so future reconcile runs can distinguish managed baseline files from user customization and apply the right hold/merge/replace policy.",
     "  4. Start from .github/AGENT-SKILLS.md, AGENT-SKILLS-BY-ROLE.md, and AGENT-SKILLS-BY-DOMAIN.md to trim or extend the catalog.",
     "  5. Open docs/ai-harness/dashboard/index.html and replace the template JSON state with real project signals.",
@@ -141,9 +144,11 @@ export function buildSummary(
     "  11. Review docs/ai-harness/readiness/remaining-work-spec.md and score the workspace against the readiness model.",
     "  12. Run the semantic readiness audit when you need a stricter operator view of placeholder pressure, evidence freshness, and dashboard truthfulness.",
     "  13. Run audit_workspace_upgrade_risk before major reconcile operations or legacy adoption.",
-    "  14. Tailor skill selection, dashboard KPIs, runtime adapters, and operating rules to your real workflows.",
-    "  15. Use runtime archive compaction when closed sessions accumulate and the active ledgers need to stay lightweight.",
-    "  16. Keep docs/work-logs, docs/reviews, docs/contracts, docs/evaluations, docs/handovers, runtime session files, readiness scorecards, semantic audits, and dashboard state current as work evolves.",
+    "  14. For legacy projects, treat workspace-init-mcp as a non-destructive harness overlay: do not delete or replace existing application source while adopting the governance artifacts.",
+    "  15. For parallel delivery, have an orchestrator split independent chunks, inject only task-relevant context into each worker, and reconcile worker outputs through contracts, evaluations, and atomic commits.",
+    "  16. Tailor skill selection, dashboard KPIs, runtime adapters, and operating rules to your real workflows.",
+    "  17. Use runtime archive compaction when closed sessions accumulate and the active ledgers need to stay lightweight.",
+    "  18. Keep docs/work-logs, docs/reviews, docs/contracts, docs/evaluations, docs/handovers, runtime session files, readiness scorecards, semantic audits, and dashboard state current as work evolves.",
   ].join("\n");
 
   return {

@@ -18,9 +18,12 @@ Use this skill for multi-file, high-risk, or long-running implementation work th
 4. Refresh governance artifacts before and after each chunk.
 5. Keep each chunk limited to one verifiable outcome.
 6. Add or update tests for behavior that changes.
+7. Treat legacy adoption as a non-destructive harness overlay; do not delete or replace existing application source during setup.
+8. For parallel work, classify dependencies and assign only independent chunks to workers.
 
 ## Recommended Delegation Roles
 
+- `@harness-orchestrator` for dependency mapping, worker assignment, and context injection
 - `@harness-implementer` for the approved code chunk
 - `@harness-verifier` for targeted checks and regression validation
 - `@harness-doc-writer` for governance updates
@@ -35,6 +38,16 @@ Split the work when any of these are true:
 - the blast radius is unclear
 - test scope is larger than one focused verification pass
 - a session interruption would lose hidden context
+- independent chunks can run in parallel without shared write paths, DB/schema changes, API contract conflicts, or runtime side effects
+
+## Parallel Execution
+
+1. Build a dependency map for the backlog.
+2. Mark chunks as blocked, sequential, or parallel-ready.
+3. Assign one worker per independent chunk.
+4. Define expected write paths and merge owner.
+5. Inject only relevant code snippets, DB schema fragments, API specs, logs, commands, and verification instructions.
+6. Integrate through evaluator evidence, receipts, dashboard updates, and atomic commits.
 
 ## Per-Chunk Workflow
 
@@ -43,4 +56,5 @@ Split the work when any of these are true:
 3. Implement the approved chunk only.
 4. Run targeted verification and update or add tests.
 5. Run independent evaluation or code review and remediate findings immediately.
-6. Refresh handover and governance state before closing the chunk.
+6. Run the maturity gate: static analysis, boundary testing, environment compatibility, dependency audit, maintainability review, self-correction, and atomic commit traceability.
+7. Refresh handover and governance state before closing the chunk.

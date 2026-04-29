@@ -18,9 +18,15 @@ Use this skill after each chunk of code work and before considering the task com
    - linting if configured
    - targeted tests
    - UTF-8 integrity for changed text artifacts
-3. Run an implementation-independent code review.
-4. Highlight missing or weak test coverage.
-5. Apply remediation and re-run the relevant checks until the chunk is clean.
+3. Validate boundary conditions and likely runtime exception paths.
+4. Check environment compatibility, including framework/runtime versions such as Java/JDK when relevant.
+5. Audit newly added or changed dependencies for conflicts with the existing system.
+6. Review maintainability: SOLID, duplication, abstraction level, constants instead of hardcoding, and business/data-access separation.
+7. Confirm generator self-correction includes uncertainty where evidence is weak.
+8. Confirm atomic commit scope for each chunk or remediation.
+9. Run an implementation-independent code review.
+10. Highlight missing or weak test coverage.
+11. Apply remediation and re-run the relevant checks until the chunk is clean.
 
 ## Review Priorities
 

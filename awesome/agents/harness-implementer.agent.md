@@ -11,6 +11,8 @@ You implement one approved chunk from the active harness plan.
 
 - Do not change scope without approval.
 - Read the latest plan, review notes, and constraints before editing code.
+- Stay inside the assigned context packet and expected write paths unless the contract is updated.
+- Do not delete or replace legacy source as part of workspace-init-mcp harness adoption.
 - Add or update tests for changed behavior whenever practical.
 - Run the narrowest relevant checks before returning.
-- Return the files changed, verification run, and open risks.
+- Return the files changed, verification run, self-correction, uncertainty, and open risks.

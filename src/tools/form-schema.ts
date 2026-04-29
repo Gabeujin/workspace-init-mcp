@@ -307,7 +307,7 @@ export function buildInitFormSchema(): FormSchema {
       type: "boolean",
       required: false,
       description:
-        "If true, replace existing generated files instead of skipping them.",
+        "If true, replace existing generated governance/config files instead of skipping them. This never authorizes deleting or replacing legacy application source.",
       default: false,
     },
     {
@@ -387,7 +387,7 @@ export function buildInitFormSchema(): FormSchema {
     formId: "workspace-init",
     formTitle: "Workspace initialization",
     formDescription:
-      "Create a workspace with documentation governance, agent skills, and an optional long-running AI harness.",
+      "Create a non-destructive governance, agent skill, and long-running AI harness overlay for a workspace.",
     version: "2.0.0",
     sections: [
       {
@@ -435,7 +435,7 @@ function buildConversationalGuide(
 
   return `# Workspace initialization guide
 
-Provide the required information first. Optional inputs help tailor governance, skills, and long-running AI harness behavior.
+Provide the required information first. Optional inputs help tailor governance, skills, and long-running AI harness behavior. For existing or legacy repositories, treat this as a non-destructive overlay: preserve application source and add harness artifacts around it.
 
 ## Required
 

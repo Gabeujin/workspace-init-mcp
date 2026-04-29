@@ -49,7 +49,7 @@ export const HARNESS_RUNTIME_ADAPTER_IDS = [
 type HarnessRuntimeAdapterId = (typeof HARNESS_RUNTIME_ADAPTER_IDS)[number];
 const NATIVE_EXECUTOR_OVERRIDES_PATH =
   ".github/ai-harness/native-executor-overrides.json";
-const HARNESS_RUNTIME_VERSION = "4.1.2";
+const HARNESS_RUNTIME_VERSION = "4.2.0";
 const HARNESS_ADAPTER_CONTRACT_VERSION = "1.0.0";
 const HARNESS_VERSION_INDEX_PATH = "docs/ai-harness/runtime/version-index.json";
 const HARNESS_COMPATIBILITY_MATRIX_PATH =
@@ -217,6 +217,10 @@ interface HarnessRuntimeSessionState {
     status: string;
     summary: string;
     outputs: string[];
+    dependencyNotes?: string | null;
+    contextInjectionNotes?: string | null;
+    expectedWritePaths?: string[];
+    verificationCommands?: string[];
   };
   phases: HarnessPhaseRecord[];
   events: HarnessRuntimeEvent[];
@@ -260,6 +264,10 @@ export interface StartHarnessSessionParams {
   sessionId?: string;
   chunkId?: string;
   chunkTitle?: string;
+  dependencyNotes?: string;
+  contextInjectionNotes?: string;
+  expectedWritePaths?: string[];
+  verificationCommands?: string[];
   adoptionTrack?: AdoptionTrack;
   contextPolicy?: ContextPolicy;
   queueIfBusy?: boolean;
@@ -2295,6 +2303,8 @@ function buildSessionSummaryMarkdown(session: HarnessRuntimeSessionState): strin
 - Current phase: \`${session.session.currentPhase}\`
 - Next actor: ${session.session.nextActor}
 - Chunk: \`${session.chunk.id}\` (${session.chunk.title})
+- Dependency notes: ${session.chunk.dependencyNotes ?? "unclassified"}
+- Context injection: ${session.chunk.contextInjectionNotes ?? "use generated work packet defaults"}
 - Context resets: ${session.context.resetCount}
 
 ## Current Instruction
@@ -2316,6 +2326,8 @@ ${session.notes.current}
 - Tests: ${session.verification.testsStatus}
 - Review: ${session.verification.reviewStatus}
 - Remediation: ${session.verification.remediationStatus}
+- Commands: ${(session.chunk.verificationCommands ?? []).join(", ") || "not specified"}
+- Atomic commit policy: one logical change per chunk or remediation with a traceable session/chunk reference
 
 ## Active Phase Artifact
 
@@ -2732,6 +2744,8 @@ function buildRoleBrief(session: HarnessRuntimeSessionState): string {
       return [
         ...baseLines,
         "Planner brief:",
+        "- Act as orchestrator for multi-chunk work: classify dependencies and parallel-safe chunks.",
+        "- Prepare minimal context-injection packets for each worker.",
         "- Keep the next step bounded, testable, and resumable.",
         "- Preserve the three-plan / three-review ladder before implementation.",
         "- Freeze the goal only when the chunk is explicit enough for contract review.",
@@ -2741,7 +2755,9 @@ function buildRoleBrief(session: HarnessRuntimeSessionState): string {
         ...baseLines,
         "Generator brief:",
         "- Build only against the approved contract and current chunk scope.",
+        "- Stay inside the injected context packet and expected write paths unless the contract is updated.",
         "- Record test evidence, implementation tradeoffs, and remaining risk explicitly.",
+        "- Include self-correction and uncertainty before evaluator review.",
         "- If drift appears, use context_reset instead of stretching the session context.",
       ].join("\n");
     case "evaluator":
@@ -2750,6 +2766,7 @@ function buildRoleBrief(session: HarnessRuntimeSessionState): string {
         "Evaluator brief:",
         "- Judge independently and do not self-approve generator work.",
         "- Use skeptical, evidence-backed findings when requesting changes.",
+        "- Verify static analysis, boundary tests, compatibility, dependency audit, maintainability, self-correction, and atomic commit evidence.",
         "- Verification is not complete until the contract is actually satisfied.",
       ].join("\n");
     default:
@@ -2804,6 +2821,7 @@ function buildPhaseWritePaths(session: HarnessRuntimeSessionState): string[] {
   const activePhase = activePhaseRecord(session);
   return uniqueStrings([
     activePhase?.artifactPath ?? null,
+    ...(session.chunk.expectedWritePaths ?? []),
     `docs/ai-harness/runtime/sessions/${session.session.id}.session.json`,
     `docs/ai-harness/runtime/sessions/${session.session.id}.md`,
     `docs/ai-harness/runtime/work-packets/${session.session.id}.work-packet.json`,
@@ -2821,6 +2839,18 @@ function buildWorkPacketMarkdown(packet: Record<string, unknown>): string {
     : [];
   const recentEvents = Array.isArray(packet.recentEvents)
     ? (packet.recentEvents as Array<Record<string, unknown>>)
+    : [];
+  const parallelExecution = isPlainObject(packet.parallelExecution)
+    ? packet.parallelExecution
+    : {};
+  const contextInjection = isPlainObject(packet.contextInjection)
+    ? packet.contextInjection
+    : {};
+  const qualityGateChecklist = Array.isArray(packet.qualityGateChecklist)
+    ? (packet.qualityGateChecklist as string[])
+    : [];
+  const verificationCommands = Array.isArray(packet.verificationCommands)
+    ? (packet.verificationCommands as string[])
     : [];
 
   return `# Work Packet: ${String(packet.sessionId || "unknown")}
@@ -2847,6 +2877,31 @@ ${requiredReads.map((item) => `- ${item}`).join("\n") || "- none"}
 ## Expected Writes
 
 ${expectedWrites.map((item) => `- ${item}`).join("\n") || "- none"}
+
+## Parallel Execution
+
+- Orchestrator required for multi-chunk work: ${String(parallelExecution.orchestratorRequiredForMultiChunkWork ?? "true")}
+- Dependency status: ${String(parallelExecution.dependencyStatus || "unclassified")}
+- Safety rule: ${String(parallelExecution.parallelSafetyRule || "n/a")}
+- Merge rule: ${String(parallelExecution.mergeRule || "n/a")}
+
+## Context Injection
+
+- Rule: ${String(contextInjection.rule || "Use the smallest sufficient context packet.")}
+- Forbidden: ${String(contextInjection.forbidden || "Do not rely on hidden or unrelated context.")}
+- Escalation: ${String(contextInjection.escalation || "Stop and update the contract when more context is needed.")}
+
+## Quality Gate Checklist
+
+${qualityGateChecklist.map((item) => `- ${item}`).join("\n") || "- none"}
+
+## Verification Commands
+
+${verificationCommands.map((item) => `- ${item}`).join("\n") || "- none"}
+
+## Atomic Commit Policy
+
+${String(packet.atomicCommitPolicy || "Use one logical change per commit.")}
 
 ## Recent Events
 
@@ -2883,7 +2938,10 @@ function buildAdapterPromptBlock(
     "- Treat the governed files as the source of truth over any hidden chat memory.",
     "- If another runtime handed this off, trust adapter-contract.json, session-continuity.md, the work packet, and runtime session state before chat history.",
     "- Do not widen scope beyond the active chunk and approved contract.",
+    "- For parallel work, stay inside your assigned dependency-free chunk and expected write paths.",
+    "- Use only the injected context packet unless you stop and update the contract.",
     "- Persist decisions, evidence, and outcomes into the referenced durable files.",
+    "- Before completion, record static analysis, boundary testing, compatibility, dependency audit, maintainability, self-correction, and atomic commit evidence.",
     "- Preserve sessionId, chunkId, currentPhase, nextActor, and leaseStatus unless an MCP runtime tool advances governance.",
     "- If the work is blocked or ambiguous, stop and record the blocker instead of improvising.",
     "",
@@ -3266,6 +3324,9 @@ function writeWorkPacket(
     chunkTitle: session.chunk.title,
     chunkStatus: session.chunk.status,
     chunkSummary: session.chunk.summary,
+    dependencyNotes: session.chunk.dependencyNotes ?? null,
+    contextInjectionNotes: session.chunk.contextInjectionNotes ?? null,
+    verificationCommands: session.chunk.verificationCommands ?? [],
     rolePromptFile: rolePromptRelativePath(session.session.nextActor),
     stateFile: relativeToWorkspace(workspacePath, sessionPath),
     summaryFile: relativeToWorkspace(workspacePath, summaryPath),
@@ -3280,6 +3341,36 @@ function writeWorkPacket(
     verification: session.verification,
     requiredReads: buildPhaseReadPaths(session),
     expectedWrites: buildPhaseWritePaths(session),
+    parallelExecution: {
+      orchestratorRequiredForMultiChunkWork: true,
+      dependencyStatus:
+        session.chunk.dependencyNotes ??
+        "Classify this chunk as blocked, sequential, or parallel-ready before assigning workers.",
+      parallelSafetyRule:
+        "Parallel execution is allowed only when expected write paths, runtime side effects, database/schema changes, and API contracts do not conflict.",
+      mergeRule:
+        "Worker outputs must return through receipts, evaluations, dashboard updates, and atomic commits before integration is complete.",
+    },
+    contextInjection: {
+      rule:
+        session.chunk.contextInjectionNotes ??
+        "Inject only task-relevant code snippets, DB schema fragments, API specs, logs, commands, and expected write paths.",
+      forbidden:
+        "Do not rely on hidden chat state, unrelated repository areas, or another worker's private scratch context.",
+      escalation:
+        "If more context is needed, stop and update the context packet or chunk contract before continuing.",
+    },
+    qualityGateChecklist: [
+      "Static analysis and likely runtime exception scan",
+      "Boundary testing for edge inputs and limits",
+      "Environment and framework/runtime version compatibility check",
+      "Dependency audit for newly added or changed libraries",
+      "Maintainability review for SOLID, duplication, abstraction level, constants, and layer separation",
+      "Generator self-correction with uncertainty report",
+      "Atomic commit traceability for the active chunk or remediation",
+    ],
+    atomicCommitPolicy:
+      "Use one logical change per commit and reference the session, chunk, plan, or issue when available.",
     roleBrief: buildRoleBrief(session),
     summary: `${session.session.nextActor} should continue ${session.session.currentPhase} for ${session.session.id} using the active artifact and approved governance boundaries.`,
     recentEvents: session.events.slice(-5).map((event) => ({
@@ -4220,6 +4311,10 @@ export function startHarnessSession(
       status: "planning",
       summary: params.goal,
       outputs: [],
+      dependencyNotes: params.dependencyNotes ?? null,
+      contextInjectionNotes: params.contextInjectionNotes ?? null,
+      expectedWritePaths: params.expectedWritePaths ?? [],
+      verificationCommands: params.verificationCommands ?? [],
     },
     phases: buildPhaseRecords(
       {

@@ -11,6 +11,7 @@ You close work through a final quality gate.
 
 - Run the post-work review flow before declaring completion.
 - Use independent evaluator evidence and explicit thresholds before approving the chunk.
+- Check static analysis, boundary tests, environment compatibility, dependency audit, maintainability, self-correction, and atomic commit evidence.
 - Remediate critical findings immediately.
 - Re-run verification after remediation.
 - Refresh governance artifacts last.

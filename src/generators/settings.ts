@@ -141,6 +141,8 @@ applyTo: "**/*.{test,spec}.{js,ts,jsx,tsx,py,java}"
 - Edge Cases: 경계값, 빈 값, null/undefined
 - Error Cases: 예외 발생 시나리오
 - 입력 유효성 검증
+- Boundary Testing: 입력값의 최소/최대, 빈 컬렉션, 큰 페이로드, 시간/날짜 경계, 권한 경계를 확인
+- Legacy Safety: workspace-init-mcp 적용 테스트에서는 기존 애플리케이션 소스가 삭제되거나 대체되지 않았는지 확인
 
 ## 테스트 구조
 
@@ -198,6 +200,13 @@ applyTo: "**"
 - N+1 쿼리 등 비효율적 패턴이 없는가?
 - 적절한 캐싱 전략이 적용되었는가?
 
+### 6. 성숙도 및 병렬 작업 검증
+- Static Analysis, Boundary Testing, Environment Sync, Dependency Audit 결과가 충분한가?
+- SOLID, 중복 제거, 추상화 수준, 하드코딩 제거, 비즈니스/데이터 계층 분리가 지켜졌는가?
+- 생성자가 자기 검토(Self-Correction)와 불확실한 부분을 명시했는가?
+- 병렬 작업이라면 청크 의존성, 컨텍스트 주입 범위, expected write paths, atomic commit 추적성이 남아 있는가?
+- workspace-init-mcp 적용 또는 reconcile 작업이 기존 레거시 소스를 삭제하거나 대체하지 않았는가?
+
 ## 리뷰 결과 형식
 
 \`\`\`markdown
@@ -250,6 +259,14 @@ applyTo: "**"
 - \`chore\`: 빌드 설정, 의존성 업데이트 등
 - \`perf\`: 성능 개선
 - \`ci\`: CI/CD 설정 변경
+
+## Atomic Commit Rules
+
+- Use one logical change per commit.
+- Do not mix feature work, refactoring, test repair, and remediation unless they belong to the same approved chunk.
+- Reference the session ID, chunk ID, plan, issue, or ticket when available.
+- For parallel agent work, each worker commit should map to exactly one assigned chunk or one evaluator-requested remediation.
+- Never hide generated-source replacement or legacy-source rewrites inside a generic chore commit.
 
 ## 규칙
 

@@ -1,7 +1,7 @@
 ﻿#!/usr/bin/env node
 
 /**
- * workspace-init-mcp MCP Server v4.1.2
+ * workspace-init-mcp MCP Server v4.2.0
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -30,6 +30,7 @@ import {
   reconcileWorkspaceInitialization,
   restoreReconcileBackup,
 } from "./tools/reconcile.js";
+import { assertGeneratedFilesRespectNonDestructivePolicy } from "./tools/generated-file-safety.js";
 import {
   auditWorkspaceManagedSemanticDiff,
   auditWorkspaceUpgradeRisk,
@@ -238,7 +239,7 @@ const InitializeWorkspaceInputSchema = BaseWorkspaceInputSchema.extend({
     .boolean()
     .optional()
     .describe(
-      "If true, overwrite existing files. If false (default), skip files that already exist."
+      "If true, overwrite existing generated governance/config files only. If false (default), skip files that already exist. This never authorizes deleting or replacing legacy application source."
     ),
 });
 
@@ -308,7 +309,7 @@ const ReconcileWorkspaceInputSchema = BaseWorkspaceInputSchema.partial().extend(
 
 const server = new McpServer({
   name: "workspace-init-mcp",
-  version: "4.1.2",
+  version: "4.2.0",
 });
 
 // ---------------------------------------------------------------------------
@@ -342,6 +343,7 @@ This tool creates a complete workspace setup including:
 Agent Skills are included by default (set includeAgentSkills: false to skip).
 Use targetIDEs to generate skills for multiple IDEs (vscode, cursor, claude-code, openhands).
 Use fileEncoding to set file encoding (default: utf-8). Use lineEnding to set line endings (default: lf).
+Legacy adoption is non-destructive: generated outputs are limited to governance, documentation, IDE, and harness artifacts and must not delete or replace existing application source files.
 
 Required inputs: workspaceName, purpose, workspacePath
 Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMultiRepo, additionalContext, plannedTasks, includeAgentSkills, agentSkillsIntent, fileEncoding, targetIDEs, lineEnding`,
@@ -451,6 +453,7 @@ Use this when:
 
 This tool:
 - analyzes the existing repository and resolves a best-effort latest configuration
+- treats the operation as a non-destructive harness overlay and does not delete or replace legacy application source
 - consults the managed file inventory when present so customized managed files can be held for manual review
 - writes missing latest-version files
 - installs version-index, compatibility-matrix, adapter-contract, and session-continuity files required by newer agent runtimes
@@ -981,6 +984,7 @@ This tool:
 - opens governed runtime state under docs/ai-harness/runtime/
 - creates a durable session JSON snapshot and markdown summary
 - seeds the first chunk and moves the workflow to plan-1
+- captures dependency notes, expected write paths, verification commands, and context-injection guidance for parallel workers
 - synchronizes the administrator dashboard so non-developers can see the active session
 
 Use this before meaningful implementation begins. The session is file-system-based and survives context resets, long-running work, and interrupted sessions.`,
@@ -1007,6 +1011,22 @@ Use this before meaningful implementation begins. The session is file-system-bas
         .string()
         .optional()
         .describe("Human-readable chunk title. Defaults to a trimmed goal summary."),
+      dependencyNotes: z
+        .string()
+        .optional()
+        .describe("Dependency classification for this chunk, for example blocked, sequential, or parallel-ready with the reason."),
+      contextInjectionNotes: z
+        .string()
+        .optional()
+        .describe("Minimal context packet guidance for the worker: relevant snippets, schemas, API specs, logs, commands, and expected write paths."),
+      expectedWritePaths: z
+        .array(z.string())
+        .optional()
+        .describe("Expected write paths for this chunk. Use this to keep parallel workers inside disjoint scopes."),
+      verificationCommands: z
+        .array(z.string())
+        .optional()
+        .describe("Commands or checks the worker/evaluator should run for this chunk."),
       adoptionTrack: z
         .enum(["legacy-modernization", "greenfield"])
         .optional()
@@ -1034,6 +1054,10 @@ Use this before meaningful implementation begins. The session is file-system-bas
         sessionId: params.sessionId,
         chunkId: params.chunkId,
         chunkTitle: params.chunkTitle,
+        dependencyNotes: params.dependencyNotes,
+        contextInjectionNotes: params.contextInjectionNotes,
+        expectedWritePaths: params.expectedWritePaths,
+        verificationCommands: params.verificationCommands,
         adoptionTrack: params.adoptionTrack,
         contextPolicy: params.contextPolicy,
         queueIfBusy: params.queueIfBusy,
@@ -1950,6 +1974,7 @@ skills and agents, then pass the selected IDs to this tool.`,
         purpose: "Selected agent skill installation",
         targetIDEs,
       });
+      assertGeneratedFilesRespectNonDestructivePolicy(files);
       const force = params.force ?? false;
       const written: string[] = [];
       const skipped: string[] = [];

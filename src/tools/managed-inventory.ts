@@ -8,7 +8,7 @@ import { analyzeWorkspace } from "./status.js";
 
 export const MANAGED_FILE_INVENTORY_PATH = ".github/ai-harness/managed-file-inventory.json";
 export const MANAGED_INVENTORY_SCHEMA_VERSION = "1.0.0";
-const TOOL_VERSION = "4.1.2";
+const TOOL_VERSION = "4.2.0";
 
 export const MANAGED_JSON_MERGE_PATHS = new Set([
   "docs/ai-harness/dashboard/state/dashboard-state.json",
@@ -769,6 +769,9 @@ export function auditWorkspaceUpgradeRisk(
   if (inventory.status !== "present") {
     suggestions.push("Run reconcile as a dry run first. This workspace is missing a trustworthy managed baseline.");
   }
+  suggestions.push(
+    "Preserve legacy application source during harness adoption; workspace-init-mcp should add or merge governance artifacts, not delete or replace business code."
+  );
   if (modifiedManagedFiles.length > 0) {
     suggestions.push("Keep overwriteModifiedManagedFiles disabled and review customized managed files one by one.");
   }
