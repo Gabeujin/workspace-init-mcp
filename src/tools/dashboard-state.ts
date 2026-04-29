@@ -755,6 +755,24 @@ export function validateDashboardStateShape(
           errors,
           `dashboardState.governedSessions[${index}].governance`,
           sessionGovernance,
+          "contractApproved"
+        );
+        requireBooleanField(
+          errors,
+          `dashboardState.governedSessions[${index}].governance`,
+          sessionGovernance,
+          "independentEvaluationPassed"
+        );
+        requireBooleanField(
+          errors,
+          `dashboardState.governedSessions[${index}].governance`,
+          sessionGovernance,
+          "governanceRefreshed"
+        );
+        requireBooleanField(
+          errors,
+          `dashboardState.governedSessions[${index}].governance`,
+          sessionGovernance,
           "closeoutReady"
         );
         requireStringField(

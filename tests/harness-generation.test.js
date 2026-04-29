@@ -34,6 +34,7 @@ const {
 const {
   assertGeneratedFilesRespectNonDestructivePolicy,
   isProtectedSourcePath,
+  normalizeSafeWorkspaceRelativePaths,
 } = generatedFileSafetyModule;
 const {
   startHarnessSession,
@@ -167,6 +168,52 @@ assert.ok(
   files.every((file) => !isProtectedSourcePath(file.relativePath)),
   "workspace initialization must not generate files inside protected legacy source roots"
 );
+assert.throws(
+  () =>
+    assertGeneratedFilesRespectNonDestructivePolicy([
+      { relativePath: "/docs/ai-harness/runtime/absolute.md", content: "" },
+    ]),
+  /Generated file safety policy blocked/,
+  "generated file safety should reject raw absolute paths before normalization"
+);
+assert.throws(
+  () =>
+    assertGeneratedFilesRespectNonDestructivePolicy([
+      { relativePath: "//server/share/docs/ai-harness/runtime/unc.md", content: "" },
+    ]),
+  /Generated file safety policy blocked/,
+  "generated file safety should reject UNC-style paths before normalization"
+);
+assert.deepEqual(
+  normalizeSafeWorkspaceRelativePaths(
+    ["docs\\ai-harness\\runtime\\example-output.md", "src/server.js"],
+    "test paths"
+  ),
+  ["docs/ai-harness/runtime/example-output.md", "src/server.js"],
+  "safe workspace paths should be normalized for runtime contracts"
+);
+assert.throws(
+  () => normalizeSafeWorkspaceRelativePaths(["../outside.md"], "test paths"),
+  /Unsafe test paths blocked/,
+  "path traversal should not be accepted as a workspace-relative contract path"
+);
+assert.throws(
+  () => normalizeSafeWorkspaceRelativePaths(["src/"], "test paths"),
+  /bare protected source roots/,
+  "bare protected source roots are too broad for expected write paths"
+);
+for (const unsafeRootAlias of ["src/.", "src//", "./src", "././src", "SRC/", "Src/."]) {
+  assert.throws(
+    () => normalizeSafeWorkspaceRelativePaths([unsafeRootAlias], "test paths"),
+    /bare protected source roots/,
+    `${unsafeRootAlias} should be treated as a bare protected source root`
+  );
+}
+assert.throws(
+  () => normalizeSafeWorkspaceRelativePaths(["C:outside.md"], "test paths"),
+  /Unsafe test paths blocked/,
+  "Windows drive-relative paths should not be accepted as workspace-relative paths"
+);
 const byPath = new Map(files.map((file) => [file.relativePath, file.content]));
 
 const registryIndex = byPath.get(".github/AGENT-SKILLS.md");
@@ -266,6 +313,12 @@ assert.ok(
     (rule) => rule.pattern === "src/" && rule.policy === "hold"
   ),
   "reconcile policy should explicitly hold legacy source roots outside harness ownership"
+);
+assert.ok(
+  parsedReconcilePolicy.nonDestructiveAdoption?.protectedSourceRoots.includes(
+    "services/"
+  ),
+  "reconcile policy should keep all declared protected source roots available for enforcement"
 );
 
 const nativeExecutorOverrides = byPath.get(
@@ -370,7 +423,7 @@ assert.match(runtimeReadme, /adapter-contract\.json/);
 const runtimeVersionIndex = byPath.get("docs/ai-harness/runtime/version-index.json");
 assert.ok(runtimeVersionIndex, "runtime version capability index not generated");
 const parsedRuntimeVersionIndex = JSON.parse(runtimeVersionIndex);
-assert.equal(parsedRuntimeVersionIndex.latestVersion, "4.2.0");
+assert.equal(parsedRuntimeVersionIndex.latestVersion, "4.2.1");
 assert.ok(
   parsedRuntimeVersionIndex.versions.some(
     (entry) =>
@@ -398,24 +451,40 @@ assert.ok(
   ),
   "runtime version index should describe the 4.2.0 orchestration and safety capabilities"
 );
+assert.ok(
+  parsedRuntimeVersionIndex.versions.some(
+    (entry) =>
+      entry.version === "4.2.1" &&
+      entry.capabilities.includes("runtime-path-alias-hardening") &&
+      entry.capabilities.includes("runtime-validation-json-diagnostics") &&
+      entry.capabilities.includes("background-native-executor-failure-state")
+  ),
+  "runtime version index should describe the 4.2.1 safety hardening capabilities"
+);
 
 const runtimeCompatibilityMatrix = byPath.get(
   "docs/ai-harness/runtime/compatibility-matrix.json"
 );
 assert.ok(runtimeCompatibilityMatrix, "runtime compatibility matrix not generated");
 const parsedRuntimeCompatibilityMatrix = JSON.parse(runtimeCompatibilityMatrix);
-assert.equal(parsedRuntimeCompatibilityMatrix.currentVersion, "4.2.0");
+assert.equal(parsedRuntimeCompatibilityMatrix.currentVersion, "4.2.1");
 assert.ok(
   parsedRuntimeCompatibilityMatrix.upgradePaths.some(
-    (entry) => entry.from === "4.1.1" && entry.to === "4.2.0"
+    (entry) => entry.from === "4.1.1" && entry.to === "4.2.1"
   ),
-  "runtime compatibility matrix should include the 4.1.1 to 4.2.0 upgrade path"
+  "runtime compatibility matrix should include the 4.1.1 to 4.2.1 upgrade path"
 );
 assert.ok(
   parsedRuntimeCompatibilityMatrix.upgradePaths.some(
-    (entry) => entry.from === "4.1.2" && entry.to === "4.2.0"
+    (entry) => entry.from === "4.1.2" && entry.to === "4.2.1"
   ),
-  "runtime compatibility matrix should include the 4.1.2 to 4.2.0 upgrade path"
+  "runtime compatibility matrix should include the 4.1.2 to 4.2.1 upgrade path"
+);
+assert.ok(
+  parsedRuntimeCompatibilityMatrix.upgradePaths.some(
+    (entry) => entry.from === "4.2.0" && entry.to === "4.2.1"
+  ),
+  "runtime compatibility matrix should include the 4.2.0 to 4.2.1 upgrade path"
 );
 assert.ok(
   parsedRuntimeCompatibilityMatrix.requiredRuntimeFiles.includes(
@@ -445,6 +514,11 @@ assert.ok(
 assert.ok(
   parsedRuntimeAdapterContract.requiredHandoffFields.includes("compatibility"),
   "runtime adapter contract should require compatibility metadata"
+);
+assert.deepEqual(
+  parsedRuntimeVersionIndex.adapterCompatibility.stableHandoffFields,
+  parsedRuntimeAdapterContract.requiredHandoffFields,
+  "runtime version index and adapter contract should share the same required handoff fields"
 );
 assert.ok(
   parsedRuntimeAdapterContract.parallelExecutionRules.some((rule) =>
@@ -1024,6 +1098,60 @@ try {
   const generatedFiles = collectFiles(createParams());
   writeGeneratedFiles(fullWorkspace, generatedFiles);
 
+  assert.throws(
+    () =>
+      startHarnessSession({
+        workspacePath: fullWorkspace,
+        goal: "Unsafe runtime write path should be blocked before session creation.",
+        sessionId: "session-runtime-unsafe",
+        expectedWritePaths: ["../outside.md"],
+      }),
+    /Unsafe harness expected write paths blocked/,
+    "runtime sessions should reject unsafe expected write paths before handoff generation"
+  );
+  assert.throws(
+    () =>
+      startHarnessSession({
+        workspacePath: fullWorkspace,
+        goal: "Unsafe runtime session ID should be blocked before file writes.",
+        sessionId: "../session-escape",
+      }),
+    /sessionId must be a safe path segment/,
+    "runtime session IDs must not be allowed to escape runtime directories"
+  );
+  assert.throws(
+    () =>
+      startHarnessSession({
+        workspacePath: fullWorkspace,
+        goal: "Unsafe runtime chunk ID should be blocked before phase artifacts.",
+        sessionId: "session-runtime-safe",
+        chunkId: "chunk/escape",
+      }),
+    /chunkId must be a safe path segment/,
+    "runtime chunk IDs must not be allowed to become nested path fragments"
+  );
+  assert.throws(
+    () =>
+      startHarnessSession({
+        workspacePath: fullWorkspace,
+        goal: "Windows reserved runtime session ID should be blocked before file writes.",
+        sessionId: "CON",
+      }),
+    /Windows reserved file name/,
+    "runtime session IDs must not be allowed to use Windows reserved file names"
+  );
+  assert.throws(
+    () =>
+      startHarnessSession({
+        workspacePath: fullWorkspace,
+        goal: "Trailing-dot runtime chunk ID should be blocked before phase artifacts.",
+        sessionId: "session-runtime-safe",
+        chunkId: "chunk-runtime-unsafe.",
+      }),
+    /safe path segment/,
+    "runtime chunk IDs must not be allowed to use Windows trailing-dot aliases"
+  );
+
   const startedSession = startHarnessSession({
     workspacePath: fullWorkspace,
     goal: "Deliver the first governed runtime-backed feature slice.",
@@ -1263,7 +1391,7 @@ try {
   const codexHandoffJson = JSON.parse(
     fs.readFileSync(path.join(fullWorkspace, codexHandoff.handoffPath), "utf-8")
   );
-  assert.equal(codexHandoffJson.compatibility.mcpServerVersion, "4.2.0");
+  assert.equal(codexHandoffJson.compatibility.mcpServerVersion, "4.2.1");
   assert.equal(
     codexHandoffJson.fileReferences.adapterContractFile,
     "docs/ai-harness/runtime/adapter-contract.json"
@@ -1272,6 +1400,12 @@ try {
     codexHandoffJson.compatibility.requiredInterfaceFields.includes("sessionId"),
     "adapter handoff should declare the stable cross-agent interface fields"
   );
+  for (const requiredField of parsedRuntimeAdapterContract.requiredHandoffFields) {
+    assert.ok(
+      codexHandoffJson.compatibility.requiredInterfaceFields.includes(requiredField),
+      `adapter handoff compatibility should include ${requiredField}`
+    );
+  }
   const codexExecutionBridge = prepareHarnessExecutionBridge(
     fullWorkspace,
     "codex-cli",
@@ -1307,6 +1441,24 @@ try {
   assert.equal(
     codexBridgeManifest.compatibility.adapterContractFile,
     "docs/ai-harness/runtime/adapter-contract.json"
+  );
+  const codexLaunchPowershell = fs.readFileSync(
+    path.join(fullWorkspace, codexExecutionBridge.launchPowershellPath),
+    "utf-8"
+  );
+  const codexLaunchBash = fs.readFileSync(
+    path.join(fullWorkspace, codexExecutionBridge.launchBashPath),
+    "utf-8"
+  );
+  assert.match(
+    codexLaunchPowershell,
+    /Write-Host '  /,
+    "PowerShell launch helper should print commands with single-quoted literals"
+  );
+  assert.match(
+    codexLaunchBash,
+    /printf '%s\\n' '/,
+    "bash launch helper should avoid double-quoted echo expansion"
   );
   const claudeHandoff = prepareHarnessAdapterHandoff(
     fullWorkspace,
@@ -1353,6 +1505,19 @@ try {
       String(command).includes('gemini -p "@')
     ),
     "Gemini execution bridge should include the dedicated prompt-file inclusion command"
+  );
+  assert.throws(
+    () =>
+      recordHarnessExecutionResult({
+        workspacePath: fullWorkspace,
+        bridgeId: "codex-cli",
+        sessionId: "session-runtime-002",
+        outcome: "completed",
+        summary: "Unsafe receipt artifact path should be rejected.",
+        artifactPaths: ["../outside.md"],
+      }),
+    /Unsafe harness execution receipt artifact paths blocked/,
+    "execution receipts should reject path traversal artifact references"
   );
   const executionReceipt = recordHarnessExecutionResult({
     workspacePath: fullWorkspace,
@@ -1488,6 +1653,52 @@ try {
     launchedGeminiNativeExecutor.status,
     "dry-run",
     "Gemini native executor launch should also support governed dry runs"
+  );
+  const failedBackgroundNativeExecutor = launchHarnessNativeExecutor({
+    workspacePath: fullWorkspace,
+    bridgeId: "gemini-cli",
+    sessionId: "session-runtime-002",
+    executableOverride: path.join(fullWorkspace, "missing-native-executor"),
+    argsOverride: ["--version"],
+  });
+  assert.equal(
+    failedBackgroundNativeExecutor.status,
+    "launching",
+    "background native executor launch should start in a non-definitive launching state"
+  );
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const failedNativeStatus = getHarnessNativeExecutionStatus(
+    fullWorkspace,
+    "session-runtime-002",
+    "gemini-cli"
+  );
+  assert.equal(
+    failedNativeStatus.status,
+    "failed",
+    "invalid background executable should be recorded as a failed native execution"
+  );
+  assert.equal(
+    failedNativeStatus.errorCode,
+    "spawn-error",
+    "invalid background executable should preserve the spawn error code"
+  );
+  const failedNativeDashboardState = JSON.parse(
+    fs.readFileSync(
+      path.join(
+        fullWorkspace,
+        "docs",
+        "ai-harness",
+        "dashboard",
+        "state",
+        "dashboard-state.json"
+      ),
+      "utf-8"
+    )
+  );
+  assert.equal(
+    failedNativeDashboardState.runtimeOrchestration.nativeExecutionStatus,
+    "failed",
+    "dashboard should reflect background native executor spawn failures"
   );
   fs.writeFileSync(
     path.join(
@@ -1861,6 +2072,27 @@ try {
     ),
     "refresh should preserve independent evaluation discipline metadata"
   );
+  const independentEvaluationKpi = refreshedState.kpis.find(
+    (kpi) => kpi.id === "independent-evaluation-discipline"
+  );
+  assert.ok(
+    independentEvaluationKpi,
+    "independent evaluation discipline KPI should be present"
+  );
+  assert.match(
+    independentEvaluationKpi.value,
+    /^0 \/ /,
+    "independent evaluation discipline should require explicit evaluator approval evidence"
+  );
+  const contractCoverageKpi = refreshedState.kpis.find(
+    (kpi) => kpi.id === "contract-coverage"
+  );
+  assert.ok(contractCoverageKpi, "contract coverage KPI should be present");
+  assert.match(
+    contractCoverageKpi.value,
+    /^0 \/ /,
+    "contract coverage should not report readiness from chunkId and nextStep alone"
+  );
   assert.ok(
     fs.existsSync(path.join(exportDir, "index.html")),
     "static export should include index.html"
@@ -1893,6 +2125,40 @@ try {
   assert.match(semanticAudit.summary, /Workspace readiness semantic audit:/);
 } finally {
   fs.rmSync(fullWorkspace, { recursive: true, force: true });
+}
+
+const corruptRuntimeWorkspace = fs.mkdtempSync(path.join(process.cwd(), "tmp-corrupt-runtime-"));
+try {
+  writeGeneratedFiles(corruptRuntimeWorkspace, collectFiles(createParams()));
+  fs.writeFileSync(
+    path.join(
+      corruptRuntimeWorkspace,
+      "docs",
+      "ai-harness",
+      "runtime",
+      "state",
+      "current-work-packet.json"
+    ),
+    "{not-json",
+    "utf-8"
+  );
+  const corruptValidation = validateWorkspace(corruptRuntimeWorkspace);
+  assert.ok(
+    corruptValidation.items.some(
+      (item) =>
+        item.path === "docs/ai-harness/runtime/state/current-work-packet.json" &&
+        item.status === "outdated" &&
+        item.details?.includes("Invalid JSON")
+    ),
+    "corrupted runtime JSON should be reported with parse details instead of throwing"
+  );
+  assert.match(
+    corruptValidation.summary,
+    /current-work-packet\.json \(Invalid JSON:/,
+    "validation summary should distinguish corrupted runtime JSON from missing artifacts"
+  );
+} finally {
+  fs.rmSync(corruptRuntimeWorkspace, { recursive: true, force: true });
 }
 
 const closingWorkspace = fs.mkdtempSync(path.join(process.cwd(), "tmp-closed-runtime-"));
@@ -2182,6 +2448,50 @@ try {
   fs.rmSync(bareLegacyWorkspace, { recursive: true, force: true });
 }
 
+const malformedPolicyWorkspace = fs.mkdtempSync(path.join(process.cwd(), "tmp-malformed-policy-"));
+try {
+  writeGeneratedFiles(malformedPolicyWorkspace, collectFiles(createParams()));
+  fs.writeFileSync(
+    path.join(
+      malformedPolicyWorkspace,
+      ".github",
+      "ai-harness",
+      "reconcile-policy.json"
+    ),
+    JSON.stringify(
+      {
+        schemaVersion: "1.0.0",
+        generatedAt: "test",
+        nonDestructiveAdoption: {
+          mode: "harness-overlay",
+          protectedIntent: "invalid test",
+          protectedSourceRoots: "../src",
+        },
+        defaults: {
+          managedJsonState: "merge",
+          managedFileRefresh: "replace",
+          modifiedManagedFile: "hold",
+        },
+        rules: [],
+      },
+      null,
+      2
+    ) + "\n",
+    "utf-8"
+  );
+  const malformedPolicyDryRun = reconcileWorkspaceInitialization({
+    workspacePath: malformedPolicyWorkspace,
+  });
+  assert.ok(
+    malformedPolicyDryRun.warnings.some((warning) =>
+      /could not be validated/.test(warning)
+    ),
+    "malformed nonDestructiveAdoption policy should fall back to the built-in safety policy"
+  );
+} finally {
+  fs.rmSync(malformedPolicyWorkspace, { recursive: true, force: true });
+}
+
 const upgradedWorkspace = fs.mkdtempSync(path.join(process.cwd(), "tmp-upgraded-workspace-"));
 try {
   writeGeneratedFiles(upgradedWorkspace, collectFiles(createParams()));
@@ -2372,7 +2682,7 @@ try {
         entry.path === "docs/ai-harness/runtime/adapter-contract.json" &&
         entry.status === "missing"
     ),
-    "managed semantic diff should classify missing 4.2.0 compatibility contract files"
+    "managed semantic diff should classify missing 4.2.1 compatibility contract files"
   );
   assert.ok(
     semanticDiff.entries.some(
@@ -2511,7 +2821,7 @@ try {
     reconcileResult.writtenFiles.includes(
       "docs/ai-harness/runtime/adapter-contract.json"
     ),
-    "reconcile should restore missing 4.2.0 adapter contract files"
+    "reconcile should restore missing 4.2.1 adapter contract files"
   );
   assert.ok(
     reconcileResult.writtenFiles.includes(

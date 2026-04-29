@@ -17,6 +17,7 @@ export interface ValidationItem {
   status: "present" | "missing" | "outdated";
   category: "copilot" | "vscode" | "docs" | "governance" | "dashboard";
   severity: "required" | "recommended" | "optional";
+  details?: string;
 }
 
 export interface ValidationResult {
@@ -355,6 +356,22 @@ const EXPECTED_FILES: Omit<ValidationItem, "status">[] = [
   },
 ];
 
+const RUNTIME_STATE_PATHS = new Set([
+  "docs/ai-harness/runtime/state/session-index.json",
+  "docs/ai-harness/runtime/state/active-session.json",
+  "docs/ai-harness/runtime/state/current-work-packet.json",
+  "docs/ai-harness/runtime/state/current-execution-bridge.json",
+  "docs/ai-harness/runtime/state/current-native-execution.json",
+]);
+
+function formatJsonError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return `Invalid JSON: ${error.message}`;
+  }
+
+  return "Invalid JSON: parse failed";
+}
+
 function inspectExpectedFile(
   workspacePath: string,
   expected: Omit<ValidationItem, "status">
@@ -376,26 +393,37 @@ function inspectExpectedFile(
       return {
         ...expected,
         status: validation.valid ? "present" : "outdated",
+        details: validation.valid
+          ? undefined
+          : "Dashboard state shape validation failed",
       };
-    } catch {
+    } catch (error) {
       return {
         ...expected,
         status: "outdated",
+        details: formatJsonError(error),
       };
     }
   }
 
-  if (
-    expected.path === "docs/ai-harness/runtime/state/session-index.json" ||
-    expected.path === "docs/ai-harness/runtime/state/active-session.json" ||
-    expected.path === "docs/ai-harness/runtime/state/current-work-packet.json" ||
-    expected.path === "docs/ai-harness/runtime/state/current-execution-bridge.json" ||
-    expected.path === "docs/ai-harness/runtime/state/current-native-execution.json"
-  ) {
+  if (RUNTIME_STATE_PATHS.has(expected.path)) {
+    try {
+      JSON.parse(fs.readFileSync(fullPath, "utf-8")) as unknown;
+    } catch (error) {
+      return {
+        ...expected,
+        status: "outdated",
+        details: formatJsonError(error),
+      };
+    }
+
     const validation = validateHarnessRuntimeFiles(workspacePath);
     return {
       ...expected,
       status: validation.valid ? "present" : "outdated",
+      details: validation.valid
+        ? undefined
+        : "Runtime state contract validation failed",
     };
   }
 
@@ -413,11 +441,13 @@ function inspectExpectedFile(
       return {
         ...expected,
         status: hasSchema ? "present" : "outdated",
+        details: hasSchema ? undefined : "Missing schemaVersion",
       };
-    } catch {
+    } catch (error) {
       return {
         ...expected,
         status: "outdated",
+        details: formatJsonError(error),
       };
     }
   }
@@ -468,7 +498,8 @@ export function validateWorkspace(workspacePath: string): ValidationResult {
         item.path === "docs/ai-harness/runtime/state/session-index.json" ||
         item.path === "docs/ai-harness/runtime/state/active-session.json" ||
         item.path === "docs/ai-harness/runtime/state/current-work-packet.json" ||
-        item.path === "docs/ai-harness/runtime/state/current-execution-bridge.json"
+        item.path === "docs/ai-harness/runtime/state/current-execution-bridge.json" ||
+        item.path === "docs/ai-harness/runtime/state/current-native-execution.json"
     )
   ) {
     suggestions.push(
@@ -538,7 +569,8 @@ export function validateWorkspace(workspacePath: string): ValidationResult {
             ? "[outdated]"
             : "[missing]";
 
-      return `  ${marker} [${item.severity}] ${item.label} -> ${item.path}`;
+      const details = item.details ? ` (${item.details})` : "";
+      return `  ${marker} [${item.severity}] ${item.label} -> ${item.path}${details}`;
     }),
     ...(suggestions.length > 0
       ? ["", "Suggestions:", ...suggestions.map((suggestion) => `  - ${suggestion}`)]

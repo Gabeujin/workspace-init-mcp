@@ -16,6 +16,10 @@ import {
   type WorkspaceUpgradeRiskAuditResult,
 } from "./managed-inventory.js";
 import {
+  isUnsafeWorkspaceRelativePath,
+  normalizeWorkspaceRelativePath,
+} from "./generated-file-safety.js";
+import {
   type FileEncoding,
   type LineEnding,
   type WorkspaceInitParams,
@@ -152,7 +156,7 @@ export interface ReconcilePreflightExportResult {
   summary: string;
 }
 
-const RECONCILE_VERSION = "4.2.0";
+const RECONCILE_VERSION = "4.2.1";
 const RECONCILE_POLICY_PATH = ".github/ai-harness/reconcile-policy.json";
 
 const LEGACY_RESOURCE_ROOTS: Array<{
@@ -251,6 +255,23 @@ function isReconcilePolicyPreset(value: unknown): value is ReconcilePolicyPreset
     (value.rules === undefined ||
       (Array.isArray(value.rules) &&
         value.rules.every((rule) => isReconcilePolicyRule(rule))))
+  );
+}
+
+function isReconcilePolicyNonDestructiveAdoption(
+  value: unknown
+): value is NonNullable<ReconcilePolicyDocument["nonDestructiveAdoption"]> {
+  return (
+    isPlainObject(value) &&
+    typeof value.mode === "string" &&
+    typeof value.protectedIntent === "string" &&
+    Array.isArray(value.protectedSourceRoots) &&
+    value.protectedSourceRoots.every(
+      (root) =>
+        typeof root === "string" &&
+        root.trim().length > 0 &&
+        !isUnsafeWorkspaceRelativePath(root)
+    )
   );
 }
 
@@ -395,6 +416,20 @@ function buildDefaultReconcilePolicy(): ReconcilePolicyDocument {
   };
 }
 
+function withDefaultNonDestructiveAdoption(
+  document: ReconcilePolicyDocument
+): ReconcilePolicyDocument {
+  if (document.nonDestructiveAdoption != null) {
+    return document;
+  }
+
+  return {
+    ...document,
+    nonDestructiveAdoption:
+      buildDefaultReconcilePolicy().nonDestructiveAdoption,
+  };
+}
+
 function loadReconcilePolicy(workspacePath: string): {
   document: ReconcilePolicyDocument;
   source: string;
@@ -418,6 +453,8 @@ function loadReconcilePolicy(workspacePath: string): {
       !isReconcilePolicyDefaults(parsed.defaults) ||
       !Array.isArray(parsed.rules) ||
       !parsed.rules.every((rule) => isReconcilePolicyRule(rule)) ||
+      (parsed.nonDestructiveAdoption !== undefined &&
+        !isReconcilePolicyNonDestructiveAdoption(parsed.nonDestructiveAdoption)) ||
       (parsed.presets !== undefined && !areReconcilePolicyPresets(parsed.presets)) ||
       (parsed.activePreset !== undefined && typeof parsed.activePreset !== "string")
     ) {
@@ -431,7 +468,12 @@ function loadReconcilePolicy(workspacePath: string): {
     }
 
     const warnings: string[] = [];
-    let document = parsed;
+    if (parsed.nonDestructiveAdoption == null) {
+      warnings.push(
+        "Reconcile policy is missing nonDestructiveAdoption.protectedSourceRoots. Using the built-in protected source root guard."
+      );
+    }
+    let document = withDefaultNonDestructiveAdoption(parsed);
     let source = RECONCILE_POLICY_PATH;
     if (parsed.activePreset != null && parsed.activePreset.length > 0) {
       const preset = parsed.presets?.[parsed.activePreset];
@@ -493,6 +535,28 @@ function matchesReconcilePattern(
   }
 }
 
+function resolveProtectedSourceRootForPath(
+  relativePath: string,
+  policyDocument: ReconcilePolicyDocument
+): string | null {
+  const protectedRoots =
+    policyDocument.nonDestructiveAdoption?.protectedSourceRoots ?? [];
+  const normalizedPath = normalizeWorkspaceRelativePath(relativePath).toLowerCase();
+
+  for (const root of protectedRoots) {
+    const normalizedRoot = normalizeWorkspaceRelativePath(root).toLowerCase();
+    const rootPrefix = normalizedRoot.endsWith("/")
+      ? normalizedRoot
+      : `${normalizedRoot}/`;
+    const rootName = rootPrefix.replace(/\/$/, "");
+    if (normalizedPath === rootName || normalizedPath.startsWith(rootPrefix)) {
+      return rootPrefix;
+    }
+  }
+
+  return null;
+}
+
 function resolveReconcilePolicyForPath(
   relativePath: string,
   policyDocument: ReconcilePolicyDocument,
@@ -500,6 +564,18 @@ function resolveReconcilePolicyForPath(
   isManagedJson: boolean,
   isModifiedManagedFile: boolean
 ): ResolvedReconcilePolicy {
+  const protectedSourceRoot = resolveProtectedSourceRootForPath(
+    relativePath,
+    policyDocument
+  );
+  if (protectedSourceRoot != null) {
+    return {
+      policy: "hold",
+      source: `${policySource}:nonDestructiveAdoption.protectedSourceRoots`,
+      reason: `Application source under ${protectedSourceRoot} is outside the harness ownership boundary and requires an explicit implementation contract before reconcile may replace it.`,
+    };
+  }
+
   for (const rule of policyDocument.rules) {
     if (matchesReconcilePattern(relativePath, rule)) {
       return {

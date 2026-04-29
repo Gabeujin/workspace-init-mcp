@@ -1,7 +1,7 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 
 /**
- * workspace-init-mcp MCP Server v4.2.0
+ * workspace-init-mcp MCP Server v4.2.1
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -77,6 +77,46 @@ import { generateSelectedSkills } from "./generators/agent-skills.js";
 // ---------------------------------------------------------------------------
 // Encoding helper
 // ---------------------------------------------------------------------------
+
+function assertAbsoluteWorkspacePath(workspacePath: string): void {
+  if (!path.isAbsolute(workspacePath)) {
+    throw new Error(
+      `workspacePath must be an absolute path. Received: ${workspacePath}`
+    );
+  }
+}
+
+const LIVE_GOVERNANCE_STATE_PREFIXES = [
+  "docs/ai-harness/runtime/sessions/",
+  "docs/ai-harness/runtime/work-packets/",
+  "docs/ai-harness/runtime/inbox/",
+  "docs/ai-harness/runtime/outbox/",
+  "docs/ai-harness/runtime/adapter-handoffs/",
+  "docs/ai-harness/runtime/execution-bridges/",
+  "docs/ai-harness/runtime/archive/",
+] as const;
+
+const LIVE_GOVERNANCE_STATE_FILES = new Set([
+  "docs/ai-harness/dashboard/state/dashboard-state.json",
+  "docs/ai-harness/readiness/maturity-scorecard.json",
+  "docs/ai-harness/readiness/semantic-audit.json",
+  "docs/ai-harness/runtime/state/session-index.json",
+  "docs/ai-harness/runtime/state/active-session.json",
+  "docs/ai-harness/runtime/state/current-work-packet.json",
+  "docs/ai-harness/runtime/state/current-execution-bridge.json",
+  "docs/ai-harness/runtime/state/current-native-execution.json",
+  "docs/ai-harness/runtime/archive/archive-index.json",
+]);
+
+function isLiveGovernanceStatePath(relativePath: string): boolean {
+  const normalized = relativePath.replace(/\\/g, "/");
+  return (
+    LIVE_GOVERNANCE_STATE_FILES.has(normalized) ||
+    LIVE_GOVERNANCE_STATE_PREFIXES.some((prefix) =>
+      normalized.startsWith(prefix)
+    )
+  );
+}
 
 /**
  * Write file content with the specified encoding.
@@ -309,7 +349,7 @@ const ReconcileWorkspaceInputSchema = BaseWorkspaceInputSchema.partial().extend(
 
 const server = new McpServer({
   name: "workspace-init-mcp",
-  version: "4.2.0",
+  version: "4.2.1",
 });
 
 // ---------------------------------------------------------------------------
@@ -351,6 +391,7 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const initParams: WorkspaceInitParams = {
         workspaceName: params.workspaceName,
         purpose: params.purpose,
@@ -393,6 +434,17 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
 
           if (!force && fs.existsSync(fullPath)) {
             skipped.push(file.relativePath);
+            continue;
+          }
+
+          if (
+            force &&
+            fs.existsSync(fullPath) &&
+            isLiveGovernanceStatePath(file.relativePath)
+          ) {
+            skipped.push(
+              `${file.relativePath} (preserved live governance state; use reconcile for merge-aware refresh)`
+            );
             continue;
           }
 
@@ -468,6 +520,7 @@ For safer upgrades, prefer requireCleanGitWhenPresent: true, keep overwriteModif
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = reconcileWorkspaceInitialization({
         workspaceName: params.workspaceName,
         purpose: params.purpose,
@@ -537,6 +590,7 @@ Use this before large upgrades, legacy-project onboarding, or any reconcile run 
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = auditWorkspaceUpgradeRisk(params.workspacePath);
       return { content: [{ type: "text" as const, text: result.summary }] };
     } catch (err) {
@@ -579,6 +633,7 @@ Use this when you want a more readable preflight view of managed-file drift befo
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = auditWorkspaceManagedSemanticDiff(
         params.workspacePath,
         params.writeReport ?? false
@@ -620,6 +675,7 @@ Use this when you want a durable preflight artifact before touching a legacy or 
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = exportReconcilePreflightReport(params.workspacePath);
       return { content: [{ type: "text" as const, text: result.summary }] };
     } catch (err) {
@@ -655,6 +711,7 @@ Use this when a reconcile apply run needs to be rolled back from the backups sto
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = restoreReconcileBackup(
         params.workspacePath,
         params.reportJsonPath
@@ -684,6 +741,7 @@ Useful for reviewing the planned structure before committing to it.`,
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const initParams: WorkspaceInitParams = {
         workspaceName: params.workspaceName,
         purpose: params.purpose,
@@ -852,6 +910,7 @@ Checks for the presence of all expected files (.github/copilot-instructions.md,
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = validateWorkspace(params.workspacePath);
       return { content: [{ type: "text" as const, text: result.summary }] };
     } catch (err) {
@@ -898,6 +957,7 @@ Use it after initialization, after major harness upgrades, or before handing the
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = assessWorkspaceReadiness(
         params.workspacePath,
         params.writeScorecard
@@ -950,6 +1010,7 @@ Use it when you want a conservative operator-style judgment instead of a file-ex
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = auditWorkspaceReadinessSemantics(
         params.workspacePath,
         params.writeReport
@@ -1047,6 +1108,7 @@ Use this before meaningful implementation begins. The session is file-system-bas
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = startHarnessSession({
         workspacePath: params.workspacePath,
         goal: params.goal,
@@ -1121,6 +1183,7 @@ Every transition writes durable evidence into the runtime session files and re-s
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = advanceHarnessSession({
         workspacePath: params.workspacePath,
         sessionId: params.sessionId,
@@ -1167,6 +1230,7 @@ Use this when:
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = getHarnessSessionStatus(params.workspacePath, params.sessionId);
       return { content: [{ type: "text" as const, text: result.summary }] };
     } catch (err) {
@@ -1214,6 +1278,7 @@ By default the MCP refuses to steal the lease from a still-active session unless
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = activateHarnessSession(
         params.workspacePath,
         params.sessionId,
@@ -1256,6 +1321,7 @@ Use this before long pauses, handovers, or release checkpoints when you want str
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = auditHarnessRuntime(params.workspacePath);
       return { content: [{ type: "text" as const, text: result.summary }] };
     } catch (err) {
@@ -1309,6 +1375,7 @@ Use it when governed runtime history grows large and operators need a lighter da
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = compactHarnessRuntime({
         workspacePath: params.workspacePath,
         keepRecentClosed: params.keepRecentClosed,
@@ -1354,6 +1421,7 @@ The MCP also refreshes work packets automatically during session changes, but th
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = prepareHarnessWorkPacket(
         params.workspacePath,
         params.sessionId
@@ -1431,6 +1499,7 @@ Use this whenever a governed session should continue in a concrete execution env
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = prepareHarnessAdapterHandoff(
         params.workspacePath,
         params.adapterId,
@@ -1533,6 +1602,7 @@ For Codex CLI, the generated plan can prefer codex exec and capture the final as
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = prepareHarnessNativeExecutor(
         params.workspacePath,
         params.bridgeId,
@@ -1599,6 +1669,7 @@ Use foreground mode when you want an immediate result in the current tool call. 
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = launchHarnessNativeExecutor({
         workspacePath: params.workspacePath,
         bridgeId: params.bridgeId,
@@ -1645,6 +1716,7 @@ server.registerTool(
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = getHarnessNativeExecutionStatus(
         params.workspacePath,
         params.sessionId,
@@ -1693,6 +1765,7 @@ Use it after preparing an adapter handoff when the session is about to continue 
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = prepareHarnessExecutionBridge(
         params.workspacePath,
         params.bridgeId,
@@ -1749,6 +1822,7 @@ Use this after GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, generic CLI r
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = recordHarnessExecutionResult({
         workspacePath: params.workspacePath,
         bridgeId: params.bridgeId,
@@ -1798,6 +1872,7 @@ and governance layers can be applied without replacing the existing architecture
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const result = analyzeWorkspace(params.workspacePath);
       return { content: [{ type: "text" as const, text: result.summary }] };
     } catch (err) {
@@ -1938,6 +2013,7 @@ skills and agents, then pass the selected IDs to this tool.`,
   },
   async (params) => {
     try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
       const skillEntries = (params.skillIds ?? [])
         .map((id) => SKILL_REGISTRY.find((s) => s.id === id))
         .filter((s): s is NonNullable<typeof s> => s != null);
@@ -2334,7 +2410,7 @@ server.registerResource(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("workspace-init-mcp server v3.1.0 started on stdio");
+console.error("workspace-init-mcp server v4.2.1 started on stdio");
 }
 
 main().catch((err) => {

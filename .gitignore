@@ -3,3 +3,6 @@ dist/
 *.tgz
 .env
 docs/
+
+# Local AI code review artifacts
+docs/agent-code-review/

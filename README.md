@@ -199,7 +199,7 @@ node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs export-static --out doc
 
 ## Runtime And Agent Switching
 
-Version `4.2.0` includes a compatibility layer under `docs/ai-harness/runtime/`:
+Version `4.2.1` includes a compatibility layer under `docs/ai-harness/runtime/`:
 
 - `version-index.json` records capabilities by workspace-init-mcp release
 - `compatibility-matrix.json` tells `@latest` sessions how to upgrade older workspaces safely

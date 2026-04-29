@@ -1,6 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
+import {
+  HARNESS_ADAPTER_CONTRACT_VERSION,
+  HARNESS_REQUIRED_HANDOFF_FIELDS,
+} from "../data/runtime-contract.js";
+import { normalizeSafeWorkspaceRelativePaths } from "./generated-file-safety.js";
 
 type HarnessActorRole = "planner" | "generator" | "evaluator" | "operator";
 type HarnessAction =
@@ -49,8 +54,7 @@ export const HARNESS_RUNTIME_ADAPTER_IDS = [
 type HarnessRuntimeAdapterId = (typeof HARNESS_RUNTIME_ADAPTER_IDS)[number];
 const NATIVE_EXECUTOR_OVERRIDES_PATH =
   ".github/ai-harness/native-executor-overrides.json";
-const HARNESS_RUNTIME_VERSION = "4.2.0";
-const HARNESS_ADAPTER_CONTRACT_VERSION = "1.0.0";
+const HARNESS_RUNTIME_VERSION = "4.2.1";
 const HARNESS_VERSION_INDEX_PATH = "docs/ai-harness/runtime/version-index.json";
 const HARNESS_COMPATIBILITY_MATRIX_PATH =
   "docs/ai-harness/runtime/compatibility-matrix.json";
@@ -58,22 +62,8 @@ const HARNESS_ADAPTER_CONTRACT_PATH =
   "docs/ai-harness/runtime/adapter-contract.json";
 const HARNESS_SESSION_CONTINUITY_PATH =
   "docs/ai-harness/runtime/session-continuity.md";
-const HARNESS_REQUIRED_INTERFACE_FIELDS = [
-  "sessionId",
-  "leaseStatus",
-  "nextActor",
-  "currentPhase",
-  "nextAction",
-  "goal",
-  "chunkId",
-  "adapter",
-  "fileReferences",
-  "operatorChecklist",
-  "runtimeExpectations",
-  "packet",
-  "promptBlock",
-  "compatibility",
-] as const;
+const WINDOWS_RESERVED_RUNTIME_PATH_SEGMENT_PATTERN =
+  /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 
 interface HarnessRuntimeAdapterDescriptor {
   id: HarnessRuntimeAdapterId;
@@ -1000,7 +990,11 @@ function readJsonIfExists<T>(filePath: string): T | null {
     return null;
   }
 
-  return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+  } catch {
+    return null;
+  }
 }
 
 function writeJson(filePath: string, value: unknown): void {
@@ -1018,6 +1012,20 @@ function writeTextIfMissing(filePath: string, content: string): void {
 function appendText(filePath: string, content: string): void {
   ensureDir(path.dirname(filePath));
   fs.appendFileSync(filePath, content, "utf-8");
+}
+
+function normalizeRuntimePathSegment(value: string, label: string): string {
+  const normalized = value.trim();
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(normalized) ||
+    normalized.endsWith(".") ||
+    WINDOWS_RESERVED_RUNTIME_PATH_SEGMENT_PATTERN.test(normalized)
+  ) {
+    throw new Error(
+      `${label} must be a safe path segment using only letters, numbers, dot, underscore, and hyphen, must not be a Windows reserved file name, and must not contain separators or traversal.`
+    );
+  }
+  return normalized;
 }
 
 function buildRuntimePaths(workspacePath: string) {
@@ -1068,12 +1076,14 @@ function buildRuntimePaths(workspacePath: string) {
 
 function buildSessionStatePath(workspacePath: string, sessionId: string): string {
   const paths = buildRuntimePaths(workspacePath);
-  return path.join(paths.sessionsRoot, `${sessionId}.session.json`);
+  const safeSessionId = normalizeRuntimePathSegment(sessionId, "sessionId");
+  return path.join(paths.sessionsRoot, `${safeSessionId}.session.json`);
 }
 
 function buildSessionSummaryPath(workspacePath: string, sessionId: string): string {
   const paths = buildRuntimePaths(workspacePath);
-  return path.join(paths.sessionsRoot, `${sessionId}.md`);
+  const safeSessionId = normalizeRuntimePathSegment(sessionId, "sessionId");
+  return path.join(paths.sessionsRoot, `${safeSessionId}.md`);
 }
 
 function buildArchivedSessionStatePath(
@@ -1081,7 +1091,8 @@ function buildArchivedSessionStatePath(
   sessionId: string
 ): string {
   const paths = buildRuntimePaths(workspacePath);
-  return path.join(paths.archiveSessionsRoot, `${sessionId}.session.json`);
+  const safeSessionId = normalizeRuntimePathSegment(sessionId, "sessionId");
+  return path.join(paths.archiveSessionsRoot, `${safeSessionId}.session.json`);
 }
 
 function buildArchivedSessionSummaryPath(
@@ -1089,25 +1100,29 @@ function buildArchivedSessionSummaryPath(
   sessionId: string
 ): string {
   const paths = buildRuntimePaths(workspacePath);
-  return path.join(paths.archiveSessionsRoot, `${sessionId}.md`);
+  const safeSessionId = normalizeRuntimePathSegment(sessionId, "sessionId");
+  return path.join(paths.archiveSessionsRoot, `${safeSessionId}.md`);
 }
 
 function buildRuntimeArchiveBundlePaths(workspacePath: string, archiveId: string) {
   const paths = buildRuntimePaths(workspacePath);
+  const safeArchiveId = normalizeRuntimePathSegment(archiveId, "archiveId");
   return {
-    bundlePath: path.join(paths.archiveBundlesRoot, `${archiveId}.json`),
-    summaryPath: path.join(paths.archiveBundlesRoot, `${archiveId}.md`),
+    bundlePath: path.join(paths.archiveBundlesRoot, `${safeArchiveId}.json`),
+    summaryPath: path.join(paths.archiveBundlesRoot, `${safeArchiveId}.md`),
   };
 }
 
 function buildWorkPacketStatePath(workspacePath: string, sessionId: string): string {
   const paths = buildRuntimePaths(workspacePath);
-  return path.join(paths.workPacketsRoot, `${sessionId}.work-packet.json`);
+  const safeSessionId = normalizeRuntimePathSegment(sessionId, "sessionId");
+  return path.join(paths.workPacketsRoot, `${safeSessionId}.work-packet.json`);
 }
 
 function buildWorkPacketMarkdownPath(workspacePath: string, sessionId: string): string {
   const paths = buildRuntimePaths(workspacePath);
-  return path.join(paths.workPacketsRoot, `${sessionId}.md`);
+  const safeSessionId = normalizeRuntimePathSegment(sessionId, "sessionId");
+  return path.join(paths.workPacketsRoot, `${safeSessionId}.md`);
 }
 
 function buildActorInboxPath(
@@ -1116,7 +1131,8 @@ function buildActorInboxPath(
   sessionId: string
 ): string {
   const paths = buildRuntimePaths(workspacePath);
-  return path.join(paths.inboxRoot, actor, `${sessionId}.md`);
+  const safeSessionId = normalizeRuntimePathSegment(sessionId, "sessionId");
+  return path.join(paths.inboxRoot, actor, `${safeSessionId}.md`);
 }
 
 function buildAdapterProfilePath(
@@ -1138,7 +1154,8 @@ function buildAdapterHandoffPaths(
   checklistPath: string;
 } {
   const paths = buildRuntimePaths(workspacePath);
-  const handoffDir = path.join(paths.adapterHandoffsRoot, sessionId, adapterId);
+  const safeSessionId = normalizeRuntimePathSegment(sessionId, "sessionId");
+  const handoffDir = path.join(paths.adapterHandoffsRoot, safeSessionId, adapterId);
   return {
     handoffDir,
     handoffPath: path.join(handoffDir, "handoff.json"),
@@ -1170,7 +1187,8 @@ function buildExecutionBridgePaths(
   receiptMarkdownPath: string;
 } {
   const paths = buildRuntimePaths(workspacePath);
-  const bridgeDir = path.join(paths.executionBridgesRoot, sessionId, bridgeId);
+  const safeSessionId = normalizeRuntimePathSegment(sessionId, "sessionId");
+  const bridgeDir = path.join(paths.executionBridgesRoot, safeSessionId, bridgeId);
   return {
     bridgeDir,
     bridgeManifestPath: path.join(bridgeDir, "bridge-manifest.json"),
@@ -1497,37 +1515,39 @@ function phaseArtifactRelativePath(
   session: Pick<HarnessRuntimeSessionState, "session" | "chunk">,
   phaseId: HarnessPhaseId
 ): string | null {
+  const sessionId = normalizeRuntimePathSegment(session.session.id, "sessionId");
+  const chunkId = normalizeRuntimePathSegment(session.chunk.id, "chunkId");
   switch (phaseId) {
     case "governance-open":
-      return `docs/context/${session.session.id}/governance-open.md`;
+      return `docs/context/${sessionId}/governance-open.md`;
     case "plan-1":
     case "plan-2":
     case "plan-3":
-      return `docs/plans/${session.session.id}/${phaseId}.md`;
+      return `docs/plans/${sessionId}/${phaseId}.md`;
     case "review-1":
     case "review-2":
     case "review-3":
-      return `docs/reviews/${session.session.id}/${phaseId}.md`;
+      return `docs/reviews/${sessionId}/${phaseId}.md`;
     case "goal-freeze":
-      return `docs/plans/${session.session.id}/goal-freeze.md`;
+      return `docs/plans/${sessionId}/goal-freeze.md`;
     case "contract-proposal":
-      return `docs/contracts/${session.session.id}/${session.chunk.id}-contract.md`;
+      return `docs/contracts/${sessionId}/${chunkId}-contract.md`;
     case "contract-review":
-      return `docs/evaluations/${session.session.id}/${session.chunk.id}-contract-review.md`;
+      return `docs/evaluations/${sessionId}/${chunkId}-contract-review.md`;
     case "implementation":
-      return `docs/work-logs/${session.session.id}-${session.chunk.id}-implementation.md`;
+      return `docs/work-logs/${sessionId}-${chunkId}-implementation.md`;
     case "self-check":
-      return `docs/reviews/${session.session.id}/self-check.md`;
+      return `docs/reviews/${sessionId}/self-check.md`;
     case "independent-evaluation":
-      return `docs/evaluations/${session.session.id}/${session.chunk.id}-independent-evaluation.md`;
+      return `docs/evaluations/${sessionId}/${chunkId}-independent-evaluation.md`;
     case "remediation":
-      return `docs/work-logs/${session.session.id}-${session.chunk.id}-remediation.md`;
+      return `docs/work-logs/${sessionId}-${chunkId}-remediation.md`;
     case "verification":
-      return `docs/reviews/${session.session.id}/verification.md`;
+      return `docs/reviews/${sessionId}/verification.md`;
     case "governance-refresh":
-      return `docs/context/${session.session.id}/governance-refresh.md`;
+      return `docs/context/${sessionId}/governance-refresh.md`;
     case "governance-close":
-      return `docs/handovers/${session.session.id}/governance-close.md`;
+      return `docs/handovers/${sessionId}/governance-close.md`;
     case "closed":
       return null;
   }
@@ -2393,12 +2413,12 @@ function buildDefaultSessionTitle(goal: string): string {
 
 function buildSessionId(provided: string | undefined, goal: string): string {
   if (provided != null && provided.trim().length > 0) {
-    return provided.trim();
+    return normalizeRuntimePathSegment(provided, "sessionId");
   }
 
   const stamp = nowIso().replace(/[-:TZ.]/g, "").slice(0, 14);
   const suffix = slugify(goal) || "governed-work";
-  return `session-${stamp}-${suffix}`;
+  return normalizeRuntimePathSegment(`session-${stamp}-${suffix}`, "sessionId");
 }
 
 function buildChunkId(
@@ -2407,10 +2427,13 @@ function buildChunkId(
   sessionId: string
 ): string {
   if (provided != null && provided.trim().length > 0) {
-    return provided.trim();
+    return normalizeRuntimePathSegment(provided, "chunkId");
   }
 
-  return `chunk-${sessionId.replace(/^session-/, "")}-${slugify(goal) || "delivery"}`;
+  return normalizeRuntimePathSegment(
+    `chunk-${sessionId.replace(/^session-/, "")}-${slugify(goal) || "delivery"}`,
+    "chunkId"
+  );
 }
 
 function buildPhaseRecords(
@@ -2486,7 +2509,7 @@ function loadSession(workspacePath: string, sessionId: string): HarnessRuntimeSe
 
 function resolveSessionId(workspacePath: string, requestedSessionId?: string): string {
   if (requestedSessionId != null && requestedSessionId.trim().length > 0) {
-    return requestedSessionId.trim();
+    return normalizeRuntimePathSegment(requestedSessionId, "sessionId");
   }
 
   const index = ensureRuntimeIndex(workspacePath);
@@ -2494,7 +2517,7 @@ function resolveSessionId(workspacePath: string, requestedSessionId?: string): s
     throw new Error("No active harness session exists in this workspace.");
   }
 
-  return index.activeSessionId;
+  return normalizeRuntimePathSegment(index.activeSessionId, "sessionId");
 }
 
 function saveSession(
@@ -3068,6 +3091,14 @@ function applyBridgeTemplate(
   return output;
 }
 
+function quotePowerShellSingleQuoted(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function quoteBashSingleQuoted(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 function buildExecutionBridgeMarkdown(manifest: Record<string, unknown>): string {
   const bridge = isPlainObject(manifest.bridge) ? manifest.bridge : {};
   const handoff = isPlainObject(manifest.handoff) ? manifest.handoff : {};
@@ -3190,8 +3221,10 @@ function buildLaunchPowershell(manifest: Record<string, unknown>): string {
       : [];
   const commandList =
     commands.length > 0
-      ? commands.map((command) => `Write-Host "  ${command}"`).join("\n")
-      : 'Write-Host "  No direct command is defined for this bridge."';
+      ? commands
+          .map((command) => `Write-Host ${quotePowerShellSingleQuoted(`  ${command}`)}`)
+          .join("\n")
+      : `Write-Host ${quotePowerShellSingleQuoted("  No direct command is defined for this bridge.")}`;
 
   return [
     '$ErrorActionPreference = "Stop"',
@@ -3217,8 +3250,10 @@ function buildLaunchBash(manifest: Record<string, unknown>): string {
       : [];
   const commandList =
     commands.length > 0
-      ? commands.map((command) => `echo "  ${command}"`).join("\n")
-      : 'echo "  No direct command is defined for this bridge."';
+      ? commands
+          .map((command) => `printf '%s\\n' ${quoteBashSingleQuoted(`  ${command}`)}`)
+          .join("\n")
+      : `printf '%s\\n' ${quoteBashSingleQuoted("  No direct command is defined for this bridge.")}`;
 
   return [
     "#!/usr/bin/env bash",
@@ -3736,6 +3771,10 @@ function syncDashboardFromSession(
       latestPlanRound: session.governance.latestPlanRound,
       latestReviewRound: session.governance.latestReviewRound,
       goalFrozen: session.governance.goalFrozen,
+      contractApproved: session.governance.contractApproved,
+      independentEvaluationPassed:
+        session.governance.independentEvaluationPassed,
+      governanceRefreshed: session.governance.governanceRefreshed,
       closeoutReady: session.governance.closeoutReady,
       evidenceFreshness: "current",
     },
@@ -4080,6 +4119,9 @@ function syncDashboardNativeExecution(
   }
 
   const executor = getHarnessNativeExecutor(bridgeId);
+  const nativeExecutionState = readJsonIfExists<Record<string, unknown>>(
+    path.join(workspacePath, nativeExecutionStatePath)
+  );
   upsertDashboardArtifact(
     dashboardState,
     "runtime-native-executors-guide",
@@ -4139,6 +4181,15 @@ function syncDashboardNativeExecution(
       nativeExecutionStateFile: nativeExecutionStatePath,
       nativeExecutionPlanFile: nativeExecutionPlanPath,
       nativeExecutorBridgeId: bridgeId,
+      nativeExecutionStatus: String(nativeExecutionState?.status ?? "unknown"),
+      nativeExecutionErrorCode:
+        nativeExecutionState?.errorCode == null
+          ? null
+          : String(nativeExecutionState.errorCode),
+      nativeExecutionErrorMessage:
+        nativeExecutionState?.errorMessage == null
+          ? null
+          : String(nativeExecutionState.errorMessage),
     };
   }
 
@@ -4242,6 +4293,10 @@ export function startHarnessSession(
   params: StartHarnessSessionParams
 ): HarnessRuntimeResult {
   const workspacePath = params.workspacePath;
+  const expectedWritePaths = normalizeSafeWorkspaceRelativePaths(
+    params.expectedWritePaths ?? [],
+    "harness expected write paths"
+  );
   const runtimeIndex = ensureRuntimeIndex(workspacePath);
   const activeSession =
     runtimeIndex.activeSessionId != null
@@ -4313,7 +4368,7 @@ export function startHarnessSession(
       outputs: [],
       dependencyNotes: params.dependencyNotes ?? null,
       contextInjectionNotes: params.contextInjectionNotes ?? null,
-      expectedWritePaths: params.expectedWritePaths ?? [],
+      expectedWritePaths,
       verificationCommands: params.verificationCommands ?? [],
     },
     phases: buildPhaseRecords(
@@ -4600,7 +4655,9 @@ function applyActionToSession(
         outcome: "resumed",
       };
     case "context_reset": {
-      const handoverPath = `docs/handovers/${session.session.id}/${session.chunk.id}-context-reset-${session.context.resetCount + 1}.md`;
+      const safeSessionId = normalizeRuntimePathSegment(session.session.id, "sessionId");
+      const safeChunkId = normalizeRuntimePathSegment(session.chunk.id, "chunkId");
+      const handoverPath = `docs/handovers/${safeSessionId}/${safeChunkId}-context-reset-${session.context.resetCount + 1}.md`;
       const fullHandoverPath = path.join(params.workspacePath, handoverPath);
       writeTextIfMissing(
         fullHandoverPath,
@@ -4733,6 +4790,14 @@ function applyActionToSession(
 export function advanceHarnessSession(
   params: AdvanceHarnessSessionParams
 ): HarnessRuntimeResult {
+  const artifactPaths = normalizeSafeWorkspaceRelativePaths(
+    params.artifactPaths ?? [],
+    "harness artifact paths"
+  );
+  const safeParams = {
+    ...params,
+    artifactPaths,
+  };
   const index = loadRuntimeIndex(params.workspacePath);
   const sessionId = resolveSessionId(params.workspacePath, params.sessionId);
   if (index.activeSessionId !== sessionId) {
@@ -4742,7 +4807,7 @@ export function advanceHarnessSession(
   }
   const session = loadSession(params.workspacePath, sessionId);
   const currentPhaseBefore = activePhaseRecord(session);
-  const transition = applyActionToSession(session, params);
+  const transition = applyActionToSession(session, safeParams);
 
   const currentArtifactPath =
     currentPhaseBefore?.artifactPath ??
@@ -4754,7 +4819,7 @@ export function advanceHarnessSession(
       params.actorRole,
       params.action,
       params.note,
-      params.artifactPaths ?? []
+      artifactPaths
     );
   }
 
@@ -4769,7 +4834,7 @@ export function advanceHarnessSession(
   const eventArtifactPaths = uniqueStrings([
     currentArtifactPath,
     nextArtifactPath,
-    ...(params.artifactPaths ?? []),
+    ...artifactPaths,
   ]);
   session.artifacts = uniqueStrings([...session.artifacts, ...eventArtifactPaths]);
   session.chunk.outputs = uniqueStrings([
@@ -5303,23 +5368,122 @@ export function launchHarnessNativeExecutor(
 
   const stdoutFd = fs.openSync(nativePaths.stdoutLogPath, "a");
   const stderrFd = fs.openSync(nativePaths.stderrLogPath, "a");
-  const child = spawn(commandPath, args, {
-    cwd: params.workspacePath,
-    env,
-    detached: true,
-    windowsHide: true,
-    stdio: ["ignore", stdoutFd, stderrFd],
+  let child: ChildProcess;
+  try {
+    child = spawn(commandPath, args, {
+      cwd: params.workspacePath,
+      env,
+      detached: true,
+      windowsHide: true,
+      stdio: ["ignore", stdoutFd, stderrFd],
+    });
+  } catch (err) {
+    fs.closeSync(stdoutFd);
+    fs.closeSync(stderrFd);
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const failedState = {
+      schemaVersion: "1.0.0",
+      generatedAt: nowIso(),
+      activeSessionId: sessionId,
+      bridgeId: params.bridgeId,
+      status: "failed",
+      launchMode: "background",
+      nativeExecutionPlanFile: prepared.nativeExecutionPlanPath,
+      nativeExecutionStateFile: prepared.nativeExecutionStatePath,
+      stdoutLogFile: prepared.stdoutLogPath,
+      stderrLogFile: prepared.stderrLogPath,
+      lastMessageFile: prepared.lastMessagePath,
+      processId: null,
+      executablePath: commandPath,
+      errorCode: "spawn-error",
+      errorMessage,
+      summary: `${executor.title} failed before background launch could start.`,
+    };
+    writeJson(nativePaths.nativeExecutionStatePath, failedState);
+    writeJson(buildRuntimePaths(params.workspacePath).currentNativeExecutionPath, failedState);
+    syncDashboardNativeExecution(
+      params.workspacePath,
+      session,
+      params.bridgeId,
+      prepared.nativeExecutionPlanPath,
+      prepared.nativeExecutionStatePath,
+      prepared.stdoutLogPath,
+      prepared.stderrLogPath,
+      prepared.lastMessagePath
+    );
+    return {
+      bridgeId: params.bridgeId,
+      sessionId,
+      status: "failed",
+      processId: undefined,
+      errorCode: "spawn-error",
+      errorMessage,
+      nativeExecutionPlanPath: prepared.nativeExecutionPlanPath,
+      nativeExecutionStatePath: prepared.nativeExecutionStatePath,
+      stdoutLogPath: prepared.stdoutLogPath,
+      stderrLogPath: prepared.stderrLogPath,
+      lastMessagePath: prepared.lastMessagePath,
+      summary: [
+        `Native executor launch failed: ${executor.title}`,
+        `Error code: spawn-error`,
+        `Error message: ${errorMessage}`,
+        `State: ${prepared.nativeExecutionStatePath}`,
+      ].join("\n"),
+    };
+  } finally {
+    try {
+      fs.closeSync(stdoutFd);
+    } catch {
+      // ignore descriptor close failures after spawn setup
+    }
+    try {
+      fs.closeSync(stderrFd);
+    } catch {
+      // ignore descriptor close failures after spawn setup
+    }
+  }
+
+  child.once("error", (err) => {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const failedState = {
+      schemaVersion: "1.0.0",
+      generatedAt: nowIso(),
+      activeSessionId: sessionId,
+      bridgeId: params.bridgeId,
+      status: "failed",
+      launchMode: "background",
+      nativeExecutionPlanFile: prepared.nativeExecutionPlanPath,
+      nativeExecutionStateFile: prepared.nativeExecutionStatePath,
+      stdoutLogFile: prepared.stdoutLogPath,
+      stderrLogFile: prepared.stderrLogPath,
+      lastMessageFile: prepared.lastMessagePath,
+      processId: child.pid ?? null,
+      executablePath: commandPath,
+      errorCode: "spawn-error",
+      errorMessage,
+      summary: `${executor.title} failed after background spawn was requested.`,
+    };
+    writeJson(nativePaths.nativeExecutionStatePath, failedState);
+    writeJson(buildRuntimePaths(params.workspacePath).currentNativeExecutionPath, failedState);
+    syncDashboardNativeExecution(
+      params.workspacePath,
+      session,
+      params.bridgeId,
+      prepared.nativeExecutionPlanPath,
+      prepared.nativeExecutionStatePath,
+      prepared.stdoutLogPath,
+      prepared.stderrLogPath,
+      prepared.lastMessagePath
+    );
   });
   child.unref();
-  fs.closeSync(stdoutFd);
-  fs.closeSync(stderrFd);
 
   const state = {
     schemaVersion: "1.0.0",
     generatedAt: nowIso(),
     activeSessionId: sessionId,
     bridgeId: params.bridgeId,
-    status: "launched",
+    status: "launching",
     launchMode: "background",
     nativeExecutionPlanFile: prepared.nativeExecutionPlanPath,
     nativeExecutionStateFile: prepared.nativeExecutionStatePath,
@@ -5328,7 +5492,7 @@ export function launchHarnessNativeExecutor(
     lastMessageFile: prepared.lastMessagePath,
     processId: child.pid ?? null,
     executablePath: commandPath,
-    summary: `${executor.title} launched in background mode.`,
+    summary: `${executor.title} background launch requested; check status for spawn errors or exit state.`,
   };
   writeJson(nativePaths.nativeExecutionStatePath, state);
   writeJson(buildRuntimePaths(params.workspacePath).currentNativeExecutionPath, state);
@@ -5346,7 +5510,7 @@ export function launchHarnessNativeExecutor(
   return {
     bridgeId: params.bridgeId,
     sessionId,
-    status: "launched",
+    status: "launching",
     processId: child.pid,
     nativeExecutionPlanPath: prepared.nativeExecutionPlanPath,
     nativeExecutionStatePath: prepared.nativeExecutionStatePath,
@@ -5354,7 +5518,7 @@ export function launchHarnessNativeExecutor(
     stderrLogPath: prepared.stderrLogPath,
     lastMessagePath: prepared.lastMessagePath,
     summary: [
-      `Native executor launched: ${executor.title}`,
+      `Native executor launch requested: ${executor.title}`,
       `PID: ${String(child.pid ?? "unknown")}`,
       `State: ${prepared.nativeExecutionStatePath}`,
       `Last message: ${prepared.lastMessagePath}`,
@@ -5388,12 +5552,20 @@ export function getHarnessNativeExecutionStatus(
   let status = String(state.status || "unknown");
   if (
     processId != null &&
-    ["launched", "running"].includes(status) &&
+    ["launching", "launched", "running"].includes(status) &&
     !isProcessRunning(processId)
   ) {
     status = "exited";
     state.status = status;
     state.summary = `${String(state.bridgeId || "native executor")} exited without a recorded exit code.`;
+    writeJson(statePath, state);
+    if (statePath === paths.currentNativeExecutionPath) {
+      writeJson(paths.currentNativeExecutionPath, state);
+    }
+  } else if (processId != null && status === "launching") {
+    status = "running";
+    state.status = status;
+    state.summary = `${String(state.bridgeId || "native executor")} is running after the background launch request.`;
     writeJson(statePath, state);
     if (statePath === paths.currentNativeExecutionPath) {
       writeJson(paths.currentNativeExecutionPath, state);
@@ -5533,7 +5705,7 @@ export function prepareHarnessExecutionBridge(
           versionIndexFile: HARNESS_VERSION_INDEX_PATH,
           compatibilityMatrixFile: HARNESS_COMPATIBILITY_MATRIX_PATH,
           sessionContinuityFile: HARNESS_SESSION_CONTINUITY_PATH,
-          requiredInterfaceFields: [...HARNESS_REQUIRED_INTERFACE_FIELDS],
+          requiredInterfaceFields: [...HARNESS_REQUIRED_HANDOFF_FIELDS],
         },
     launchCommands: {
       powershell: launchCommands.powershell.map((command) =>
@@ -5648,7 +5820,7 @@ export function prepareHarnessAdapterHandoff(
     versionIndexFile: HARNESS_VERSION_INDEX_PATH,
     compatibilityMatrixFile: HARNESS_COMPATIBILITY_MATRIX_PATH,
     sessionContinuityFile: HARNESS_SESSION_CONTINUITY_PATH,
-    requiredInterfaceFields: [...HARNESS_REQUIRED_INTERFACE_FIELDS],
+    requiredInterfaceFields: [...HARNESS_REQUIRED_HANDOFF_FIELDS],
     switchingRule:
       "Read durable harness files before chat history and preserve session identity across runtime switches.",
   };
@@ -5736,6 +5908,10 @@ export function prepareHarnessAdapterHandoff(
 export function recordHarnessExecutionResult(
   params: RecordHarnessExecutionResultParams
 ): HarnessExecutionReceiptResult {
+  const artifactPaths = normalizeSafeWorkspaceRelativePaths(
+    params.artifactPaths ?? [],
+    "harness execution receipt artifact paths"
+  );
   const sessionId = resolveSessionId(params.workspacePath, params.sessionId);
   const session = loadSession(params.workspacePath, sessionId);
   const bridge = getHarnessExecutionBridge(params.bridgeId);
@@ -5752,7 +5928,7 @@ export function recordHarnessExecutionResult(
     bridgeId: params.bridgeId,
     outcome: params.outcome,
     summary: params.summary,
-    artifactPaths: uniqueStrings(params.artifactPaths ?? []),
+    artifactPaths: uniqueStrings(artifactPaths),
     nextStep:
       params.nextStep?.trim() ||
       "Advance the governed session with the correct actor role and transition action.",

@@ -2,9 +2,12 @@ import {
   type GeneratedFile,
   type WorkspaceInitParams,
 } from "../types.js";
+import {
+  HARNESS_ADAPTER_CONTRACT_VERSION,
+  HARNESS_REQUIRED_HANDOFF_FIELDS,
+} from "../data/runtime-contract.js";
 
-const RUNTIME_COMPATIBILITY_VERSION = "4.2.0";
-const ADAPTER_CONTRACT_VERSION = "1.0.0";
+const RUNTIME_COMPATIBILITY_VERSION = "4.2.1";
 const RUNTIME_COMPATIBILITY_FILES = [
   "docs/ai-harness/runtime/version-index.json",
   "docs/ai-harness/runtime/compatibility-matrix.json",
@@ -361,7 +364,7 @@ function buildRuntimeVersionIndex(): string {
           ],
         },
         {
-          version: RUNTIME_COMPATIBILITY_VERSION,
+          version: "4.2.0",
           releaseTheme:
             "Parallel orchestration, non-destructive adoption, and quality gates",
           capabilities: [
@@ -382,10 +385,28 @@ function buildRuntimeVersionIndex(): string {
             "Generated work packets should name dependency status, expected write paths, verification commands, and integration ownership.",
           ],
         },
+        {
+          version: RUNTIME_COMPATIBILITY_VERSION,
+          releaseTheme:
+            "Safety hardening, runtime truthfulness, and release gate validation",
+          capabilities: [
+            "runtime-path-alias-hardening",
+            "runtime-validation-json-diagnostics",
+            "background-native-executor-failure-state",
+            "strict-dashboard-contract-evidence",
+            "cross-platform-release-ci",
+          ],
+          introducedFiles: [],
+          upgradeNotes: [
+            "Runtime session, chunk, and archive identifiers reject Windows reserved file-name aliases before writing state.",
+            "Validation summaries now distinguish malformed JSON runtime state from missing artifacts.",
+            "Native executor background launches remain non-definitive until a process is known to be running or a spawn failure is recorded.",
+          ],
+        },
       ],
       latestRequiredArtifacts: RUNTIME_COMPATIBILITY_FILES,
       adapterCompatibility: {
-        stableContractVersion: ADAPTER_CONTRACT_VERSION,
+        stableContractVersion: HARNESS_ADAPTER_CONTRACT_VERSION,
         supportedRuntimes: [
           "copilot",
           "github-copilot",
@@ -396,22 +417,7 @@ function buildRuntimeVersionIndex(): string {
           "generic-cli",
           "generic-file-runtime",
         ],
-        stableHandoffFields: [
-          "sessionId",
-          "leaseStatus",
-          "nextActor",
-          "currentPhase",
-          "nextAction",
-          "goal",
-          "chunkId",
-          "adapter",
-          "fileReferences",
-          "operatorChecklist",
-          "runtimeExpectations",
-          "packet",
-          "promptBlock",
-          "compatibility",
-        ],
+        stableHandoffFields: [...HARNESS_REQUIRED_HANDOFF_FIELDS],
       },
     },
     null,
@@ -426,7 +432,7 @@ function buildRuntimeCompatibilityMatrix(): string {
       generatedAt: "bootstrap",
       generatedBy: "workspace-init-mcp",
       currentVersion: RUNTIME_COMPATIBILITY_VERSION,
-      adapterContractVersion: ADAPTER_CONTRACT_VERSION,
+      adapterContractVersion: HARNESS_ADAPTER_CONTRACT_VERSION,
       upgradePolicy: {
         latestKeyword:
           "When an agent uses @latest, first inspect version-index.json and run reconcile_workspace_initialization if required compatibility files are missing.",
@@ -497,6 +503,21 @@ function buildRuntimeCompatibilityMatrix(): string {
             "existing adapter handoff bundles",
           ],
         },
+        {
+          from: "4.2.0",
+          to: RUNTIME_COMPATIBILITY_VERSION,
+          requiredActions: [
+            "Regenerate runtime compatibility files so 4.2.1 safety hardening appears in version-index.json.",
+            "Re-run validation after reconcile to surface malformed JSON runtime state with operator-facing diagnostics.",
+            "Refresh native executor state after background launch failures so dashboards do not retain stale launch state.",
+          ],
+          preserve: [
+            "parallel worker context packets",
+            "protected source root policy",
+            "existing runtime sessions",
+            "existing dashboard truth fields",
+          ],
+        },
       ],
       compatibilityChecks: [
         {
@@ -545,7 +566,7 @@ function buildRuntimeAdapterContract(): string {
   return `${JSON.stringify(
     {
       schemaVersion: "1.0.0",
-      contractVersion: ADAPTER_CONTRACT_VERSION,
+      contractVersion: HARNESS_ADAPTER_CONTRACT_VERSION,
       generatedAt: "bootstrap",
       generatedBy: "workspace-init-mcp",
       purpose:
@@ -560,25 +581,7 @@ function buildRuntimeAdapterContract(): string {
         "generic-cli",
         "generic-file-runtime",
       ],
-      requiredHandoffFields: [
-        "schemaVersion",
-        "generatedAt",
-        "adapterId",
-        "sessionId",
-        "leaseStatus",
-        "nextActor",
-        "currentPhase",
-        "nextAction",
-        "goal",
-        "chunkId",
-        "adapter",
-        "fileReferences",
-        "operatorChecklist",
-        "runtimeExpectations",
-        "packet",
-        "promptBlock",
-        "compatibility",
-      ],
+      requiredHandoffFields: [...HARNESS_REQUIRED_HANDOFF_FIELDS],
       requiredFileReferences: [
         "workPacketFile",
         "workPacketMarkdownFile",
