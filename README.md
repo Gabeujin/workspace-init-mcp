@@ -48,42 +48,123 @@ Version `4.3.0` includes the current safety baseline for legacy adoption and har
 
 ## Quick Start
 
-Add the MCP server to your client, then ask your agent to analyze or initialize a workspace.
+Pick your agent tool, add the MCP server once, then ask the agent to call the tool that matches your situation.
 
-Example user prompt:
+The MCP server command is always:
 
-```text
-Analyze this existing repository and initialize workspace-init-mcp as a non-destructive AI harness overlay.
-Preserve application source. Use strict governance, balanced autonomy, and include agent skills.
+```bash
+npx -y workspace-init-mcp
 ```
 
-Recommended first pass for an existing repository:
+### New Project
 
-1. Run `analyze_workspace`.
-2. Run `preview_workspace_init` to inspect generated files.
-3. Run `initialize_workspace` with `force: false`.
-4. Run `validate_workspace`.
-5. For older initialized workspaces, run `reconcile_workspace_initialization` as a dry run before applying changes.
+Use this when you are starting a repository and want the harness from day one.
 
-## Setup
+Ask your agent:
 
-### VS Code `settings.json`
+```text
+Use workspace-init-mcp. Call initialize_workspace for this new project.
+Use strict governance, balanced autonomy, include harness engineering, include agent skills,
+and then call validate_workspace.
+```
 
-```jsonc
+Recommended tool flow:
+
+1. `get_init_form_schema` if the client can render a setup form.
+2. `initialize_workspace` with an absolute `workspacePath`.
+3. `validate_workspace`.
+4. Start work through the generated harness: plan, review, contract, implementation, evaluation, verification, closeout.
+
+### Existing Project
+
+Use this when AI enters a legacy repo, client system, or production-adjacent service.
+
+Ask your agent:
+
+```text
+Use workspace-init-mcp for non-destructive legacy adoption.
+First call analyze_workspace, then preview_workspace_init.
+Do not delete, move, truncate, or replace application source.
+If the preview is safe, call initialize_workspace with force=false, then validate_workspace.
+```
+
+Recommended tool flow:
+
+1. `analyze_workspace`.
+2. `preview_workspace_init`.
+3. `initialize_workspace` with `force: false`.
+4. `validate_workspace`.
+5. For an already initialized workspace, run `audit_workspace_upgrade_risk` and `reconcile_workspace_initialization` in dry-run mode before any apply run.
+
+## Agent Tool Setup
+
+These are the common MCP-capable agent environments this project is designed for. The exact popularity order changes over time, so treat this as a practical "top 5 places users usually start" rather than a permanent ranking.
+
+### 1. Codex CLI / Codex Desktop
+
+Add the MCP server:
+
+```bash
+codex mcp add workspace-init -- npx -y workspace-init-mcp
+codex mcp get workspace-init
+```
+
+Then ask Codex:
+
+```text
+Use workspace-init-mcp. For a new project, call initialize_workspace and validate_workspace.
+For an existing project, call analyze_workspace, preview_workspace_init, initialize_workspace force=false, and validate_workspace.
+```
+
+### 2. Claude Code / Claude CLI
+
+Add the MCP server:
+
+```bash
+claude mcp add-json workspace-init '{"type":"stdio","command":"npx","args":["-y","workspace-init-mcp"]}'
+claude mcp get workspace-init
+```
+
+Then ask Claude:
+
+```text
+Use the workspace-init MCP tools. Start with analyze_workspace for an existing repo,
+or initialize_workspace for a new repo. Preserve application source.
+```
+
+### 3. Gemini CLI / Google Antigravity
+
+For Gemini CLI:
+
+```bash
+gemini mcp add workspace-init npx -y workspace-init-mcp
+gemini mcp list
+```
+
+For Google Antigravity or another Gemini-based agent IDE, add an equivalent stdio MCP server in the MCP settings:
+
+```json
 {
-  "mcp": {
-    "servers": {
-      "workspace-init": {
-        "type": "stdio",
-        "command": "npx",
-        "args": ["-y", "workspace-init-mcp"]
-      }
+  "mcpServers": {
+    "workspace-init": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "workspace-init-mcp"]
     }
   }
 }
 ```
 
-### VS Code `.vscode/mcp.json`
+Then ask the agent:
+
+```text
+Use workspace-init-mcp to install an AI harness.
+For this existing repo, analyze first, preview generated files, preserve source, then initialize.
+```
+
+### 4. GitHub Copilot In VS Code
+
+Add this to `.vscode/mcp.json` in the repository:
 
 ```json
 {
@@ -97,14 +178,22 @@ Recommended first pass for an existing repository:
 }
 ```
 
-### Claude Desktop
+Start the server from VS Code, open Copilot Chat in Agent mode, then ask:
 
-Add this to `claude_desktop_config.json`:
+```text
+Use the workspace-init MCP server. If this is a new project, call initialize_workspace.
+If this is an existing project, call analyze_workspace and preview_workspace_init first.
+```
+
+### 5. Cursor, OpenHands, Open Claude, Or Other MCP-Compatible IDE/CLI
+
+Use the same stdio server shape in the tool's MCP configuration:
 
 ```json
 {
   "mcpServers": {
     "workspace-init": {
+      "type": "stdio",
       "command": "npx",
       "args": ["-y", "workspace-init-mcp"]
     }
@@ -112,11 +201,14 @@ Add this to `claude_desktop_config.json`:
 }
 ```
 
-### Codex CLI / Desktop
+For OpenHands CLI-style configuration, use the tool's MCP server manager or config file and point the command to `npx` with args `["-y", "workspace-init-mcp"]`.
 
-```bash
-codex mcp add workspace-init -- npx -y workspace-init-mcp
-codex mcp get workspace-init
+Then ask:
+
+```text
+Use workspace-init-mcp. Choose the safe flow:
+new project = initialize_workspace -> validate_workspace;
+existing project = analyze_workspace -> preview_workspace_init -> initialize_workspace force=false -> validate_workspace.
 ```
 
 ## What It Generates
