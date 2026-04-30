@@ -6,6 +6,8 @@ const GENERATED_CONTROL_PREFIXES = [
   ".cursor/",
   ".claude/",
   ".agents/",
+  ".governance/",
+  "live-artifacts-dashboard/",
   "docs/",
 ] as const;
 

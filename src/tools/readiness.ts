@@ -15,6 +15,9 @@ interface ReadinessDimensionDefinition {
 export interface WorkspaceReadinessAssessment {
   workspacePath: string;
   overallScore: number;
+  structuralScore: number;
+  semanticScore: number;
+  semanticCapApplied: boolean;
   classification: ReadinessStatus;
   dimensions: Array<{
     id: string;
@@ -264,6 +267,24 @@ function workspaceHasPath(workspacePath: string, relativePath: string): boolean 
   return fs.existsSync(path.join(workspacePath, relativePath));
 }
 
+function applySemanticReadinessCap(
+  structuralScore: number,
+  semanticScore: number
+): {
+  overallScore: number;
+  semanticCapApplied: boolean;
+} {
+  if (semanticScore >= 85) {
+    return { overallScore: structuralScore, semanticCapApplied: false };
+  }
+
+  const cappedScore = Math.min(structuralScore, Math.min(84, semanticScore + 20));
+  return {
+    overallScore: cappedScore,
+    semanticCapApplied: cappedScore < structuralScore,
+  };
+}
+
 export function assessWorkspaceReadiness(
   workspacePath: string,
   writeScorecard = false
@@ -294,13 +315,18 @@ export function assessWorkspaceReadiness(
     };
   });
 
-  const weightedScore = Math.round(
+  const structuralScore = Math.round(
     dimensions.reduce(
       (total, dimension) => total + dimension.score * (dimension.weight / 100),
       0
     )
   );
-  const classification = classifyScore(weightedScore);
+  const semanticAudit = auditWorkspaceReadinessSemantics(workspacePath, false);
+  const { overallScore, semanticCapApplied } = applySemanticReadinessCap(
+    structuralScore,
+    semanticAudit.overallScore
+  );
+  const classification = classifyScore(overallScore);
 
   const topGaps = dimensions
     .filter((dimension) => dimension.missingPaths.length > 0)
@@ -330,7 +356,10 @@ export function assessWorkspaceReadiness(
           schemaVersion: "1.0.0",
           generatedAt: new Date().toISOString(),
           assessmentStatus: "assessed",
-          overallScore: weightedScore,
+          overallScore,
+          structuralScore,
+          semanticScore: semanticAudit.overallScore,
+          semanticCapApplied,
           classification,
           dimensions,
           topGaps,
@@ -346,7 +375,10 @@ export function assessWorkspaceReadiness(
   const summary = [
     `Workspace readiness assessment: ${path.basename(workspacePath)}`,
     `Initialization completeness: ${validation.completeness}%`,
-    `Overall score: ${weightedScore}/100 (${classification})`,
+    `Overall score: ${overallScore}/100 (${classification})`,
+    `Structural score: ${structuralScore}/100`,
+    `Semantic score: ${semanticAudit.overallScore}/100`,
+    `Semantic cap applied: ${semanticCapApplied ? "yes" : "no"}`,
     "",
     "Dimensions:",
     ...dimensions.map(
@@ -363,7 +395,10 @@ export function assessWorkspaceReadiness(
 
   return {
     workspacePath,
-    overallScore: weightedScore,
+    overallScore,
+    structuralScore,
+    semanticScore: semanticAudit.overallScore,
+    semanticCapApplied,
     classification,
     dimensions,
     topGaps,

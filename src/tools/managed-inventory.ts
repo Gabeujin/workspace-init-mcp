@@ -5,10 +5,16 @@ import { execFileSync } from "node:child_process";
 
 import { type GeneratedFile } from "../types.js";
 import { analyzeWorkspace } from "./status.js";
+import {
+  isGeneratedWorkspaceControlPath,
+  isProtectedSourcePath,
+  isUnsafeWorkspaceRelativePath,
+  normalizeWorkspaceRelativePath,
+} from "./generated-file-safety.js";
 
 export const MANAGED_FILE_INVENTORY_PATH = ".github/ai-harness/managed-file-inventory.json";
 export const MANAGED_INVENTORY_SCHEMA_VERSION = "1.0.0";
-const TOOL_VERSION = "4.2.1";
+const TOOL_VERSION = "4.3.0";
 
 export const MANAGED_JSON_MERGE_PATHS = new Set([
   "docs/ai-harness/dashboard/state/dashboard-state.json",
@@ -125,6 +131,12 @@ function classifyManagedPath(relativePath: string): string {
   if (relativePath.startsWith(".github/ai-harness/")) {
     return "governance";
   }
+  if (relativePath.startsWith(".governance/")) {
+    return "governance";
+  }
+  if (relativePath.startsWith("live-artifacts-dashboard/")) {
+    return "live-artifacts-dashboard";
+  }
   if (relativePath.startsWith("docs/ai-harness/dashboard/")) {
     return "dashboard";
   }
@@ -166,6 +178,16 @@ function isInventoryEntry(value: unknown): value is ManagedFileInventoryEntry {
     ((value as ManagedFileInventoryEntry).strategy === "merge" ||
       (value as ManagedFileInventoryEntry).strategy === "replace") &&
     typeof (value as ManagedFileInventoryEntry).category === "string"
+  );
+}
+
+function isSafeManagedInventoryPath(relativePath: string): boolean {
+  const normalized = normalizeWorkspaceRelativePath(relativePath);
+  return (
+    normalized === relativePath.replace(/\\/g, "/") &&
+    !isUnsafeWorkspaceRelativePath(relativePath) &&
+    !isProtectedSourcePath(relativePath) &&
+    isGeneratedWorkspaceControlPath(relativePath)
   );
 }
 
@@ -696,7 +718,9 @@ export function readManagedFileInventory(
       parsed == null ||
       typeof parsed !== "object" ||
       !Array.isArray(parsed.entries) ||
-      !parsed.entries.every((entry) => isInventoryEntry(entry))
+      !parsed.entries.every(
+        (entry) => isInventoryEntry(entry) && isSafeManagedInventoryPath(entry.path)
+      )
     ) {
       return {
         status: "invalid",

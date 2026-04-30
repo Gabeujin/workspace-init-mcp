@@ -354,6 +354,48 @@ const EXPECTED_FILES: Omit<ValidationItem, "status">[] = [
     category: "dashboard",
     severity: "recommended",
   },
+  {
+    path: "live-artifacts-dashboard/package.json",
+    label: "Live artifacts dashboard package",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "live-artifacts-dashboard/server.js",
+    label: "Live artifacts dashboard server",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "live-artifacts-dashboard/public/index.html",
+    label: "Live artifacts dashboard screen",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "live-artifacts-dashboard/public/app.js",
+    label: "Live artifacts dashboard app",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "live-artifacts-dashboard/public/vendor/chart.umd.js",
+    label: "Live artifacts local chart adapter",
+    category: "dashboard",
+    severity: "recommended",
+  },
+  {
+    path: ".governance/_INDEX.md",
+    label: "Governance index",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: ".governance/_PROJECT_STATE.md",
+    label: "Governance project state",
+    category: "governance",
+    severity: "required",
+  },
 ];
 
 const RUNTIME_STATE_PATHS = new Set([

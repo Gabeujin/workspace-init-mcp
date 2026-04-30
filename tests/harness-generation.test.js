@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -13,6 +15,7 @@ const readinessModule = await import("../dist/tools/readiness.js");
 const reconcileModule = await import("../dist/tools/reconcile.js");
 const managedInventoryModule = await import("../dist/tools/managed-inventory.js");
 const generatedFileSafetyModule = await import("../dist/tools/generated-file-safety.js");
+const dashboardStateContractModule = await import("../dist/data/dashboard-state-contract.js");
 
 const { collectFiles } = initModule;
 const { validateWorkspace } = validateModule;
@@ -36,12 +39,14 @@ const {
   isProtectedSourcePath,
   normalizeSafeWorkspaceRelativePaths,
 } = generatedFileSafetyModule;
+const { DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS } = dashboardStateContractModule;
 const {
   startHarnessSession,
   advanceHarnessSession,
   getHarnessSessionStatus,
   activateHarnessSession,
   auditHarnessRuntime,
+  auditHarnessParallelChunkConflicts,
   compactHarnessRuntime,
   listHarnessRuntimeAdapters,
   listHarnessExecutionBridges,
@@ -75,6 +80,107 @@ function writeGeneratedFiles(rootDir, files) {
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, file.content, "utf-8");
   }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function waitForJsonEndpoint(endpoint, timeoutMs = 6000, init = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(endpoint, {
+        cache: "no-store",
+        ...init,
+        headers: init.headers,
+      });
+      if (response.ok) {
+        return await response.json();
+      }
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(120);
+  }
+  throw lastError || new Error(`Timed out waiting for ${endpoint}`);
+}
+
+async function postJsonEndpoint(endpoint, init = {}) {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    cache: "no-store",
+    ...init,
+    headers: init.headers,
+  });
+  assert.equal(response.ok, true, `POST ${endpoint} should return HTTP 2xx`);
+  return await response.json();
+}
+
+async function getAvailablePort() {
+  return await new Promise((resolve, reject) => {
+    const server = http.createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = address && typeof address === "object" ? address.port : 0;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+async function readFileWhenExists(filePath, timeoutMs = 6000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      return fs.readFileSync(filePath, "utf-8");
+    } catch (error) {
+      lastError = error;
+      await delay(120);
+    }
+  }
+  throw lastError || new Error(`Timed out waiting for ${filePath}`);
+}
+
+async function waitForSseEvent(endpoint, eventName, timeoutMs = 6000) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(endpoint);
+    const timer = setTimeout(() => {
+      request.destroy();
+      reject(new Error(`Timed out waiting for SSE event ${eventName}`));
+    }, timeoutMs);
+
+    request.on("response", (response) => {
+      response.setEncoding("utf-8");
+      response.on("data", (chunk) => {
+        if (String(chunk).includes(`event: ${eventName}`)) {
+          clearTimeout(timer);
+          request.destroy();
+          resolve();
+        }
+      });
+    });
+    request.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+async function terminateProcess(childProcess) {
+  if (childProcess.exitCode != null) {
+    return;
+  }
+  childProcess.kill();
+  await Promise.race([
+    new Promise((resolve) => childProcess.once("exit", resolve)),
+    delay(2000),
+  ]);
 }
 
 async function runGeneratedDashboardOps(scriptPath, args, gitFixturePath) {
@@ -136,6 +242,7 @@ for (const skillId of [
   "harness-multi-expert-review",
   "harness-code-review-pipeline",
   "harness-post-work-review",
+  "harness-memory-pattern-miner",
   "service-endpoint-tracer",
   "message-resource-lookup",
   "legacy-sql-review",
@@ -153,6 +260,7 @@ for (const agentId of [
   "harness-implementer",
   "harness-verifier",
   "harness-quality-gate",
+  "harness-memory-curator",
   "legacy-enterprise-analysis",
   "risk-focused-code-review",
 ]) {
@@ -160,6 +268,10 @@ for (const agentId of [
 }
 
 const files = collectFiles(createParams());
+const repositoryReadme = fs.readFileSync(path.join(process.cwd(), "README.md"), "utf-8");
+assert.match(repositoryReadme, /Live Artifacts Dashboard/);
+assert.match(repositoryReadme, /Governance intake/);
+assert.match(repositoryReadme, /POST \/api\/summary\/refresh/);
 assert.doesNotThrow(
   () => assertGeneratedFilesRespectNonDestructivePolicy(files),
   "generated initialization files should stay inside governance/docs/IDE harness roots"
@@ -369,6 +481,9 @@ assert.ok(dashboardHtml, "dashboard HTML not generated");
 assert.match(dashboardHtml, /AI Harness Dashboard/);
 assert.match(dashboardHtml, /Git-friendly/);
 assert.match(dashboardHtml, /runtime-orchestration/);
+assert.match(dashboardHtml, /state-source-banner/);
+assert.match(dashboardHtml, /section-nav/);
+assert.match(dashboardHtml, /memory-promotion/);
 
 const dashboardOpsReadme = byPath.get("docs/ai-harness/dashboard/scripts/README.md");
 assert.ok(dashboardOpsReadme, "dashboard operations README not generated");
@@ -378,6 +493,57 @@ const dashboardOpsScript = byPath.get("docs/ai-harness/dashboard/scripts/dashboa
 assert.ok(dashboardOpsScript, "dashboard operations script not generated");
 assert.match(dashboardOpsScript, /export-static/);
 assert.match(dashboardOpsScript, /serve/);
+assert.match(dashboardOpsScript, /operationsHealth/);
+assert.match(dashboardOpsScript, /memoryPromotion/);
+assert.match(dashboardOpsScript, /strict-governance/);
+assert.match(dashboardOpsScript, /isPathInsideDirectory/);
+assert.match(dashboardOpsScript, /coerceFiniteNumber/);
+assert.match(dashboardOpsScript, /classifyEvidenceOutputs/);
+assert.match(dashboardOpsScript, /DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS/);
+assert.match(dashboardOpsScript, /writeTextFileAtomic/);
+assert.match(dashboardOpsScript, /dataSources must include at least one connected source/);
+
+const liveDashboardPackage = byPath.get("live-artifacts-dashboard/package.json");
+assert.ok(liveDashboardPackage, "live artifacts dashboard package not generated");
+assert.match(liveDashboardPackage, /"health": "node server\.js --health"/);
+
+const liveDashboardServer = byPath.get("live-artifacts-dashboard/server.js");
+assert.ok(liveDashboardServer, "live artifacts dashboard server not generated");
+assert.match(liveDashboardServer, /DEFAULT_PORT = 43111/);
+assert.match(liveDashboardServer, /buildAdminDashboardReference/);
+assert.match(liveDashboardServer, /\/api\/events/);
+assert.match(liveDashboardServer, /\/api\/summary\/refresh/);
+assert.match(liveDashboardServer, /SOURCE_PREVIEW_ENABLED/);
+assert.match(liveDashboardServer, /LIVE_ARTIFACTS_API_TOKEN/);
+assert.match(liveDashboardServer, /authorizeApiRequest/);
+assert.match(liveDashboardServer, /redactSecrets/);
+assert.match(liveDashboardServer, /rootScope: "project-root"/);
+assert.match(liveDashboardServer, /renameSync\(tempPath, filePath\)/);
+
+const liveDashboardHtml = byPath.get("live-artifacts-dashboard/public/index.html");
+assert.ok(liveDashboardHtml, "live artifacts dashboard HTML not generated");
+assert.match(liveDashboardHtml, /Dashboard Boundary/);
+assert.match(liveDashboardHtml, /scan-warning/);
+assert.doesNotMatch(liveDashboardHtml, /https?:\/\//i, "live dashboard public HTML should not use CDN URLs");
+
+const liveDashboardApp = byPath.get("live-artifacts-dashboard/public/app.js");
+assert.ok(liveDashboardApp, "live artifacts dashboard app not generated");
+assert.match(liveDashboardApp, /renderDashboardBoundary/);
+assert.match(liveDashboardApp, /renderScanHealth/);
+assert.doesNotMatch(liveDashboardApp, /https?:\/\//i, "live dashboard app should not use remote URLs");
+
+const liveDashboardChartAdapter = byPath.get("live-artifacts-dashboard/public/vendor/chart.umd.js");
+assert.ok(liveDashboardChartAdapter, "live artifacts local chart adapter not generated");
+assert.match(liveDashboardChartAdapter, /global\.Chart/);
+
+const governanceIndex = byPath.get(".governance/_INDEX.md");
+assert.ok(governanceIndex, "governance index not generated");
+assert.match(governanceIndex, /canonical admin dashboard state/);
+
+const liveArtifactsGuide = byPath.get("docs/ai-harness/live-artifacts-dashboard.md");
+assert.ok(liveArtifactsGuide, "live artifacts dashboard guide not generated");
+assert.match(liveArtifactsGuide, /Boundary With Admin Dashboard/);
+assert.match(liveArtifactsGuide, /43111/);
 
 const readinessGuide = byPath.get("docs/ai-harness/readiness/README.md");
 assert.ok(readinessGuide, "readiness guide not generated");
@@ -423,7 +589,7 @@ assert.match(runtimeReadme, /adapter-contract\.json/);
 const runtimeVersionIndex = byPath.get("docs/ai-harness/runtime/version-index.json");
 assert.ok(runtimeVersionIndex, "runtime version capability index not generated");
 const parsedRuntimeVersionIndex = JSON.parse(runtimeVersionIndex);
-assert.equal(parsedRuntimeVersionIndex.latestVersion, "4.2.1");
+assert.equal(parsedRuntimeVersionIndex.latestVersion, "4.3.0");
 assert.ok(
   parsedRuntimeVersionIndex.versions.some(
     (entry) =>
@@ -457,9 +623,24 @@ assert.ok(
       entry.version === "4.2.1" &&
       entry.capabilities.includes("runtime-path-alias-hardening") &&
       entry.capabilities.includes("runtime-validation-json-diagnostics") &&
-      entry.capabilities.includes("background-native-executor-failure-state")
+      entry.capabilities.includes("background-native-executor-failure-state") &&
+      entry.capabilities.includes("strict-dashboard-contract-evidence") &&
+      entry.capabilities.includes("cross-platform-release-ci")
   ),
   "runtime version index should describe the 4.2.1 safety hardening capabilities"
+);
+assert.ok(
+  parsedRuntimeVersionIndex.versions.some(
+    (entry) =>
+      entry.version === "4.3.0" &&
+      entry.capabilities.includes("live-artifacts-dashboard") &&
+      entry.capabilities.includes("memory-to-skill-promotion") &&
+      entry.capabilities.includes("native-executor-resource-guardrails") &&
+      entry.capabilities.includes("parallel-chunk-conflict-audit") &&
+      entry.capabilities.includes("atomic-runtime-json-writes") &&
+      entry.capabilities.includes("strict-memory-promotion-ownership-roots")
+  ),
+  "runtime version index should describe the 4.3.0 live artifact, memory, and runtime guardrail capabilities"
 );
 
 const runtimeCompatibilityMatrix = byPath.get(
@@ -467,24 +648,30 @@ const runtimeCompatibilityMatrix = byPath.get(
 );
 assert.ok(runtimeCompatibilityMatrix, "runtime compatibility matrix not generated");
 const parsedRuntimeCompatibilityMatrix = JSON.parse(runtimeCompatibilityMatrix);
-assert.equal(parsedRuntimeCompatibilityMatrix.currentVersion, "4.2.1");
+assert.equal(parsedRuntimeCompatibilityMatrix.currentVersion, "4.3.0");
 assert.ok(
   parsedRuntimeCompatibilityMatrix.upgradePaths.some(
-    (entry) => entry.from === "4.1.1" && entry.to === "4.2.1"
+    (entry) => entry.from === "4.1.1" && entry.to === "4.3.0"
   ),
-  "runtime compatibility matrix should include the 4.1.1 to 4.2.1 upgrade path"
+  "runtime compatibility matrix should include the 4.1.1 to 4.3.0 upgrade path"
 );
 assert.ok(
   parsedRuntimeCompatibilityMatrix.upgradePaths.some(
-    (entry) => entry.from === "4.1.2" && entry.to === "4.2.1"
+    (entry) => entry.from === "4.1.2" && entry.to === "4.3.0"
   ),
-  "runtime compatibility matrix should include the 4.1.2 to 4.2.1 upgrade path"
+  "runtime compatibility matrix should include the 4.1.2 to 4.3.0 upgrade path"
 );
 assert.ok(
   parsedRuntimeCompatibilityMatrix.upgradePaths.some(
-    (entry) => entry.from === "4.2.0" && entry.to === "4.2.1"
+    (entry) => entry.from === "4.2.0" && entry.to === "4.3.0"
   ),
-  "runtime compatibility matrix should include the 4.2.0 to 4.2.1 upgrade path"
+  "runtime compatibility matrix should include the 4.2.0 to 4.3.0 upgrade path"
+);
+assert.ok(
+  parsedRuntimeCompatibilityMatrix.upgradePaths.some(
+    (entry) => entry.from === "4.2.1" && entry.to === "4.3.0"
+  ),
+  "runtime compatibility matrix should include the 4.2.1 to 4.3.0 upgrade path"
 );
 assert.ok(
   parsedRuntimeCompatibilityMatrix.requiredRuntimeFiles.includes(
@@ -704,6 +891,18 @@ assert.ok(dashboardState, "dashboard state JSON not generated");
 const parsedDashboardState = JSON.parse(dashboardState);
 assert.equal(parsedDashboardState.domainLens.mode, "software-delivery");
 assert.equal(parsedDashboardState.governanceState.policyId, "three-plan-three-review");
+assert.ok(
+  parsedDashboardState.governanceState.requiredArtifacts.includes(
+    "live-artifacts-dashboard/public/app.js"
+  ),
+  "admin governance state should require the live artifacts dashboard app"
+);
+assert.ok(
+  parsedDashboardState.governanceState.requiredArtifacts.includes(
+    "live-artifacts-dashboard/public/vendor/chart.umd.js"
+  ),
+  "admin governance state should require the local live artifacts chart adapter"
+);
 assert.equal(parsedDashboardState.kpiProfile.id, "software-devops-governed-kpis");
 assert.ok(
   parsedDashboardState.kpiProfile.requiredKpiIds.includes("session-governance-coverage"),
@@ -731,6 +930,39 @@ assert.ok(
   parsedDashboardState.kpis.some((kpi) => kpi.id === "ax-dx-adoption"),
   "dashboard should expose a DX/AX readiness KPI"
 );
+assert.equal(
+  parsedDashboardState.operationsHealth.status,
+  "not-configured",
+  "admin dashboard should bootstrap server operations health separately from live artifacts"
+);
+assert.equal(
+  parsedDashboardState.operationsHealth.dbcp.poolName,
+  "default",
+  "admin dashboard should include DBCP health placeholders"
+);
+assert.ok(
+  parsedDashboardState.operationsHealth.latencyQueries.some(
+    (query) => query.id === "latency-p95"
+  ),
+  "admin dashboard should include latency query placeholders"
+);
+assert.ok(
+  parsedDashboardState.operationsHealth.dataSources.some(
+    (source) => source.id === "application-logs"
+  ),
+  "admin dashboard should include server traffic/request-response data source wiring"
+);
+assert.equal(
+  parsedDashboardState.memoryPromotion.thresholdScore,
+  7,
+  "dashboard should include a conservative memory promotion threshold"
+);
+assert.ok(
+  parsedDashboardState.memoryPromotion.candidates.some(
+    (candidate) => candidate.id === "memory-to-skill-promotion"
+  ),
+  "dashboard should seed a memory-to-skill promotion candidate"
+);
 assert.ok(
   Array.isArray(parsedDashboardState.governedSessions) &&
     parsedDashboardState.governedSessions.length > 0,
@@ -739,6 +971,10 @@ assert.ok(
 assert.ok(
   parsedDashboardState.artifacts.some((artifact) => artifact.id === "admin-dashboard"),
   "dashboard should include the admin dashboard artifact"
+);
+assert.ok(
+  parsedDashboardState.artifacts.some((artifact) => artifact.id === "live-artifacts-dashboard"),
+  "admin dashboard should reference the separate live artifacts observer"
 );
 assert.ok(
   parsedDashboardState.artifacts.some(
@@ -873,6 +1109,11 @@ assert.ok(
 const dashboardSchema = byPath.get("docs/ai-harness/dashboard/state/dashboard-state.schema.json");
 assert.ok(dashboardSchema, "dashboard schema not generated");
 const parsedDashboardSchema = JSON.parse(dashboardSchema);
+assert.deepEqual(
+  parsedDashboardSchema.required,
+  [...DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS],
+  "dashboard schema should use the canonical top-level contract"
+);
 assert.ok(
   parsedDashboardSchema.required.includes("versionLedger"),
   "dashboard schema should require versionLedger"
@@ -880,6 +1121,14 @@ assert.ok(
 assert.ok(
   parsedDashboardSchema.required.includes("runtimeOrchestration"),
   "dashboard schema should require runtime orchestration state"
+);
+assert.ok(
+  parsedDashboardSchema.required.includes("operationsHealth"),
+  "dashboard schema should require operations health state"
+);
+assert.ok(
+  parsedDashboardSchema.required.includes("memoryPromotion"),
+  "dashboard schema should require memory promotion state"
 );
 
 const dashboardTemplate = byPath.get("docs/ai-harness/dashboard/templates/creative-narrative.state.json");
@@ -912,11 +1161,21 @@ const domainLedgerSkill = byPath.get(".github/skills/domain-model-ledger/SKILL.m
 assert.ok(domainLedgerSkill, "domain model ledger skill not generated");
 assert.match(domainLedgerSkill, /software delivery/i);
 
+const memoryPatternSkill = byPath.get(".github/skills/harness-memory-pattern-miner/SKILL.md");
+assert.ok(memoryPatternSkill, "harness memory pattern miner skill not generated");
+assert.match(memoryPatternSkill, /Promotion Threshold/);
+assert.match(memoryPatternSkill, /three times|two governed sessions/i);
+
 const harnessAgent = byPath.get(".github/agents/harness-quality-gate.agent.md");
 assert.ok(harnessAgent, "harness quality gate agent not generated");
 assert.match(harnessAgent, /tools: \[read, edit, search, execute\]/);
 assert.match(harnessAgent, /user-invocable: true/);
 assert.match(harnessAgent, /Refresh governance artifacts last/);
+
+const memoryCuratorAgent = byPath.get(".github/agents/harness-memory-curator.agent.md");
+assert.ok(memoryCuratorAgent, "harness memory curator agent not generated");
+assert.match(memoryCuratorAgent, /repeated session memory/i);
+assert.match(memoryCuratorAgent, /promotion threshold/i);
 
 const riskReviewAgent = byPath.get(".github/agents/risk-focused-code-review.agent.md");
 assert.ok(riskReviewAgent, "risk-focused review agent not generated");
@@ -971,6 +1230,14 @@ assert.ok(
 assert.ok(
   cursorByPath.has(".cursor/agents/harness-quality-gate.agent.md"),
   "cursor-only initialization should mirror agents into .cursor"
+);
+assert.ok(
+  cursorByPath.has(".cursor/skills/harness-memory-pattern-miner/SKILL.md"),
+  "cursor-only initialization should mirror memory pattern miner skill into .cursor"
+);
+assert.ok(
+  cursorByPath.has(".cursor/agents/harness-memory-curator.agent.md"),
+  "cursor-only initialization should mirror memory curator agent into .cursor"
 );
 
 const cursorMachineIndex = JSON.parse(cursorByPath.get(".github/agent-skill-index.json"));
@@ -1093,10 +1360,197 @@ assert.ok(
   "creative initialization should include draft progression"
 );
 
+const parallelConflictWorkspace = fs.mkdtempSync(path.join(process.cwd(), "tmp-parallel-conflict-"));
+try {
+  writeGeneratedFiles(parallelConflictWorkspace, collectFiles(createParams()));
+  startHarnessSession({
+    workspacePath: parallelConflictWorkspace,
+    goal: "Prepare first parallel chunk.",
+    sessionId: "parallel-session-001",
+    chunkId: "parallel-chunk-001",
+    dependencyNotes: "parallel-ready: independent except for declared write scope",
+    expectedWritePaths: ["docs/work-logs/shared-output.md"],
+  });
+  startHarnessSession({
+    workspacePath: parallelConflictWorkspace,
+    goal: "Prepare second parallel chunk with a conflicting write path.",
+    sessionId: "parallel-session-002",
+    chunkId: "parallel-chunk-002",
+    dependencyNotes: "parallel-ready: independent except for declared write scope",
+    expectedWritePaths: ["docs/work-logs/shared-output.md"],
+  });
+  const conflictAudit = auditHarnessParallelChunkConflicts(parallelConflictWorkspace);
+  assert.equal(
+    conflictAudit.valid,
+    false,
+    "parallel chunk conflict audit should fail when expected write paths overlap"
+  );
+  assert.equal(conflictAudit.conflicts.length, 1);
+  assert.match(conflictAudit.summary, /same expected write path/);
+  const unsafeSessionPath = path.join(
+    parallelConflictWorkspace,
+    "docs",
+    "ai-harness",
+    "runtime",
+    "sessions",
+    "parallel-session-001.session.json"
+  );
+  const unsafeSession = JSON.parse(fs.readFileSync(unsafeSessionPath, "utf-8"));
+  unsafeSession.chunk.expectedWritePaths = ["src/"];
+  fs.writeFileSync(
+    unsafeSessionPath,
+    JSON.stringify(unsafeSession, null, 2) + "\n",
+    "utf-8"
+  );
+  const unsafeScopeAudit = auditHarnessParallelChunkConflicts(parallelConflictWorkspace);
+  assert.equal(
+    unsafeScopeAudit.valid,
+    false,
+    "parallel chunk conflict audit should fail on unsafe legacy expectedWritePaths"
+  );
+  assert.ok(
+    unsafeScopeAudit.errors.some((error) =>
+      error.includes("unsafe expectedWritePaths")
+    ),
+    "parallel chunk conflict audit should explain unsafe persisted write scopes"
+  );
+} finally {
+  fs.rmSync(parallelConflictWorkspace, { recursive: true, force: true });
+}
+
 const fullWorkspace = fs.mkdtempSync(path.join(process.cwd(), "tmp-full-workspace-"));
 try {
   const generatedFiles = collectFiles(createParams());
   writeGeneratedFiles(fullWorkspace, generatedFiles);
+  fs.mkdirSync(path.join(fullWorkspace, "src"), { recursive: true });
+  fs.writeFileSync(
+    path.join(fullWorkspace, "src", "app.js"),
+    "const token = 'legacy-source-should-not-be-scanned';\n",
+    "utf-8"
+  );
+  fs.mkdirSync(path.join(fullWorkspace, "docs", "context"), { recursive: true });
+  fs.writeFileSync(
+    path.join(fullWorkspace, "docs", "context", "governance-note.md"),
+    "client_secret: super-secret-value\nAuthorization: Bearer abc.def.ghi\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(fullWorkspace, ".governance", "backlog", "live-open-task.md"),
+    "- [ ] live-artifacts: open Verify live artifacts dashboard boundary\n",
+    "utf-8"
+  );
+
+  const liveDashboardRoot = path.join(fullWorkspace, "live-artifacts-dashboard");
+  execFileSync(process.execPath, ["--check", path.join(liveDashboardRoot, "server.js")]);
+  execFileSync(process.execPath, ["--check", path.join(liveDashboardRoot, "public", "app.js")]);
+  const liveHealthOutput = execFileSync(process.execPath, ["server.js", "--health"], {
+    cwd: liveDashboardRoot,
+    encoding: "utf-8",
+  });
+  const parsedLiveHealth = JSON.parse(liveHealthOutput);
+  assert.equal(parsedLiveHealth.ok, true, "live artifacts dashboard health check should pass");
+  assert.ok(
+    parsedLiveHealth.counts.activeOpenTasks > 0,
+    "live artifacts dashboard health should detect open work markers"
+  );
+
+  const livePort = await getAvailablePort();
+  const liveProcess = spawn(process.execPath, ["server.js", "--port", String(livePort)], {
+    cwd: liveDashboardRoot,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  try {
+    const apiToken = (
+      await readFileWhenExists(path.join(liveDashboardRoot, ".state", "api-token"))
+    ).trim();
+    assert.ok(apiToken.length >= 20, "live artifacts dashboard should generate a local API token");
+    const apiHeaders = { "x-live-artifacts-token": apiToken };
+    const health = await waitForJsonEndpoint(`http://127.0.0.1:${livePort}/api/health`, 6000, {
+      headers: apiHeaders,
+    });
+    assert.equal(health.ok, true, "live artifacts health API should return ok");
+    const indexResponse = await fetch(`http://127.0.0.1:${livePort}/`, {
+      cache: "no-store",
+    });
+    assert.equal(indexResponse.ok, true, "live artifacts dashboard UI should be served");
+    const indexHtml = await indexResponse.text();
+    assert.match(indexHtml, /window\.__LIVE_ARTIFACTS_API_TOKEN__/);
+    assert.doesNotMatch(indexHtml, /= "__LIVE_ARTIFACTS_API_TOKEN__";/);
+    assert.match(
+      indexHtml,
+      new RegExp(apiToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      "served live dashboard HTML should receive the generated API token"
+    );
+    const unauthorizedHealth = await fetch(`http://127.0.0.1:${livePort}/api/health`, {
+      cache: "no-store",
+    });
+    assert.equal(
+      unauthorizedHealth.status,
+      401,
+      "live artifacts API should require the local token by default"
+    );
+
+    const summary = await postJsonEndpoint(`http://127.0.0.1:${livePort}/api/summary/refresh`, {
+      headers: apiHeaders,
+    });
+    assert.equal(
+      summary.project.dashboardUrl,
+      `http://127.0.0.1:${livePort}/`,
+      "live artifacts dashboard should report the requested runtime port"
+    );
+    assert.equal(summary.project.root, ".");
+    assert.equal(summary.project.rootScope, "project-root");
+    assert.equal(summary.health.sourcePreviewEnabled, false);
+    assert.equal(summary.adminDashboard.defaultServePort, 43110);
+    assert.equal(summary.adminDashboard.liveArtifactsPort, livePort);
+    assert.match(summary.adminDashboard.boundary, /Admin dashboard owns curated governance/);
+    assert.ok(
+      !summary.artifacts.some((artifact) => artifact.path === "src/app.js"),
+      "live dashboard should not scan protected legacy source roots by default"
+    );
+    const liveOpenArtifact = summary.artifacts.find((artifact) =>
+      artifact.path.endsWith(".governance/backlog/live-open-task.md")
+    );
+    assert.ok(liveOpenArtifact, "live dashboard summary should include generated open backlog artifact");
+    const secretArtifact = summary.artifacts.find((artifact) =>
+      artifact.path.endsWith("docs/context/governance-note.md")
+    );
+    assert.ok(secretArtifact, "live dashboard summary should include governance context evidence");
+
+    const openOnly = await waitForJsonEndpoint(
+      `http://127.0.0.1:${livePort}/api/artifacts?openOnly=true`,
+      6000,
+      { headers: apiHeaders }
+    );
+    assert.ok(
+      openOnly.artifacts.some((artifact) => artifact.id === liveOpenArtifact.id),
+      "openOnly artifact API should return active open work"
+    );
+
+    const detail = await waitForJsonEndpoint(
+      `http://127.0.0.1:${livePort}/api/artifact?id=${encodeURIComponent(liveOpenArtifact.id)}`,
+      6000,
+      { headers: apiHeaders }
+    );
+    assert.equal(detail.ok, true, "artifact detail API should return ok");
+    assert.match(detail.preview, /live-artifacts: open/);
+    const secretDetail = await waitForJsonEndpoint(
+      `http://127.0.0.1:${livePort}/api/artifact?id=${encodeURIComponent(secretArtifact.id)}`,
+      6000,
+      { headers: apiHeaders }
+    );
+    assert.equal(secretDetail.ok, true, "governance evidence detail API should return ok");
+    assert.match(secretDetail.preview, /\[redacted\]/);
+    assert.doesNotMatch(secretDetail.preview, /super-secret-value/);
+    assert.doesNotMatch(secretDetail.preview, /abc\.def\.ghi/);
+    await waitForSseEvent(
+      `http://127.0.0.1:${livePort}/api/events?token=${encodeURIComponent(apiToken)}`,
+      "ready"
+    );
+  } finally {
+    await terminateProcess(liveProcess);
+  }
 
   assert.throws(
     () =>
@@ -1391,7 +1845,7 @@ try {
   const codexHandoffJson = JSON.parse(
     fs.readFileSync(path.join(fullWorkspace, codexHandoff.handoffPath), "utf-8")
   );
-  assert.equal(codexHandoffJson.compatibility.mcpServerVersion, "4.2.1");
+  assert.equal(codexHandoffJson.compatibility.mcpServerVersion, "4.3.0");
   assert.equal(
     codexHandoffJson.fileReferences.adapterContractFile,
     "docs/ai-harness/runtime/adapter-contract.json"
@@ -1608,6 +2062,67 @@ try {
     "codex-cli"
   );
   assert.match(nativeExecutorStatus.summary, /Native execution status: prepared/);
+  assert.throws(
+    () =>
+      launchHarnessNativeExecutor({
+        workspacePath: fullWorkspace,
+        bridgeId: "codex-cli",
+        sessionId: "session-runtime-002",
+        executableOverride: process.execPath,
+        argsOverride: ["-e", "console.log('blocked native executor override')"],
+        waitForExit: true,
+      }),
+    /allowUnsafeNativeExecutorOverride=true/,
+    "real native executor launches with override args should require explicit operator authorization"
+  );
+  const authorizedForegroundNativeExecutor = launchHarnessNativeExecutor({
+    workspacePath: fullWorkspace,
+    bridgeId: "codex-cli",
+    sessionId: "session-runtime-002",
+    executableOverride: process.execPath,
+    argsOverride: ["-e", "console.log('authorized native executor ok')"],
+    waitForExit: true,
+    allowUnsafeNativeExecutorOverride: true,
+  });
+  assert.equal(
+    authorizedForegroundNativeExecutor.status,
+    "completed",
+    "explicitly authorized foreground native executor overrides should still run"
+  );
+  const timedOutForegroundNativeExecutor = launchHarnessNativeExecutor({
+    workspacePath: fullWorkspace,
+    bridgeId: "codex-cli",
+    sessionId: "session-runtime-002",
+    executableOverride: process.execPath,
+    argsOverride: ["-e", "setTimeout(() => {}, 1000)"],
+    waitForExit: true,
+    timeoutMs: 50,
+    allowUnsafeNativeExecutorOverride: true,
+  });
+  assert.equal(
+    timedOutForegroundNativeExecutor.status,
+    "failed",
+    "foreground native executor should fail when timeoutMs is exceeded"
+  );
+  assert.equal(timedOutForegroundNativeExecutor.errorCode, "timeout");
+  assert.match(timedOutForegroundNativeExecutor.summary, /Timeout: 50ms/);
+  const outputLimitedForegroundNativeExecutor = launchHarnessNativeExecutor({
+    workspacePath: fullWorkspace,
+    bridgeId: "codex-cli",
+    sessionId: "session-runtime-002",
+    executableOverride: process.execPath,
+    argsOverride: ["-e", "console.log('x'.repeat(4096))"],
+    waitForExit: true,
+    maxOutputBytes: 1024,
+    allowUnsafeNativeExecutorOverride: true,
+  });
+  assert.equal(
+    outputLimitedForegroundNativeExecutor.status,
+    "failed",
+    "foreground native executor should fail when output exceeds maxOutputBytes"
+  );
+  assert.equal(outputLimitedForegroundNativeExecutor.errorCode, "output-limit");
+  assert.match(outputLimitedForegroundNativeExecutor.summary, /Output truncated: yes/);
   const preparedClaudeNativeExecutor = prepareHarnessNativeExecutor(
     fullWorkspace,
     "claude-code",
@@ -1660,6 +2175,7 @@ try {
     sessionId: "session-runtime-002",
     executableOverride: path.join(fullWorkspace, "missing-native-executor"),
     argsOverride: ["--version"],
+    allowUnsafeNativeExecutorOverride: true,
   });
   assert.equal(
     failedBackgroundNativeExecutor.status,
@@ -1834,14 +2350,23 @@ try {
     "generated workspace should include the full expected baseline"
   );
   const readinessAssessment = assessWorkspaceReadiness(fullWorkspace, true);
-  assert.equal(
+  assert.notEqual(
     readinessAssessment.classification,
     "ready",
-    "generated workspace should start from a ready baseline after initialization"
+    "structural readiness should be capped below ready until semantic evidence is ready"
   );
   assert.ok(
-    readinessAssessment.overallScore >= 95,
-    "generated workspace should receive a strong conservative readiness score"
+    readinessAssessment.structuralScore >= 95,
+    "generated workspace should still expose strong structural readiness"
+  );
+  assert.ok(
+    readinessAssessment.overallScore <= 84,
+    "semantic readiness cap should prevent structural completeness from overstating operational readiness"
+  );
+  assert.equal(
+    readinessAssessment.semanticCapApplied,
+    true,
+    "readiness assessment should report when the semantic cap is applied"
   );
   assert.equal(
     readinessAssessment.scorecardPath,
@@ -1853,6 +2378,7 @@ try {
   );
   assert.match(readinessAssessment.summary, /Initialization completeness: 100%/);
   assert.match(readinessAssessment.summary, /Overall score:/);
+  assert.match(readinessAssessment.summary, /Semantic cap applied: yes/);
 
   const patchPath = path.join(fullWorkspace, "dashboard-patch.json");
   fs.writeFileSync(
@@ -1946,6 +2472,190 @@ try {
   );
 
   await runGeneratedDashboardOps(dashboardOpsPath, ["validate"], gitFixturePath);
+  await runGeneratedDashboardOps(
+    dashboardOpsPath,
+    ["validate", "--strict-governance"],
+    gitFixturePath
+  );
+
+  const dashboardStatePath = path.join(
+    fullWorkspace,
+    "docs",
+    "ai-harness",
+    "dashboard",
+    "state",
+    "dashboard-state.json"
+  );
+  const invalidMemoryPromotionState = JSON.parse(
+    fs.readFileSync(dashboardStatePath, "utf-8")
+  );
+  invalidMemoryPromotionState.memoryPromotion.candidates = [
+    {
+      ...invalidMemoryPromotionState.memoryPromotion.candidates[0],
+      status: "approved",
+      decision: "approved",
+      score: 5,
+      occurrences: 1,
+      governedSessionCount: 0,
+      collisionCheck: "pending",
+      generatedPaths: [],
+    },
+  ];
+  const invalidMemoryPromotionPath = path.join(
+    fullWorkspace,
+    "dashboard-invalid-memory-promotion.json"
+  );
+  fs.writeFileSync(
+    invalidMemoryPromotionPath,
+    JSON.stringify(invalidMemoryPromotionState, null, 2) + "\n",
+    "utf-8"
+  );
+  const strictGovernanceFailure = spawnSync(
+    process.execPath,
+    [
+      dashboardOpsPath,
+      "validate",
+      "--state",
+      invalidMemoryPromotionPath,
+      "--strict-governance",
+    ],
+    {
+      cwd: fullWorkspace,
+      env: { ...process.env, DASHBOARD_GIT_FIXTURE: gitFixturePath },
+      encoding: "utf-8",
+      windowsHide: true,
+    }
+  );
+  assert.equal(
+    strictGovernanceFailure.status,
+    1,
+    "strict dashboard governance validation should reject under-threshold approved promotion candidates"
+  );
+  assert.match(
+    `${strictGovernanceFailure.stdout}\n${strictGovernanceFailure.stderr}`,
+    /memoryPromotion/,
+    "strict dashboard governance failure should identify the memory promotion ledger"
+  );
+  const invalidMemoryGeneratedPathState = JSON.parse(
+    fs.readFileSync(dashboardStatePath, "utf-8")
+  );
+  invalidMemoryGeneratedPathState.memoryPromotion.candidates = [
+    {
+      ...invalidMemoryGeneratedPathState.memoryPromotion.candidates[0],
+      status: "approved",
+      decision: "approved",
+      score: 9,
+      occurrences: 3,
+      governedSessionCount: 2,
+      collisionCheck: "passed",
+      generatedPaths: ["src/generated-skill/SKILL.md"],
+    },
+  ];
+  const invalidMemoryGeneratedPath = path.join(
+    fullWorkspace,
+    "dashboard-invalid-memory-generated-path.json"
+  );
+  fs.writeFileSync(
+    invalidMemoryGeneratedPath,
+    JSON.stringify(invalidMemoryGeneratedPathState, null, 2) + "\n",
+    "utf-8"
+  );
+  const strictGovernanceGeneratedPathFailure = spawnSync(
+    process.execPath,
+    [
+      dashboardOpsPath,
+      "validate",
+      "--state",
+      invalidMemoryGeneratedPath,
+      "--strict-governance",
+    ],
+    {
+      cwd: fullWorkspace,
+      env: { ...process.env, DASHBOARD_GIT_FIXTURE: gitFixturePath },
+      encoding: "utf-8",
+      windowsHide: true,
+    }
+  );
+  assert.equal(
+    strictGovernanceGeneratedPathFailure.status,
+    1,
+    "strict dashboard governance validation should reject unsafe promotion generated paths"
+  );
+  assert.match(
+    `${strictGovernanceGeneratedPathFailure.stdout}\n${strictGovernanceGeneratedPathFailure.stderr}`,
+    /skill or agent ownership roots/,
+    "strict dashboard governance failure should require skill or agent ownership roots"
+  );
+  const invalidOperationsHealthState = JSON.parse(
+    fs.readFileSync(dashboardStatePath, "utf-8")
+  );
+  invalidOperationsHealthState.operationsHealth = {
+    ...invalidOperationsHealthState.operationsHealth,
+    status: "ok",
+    lastUpdated: "2000-01-01T00:00:00.000Z",
+    dbcp: {
+      ...invalidOperationsHealthState.operationsHealth.dbcp,
+      status: "ok",
+      validationQuery: "TBD",
+      lastCheckAt: "2000-01-01T00:00:00.000Z",
+    },
+    latencyQueries: [
+      {
+        id: "latency-p95",
+        label: "P95 endpoint latency",
+        query: "TBD",
+        status: "ok",
+        p95Ms: 12,
+        lastRunAt: "2000-01-01T00:00:00.000Z",
+      },
+    ],
+    dataSources: [
+      {
+        id: "application-logs",
+        label: "Application request and response logs",
+        status: "connected",
+        path: "missing/ops.log",
+        expectedSignal: "request and response evidence",
+      },
+    ],
+  };
+  const invalidOperationsHealthPath = path.join(
+    fullWorkspace,
+    "dashboard-invalid-operations-health.json"
+  );
+  fs.writeFileSync(
+    invalidOperationsHealthPath,
+    JSON.stringify(invalidOperationsHealthState, null, 2) + "\n",
+    "utf-8"
+  );
+  const strictOperationsHealthFailure = spawnSync(
+    process.execPath,
+    [
+      dashboardOpsPath,
+      "validate",
+      "--state",
+      invalidOperationsHealthPath,
+      "--workspace-root",
+      fullWorkspace,
+      "--strict-governance",
+    ],
+    {
+      cwd: fullWorkspace,
+      env: { ...process.env, DASHBOARD_GIT_FIXTURE: gitFixturePath },
+      encoding: "utf-8",
+      windowsHide: true,
+    }
+  );
+  assert.equal(
+    strictOperationsHealthFailure.status,
+    1,
+    "strict dashboard governance validation should reject stale or unevidenced operations health"
+  );
+  assert.match(
+    `${strictOperationsHealthFailure.stdout}\n${strictOperationsHealthFailure.stderr}`,
+    /operationsHealth/,
+    "strict dashboard governance failure should identify operations health evidence"
+  );
 
   const exportDir = path.join(
     fullWorkspace,
@@ -2157,6 +2867,37 @@ try {
     /current-work-packet\.json \(Invalid JSON:/,
     "validation summary should distinguish corrupted runtime JSON from missing artifacts"
   );
+  const corruptRuntimeAudit = auditHarnessRuntime(corruptRuntimeWorkspace);
+  assert.equal(
+    corruptRuntimeAudit.valid,
+    false,
+    "runtime audit should report corrupted JSON instead of treating it as missing"
+  );
+  assert.ok(
+    corruptRuntimeAudit.errors.some(
+      (error) =>
+        error.includes("current-work-packet.json") &&
+        error.includes("Invalid JSON")
+    ),
+    "runtime audit should identify the corrupted runtime JSON file"
+  );
+  fs.writeFileSync(
+    path.join(
+      corruptRuntimeWorkspace,
+      "docs",
+      "ai-harness",
+      "runtime",
+      "state",
+      "current-native-execution.json"
+    ),
+    "{not-json",
+    "utf-8"
+  );
+  assert.throws(
+    () => getHarnessNativeExecutionStatus(corruptRuntimeWorkspace),
+    /Invalid JSON.*current-native-execution\.json/,
+    "native execution status should distinguish corrupted state from a missing state file"
+  );
 } finally {
   fs.rmSync(corruptRuntimeWorkspace, { recursive: true, force: true });
 }
@@ -2233,6 +2974,7 @@ try {
 }
 
 const archiveWorkspace = fs.mkdtempSync(path.join(process.cwd(), "tmp-archive-runtime-"));
+const archiveEscapeDir = fs.mkdtempSync(path.join(process.cwd(), "tmp-archive-escape-"));
 try {
   writeGeneratedFiles(archiveWorkspace, collectFiles(createParams()));
   for (const sessionSuffix of ["001", "002", "003"]) {
@@ -2245,6 +2987,50 @@ try {
     });
     completeHarnessSessionToClose(archiveWorkspace);
   }
+  const archiveIndexPath = path.join(
+    archiveWorkspace,
+    "docs",
+    "ai-harness",
+    "runtime",
+    "state",
+    "session-index.json"
+  );
+  const archiveIndexBeforeCompaction = JSON.parse(
+    fs.readFileSync(archiveIndexPath, "utf-8")
+  );
+  const outsideSessionMarkerPath = path.join(
+    archiveEscapeDir,
+    "outside-session-marker.json"
+  );
+  const outsideSummaryMarkerPath = path.join(
+    archiveEscapeDir,
+    "outside-session-marker.md"
+  );
+  fs.writeFileSync(outsideSessionMarkerPath, "outside session marker\n", "utf-8");
+  fs.writeFileSync(outsideSummaryMarkerPath, "outside summary marker\n", "utf-8");
+  archiveIndexBeforeCompaction.sessions[0].sessionPath = path
+    .relative(archiveWorkspace, outsideSessionMarkerPath)
+    .replace(/\\/g, "/");
+  archiveIndexBeforeCompaction.sessions[0].summaryPath = path
+    .relative(archiveWorkspace, outsideSummaryMarkerPath)
+    .replace(/\\/g, "/");
+  fs.writeFileSync(
+    archiveIndexPath,
+    JSON.stringify(archiveIndexBeforeCompaction, null, 2) + "\n",
+    "utf-8"
+  );
+  const tamperedArchiveAudit = auditHarnessRuntime(archiveWorkspace);
+  assert.equal(
+    tamperedArchiveAudit.valid,
+    false,
+    "runtime audit should reject persisted session paths that do not match safe runtime roots"
+  );
+  assert.ok(
+    tamperedArchiveAudit.errors.some((error) =>
+      error.includes("sessionPath") && error.includes("session-archive-001")
+    ),
+    "runtime audit should explain tampered sessionPath entries"
+  );
 
   const compaction = compactHarnessRuntime({
     workspacePath: archiveWorkspace,
@@ -2266,6 +3052,16 @@ try {
   assert.ok(
     fs.existsSync(path.join(archiveWorkspace, compaction.archiveSummaryPath)),
     "compaction should write the archive summary markdown"
+  );
+  assert.equal(
+    fs.readFileSync(outsideSessionMarkerPath, "utf-8"),
+    "outside session marker\n",
+    "compaction must not trust index sessionPath values that escape the workspace"
+  );
+  assert.equal(
+    fs.readFileSync(outsideSummaryMarkerPath, "utf-8"),
+    "outside summary marker\n",
+    "compaction must not trust index summaryPath values that escape the workspace"
   );
 
   const compactedRuntimeIndex = JSON.parse(
@@ -2353,6 +3149,7 @@ try {
   );
 } finally {
   fs.rmSync(archiveWorkspace, { recursive: true, force: true });
+  fs.rmSync(archiveEscapeDir, { recursive: true, force: true });
 }
 
 const bareLegacyWorkspace = fs.mkdtempSync(path.join(process.cwd(), "tmp-bare-legacy-"));
@@ -2443,6 +3240,36 @@ try {
     bareValidation.isInitialized,
     true,
     "bare legacy repo should validate after reconcile"
+  );
+  const bareDashboardStatePath = path.join(
+    bareLegacyWorkspace,
+    "docs",
+    "ai-harness",
+    "dashboard",
+    "state",
+    "dashboard-state.json"
+  );
+  fs.writeFileSync(bareDashboardStatePath, "{not-json", "utf-8");
+  const malformedManagedJsonReconcile = reconcileWorkspaceInitialization({
+    workspacePath: bareLegacyWorkspace,
+    applyChanges: true,
+  });
+  assert.ok(
+    malformedManagedJsonReconcile.manualReviewFiles.includes(
+      "docs/ai-harness/dashboard/state/dashboard-state.json"
+    ),
+    "malformed managed JSON should be held for manual review instead of replaced"
+  );
+  assert.equal(
+    fs.readFileSync(bareDashboardStatePath, "utf-8"),
+    "{not-json",
+    "malformed managed JSON should remain untouched until reviewed"
+  );
+  assert.ok(
+    malformedManagedJsonReconcile.warnings.some((warning) =>
+      /Managed JSON merge held/.test(warning)
+    ),
+    "malformed managed JSON should produce an explicit reconcile warning"
   );
 } finally {
   fs.rmSync(bareLegacyWorkspace, { recursive: true, force: true });
@@ -2682,7 +3509,7 @@ try {
         entry.path === "docs/ai-harness/runtime/adapter-contract.json" &&
         entry.status === "missing"
     ),
-    "managed semantic diff should classify missing 4.2.1 compatibility contract files"
+    "managed semantic diff should classify missing 4.3.0 compatibility contract files"
   );
   assert.ok(
     semanticDiff.entries.some(
@@ -2821,7 +3648,7 @@ try {
     reconcileResult.writtenFiles.includes(
       "docs/ai-harness/runtime/adapter-contract.json"
     ),
-    "reconcile should restore missing 4.2.1 adapter contract files"
+    "reconcile should restore missing 4.3.0 adapter contract files"
   );
   assert.ok(
     reconcileResult.writtenFiles.includes(

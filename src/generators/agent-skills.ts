@@ -69,6 +69,7 @@ const HARNESS_CORE_SKILL_IDS = [
   "harness-post-work-review",
   "remember",
   "memory-merger",
+  "harness-memory-pattern-miner",
 ];
 
 const HARNESS_CORE_AGENT_IDS = [
@@ -84,6 +85,7 @@ const HARNESS_CORE_AGENT_IDS = [
   "harness-implementer",
   "harness-verifier",
   "harness-quality-gate",
+  "harness-memory-curator",
   "risk-focused-code-review",
   "principal-software-engineer",
 ];
@@ -1262,6 +1264,7 @@ function buildRecommendationIntent(
   if (params.includeHarnessEngineering !== false) {
     parts.push(
       "context continuity governance review memory handover token discipline long-running delivery planner generator evaluator contract skeptical evaluation context reset compaction"
+      + " repeated workflow pattern mining skill factory agent factory reusable work"
     );
   }
 

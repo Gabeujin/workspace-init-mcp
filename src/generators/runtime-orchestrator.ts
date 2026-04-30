@@ -7,7 +7,7 @@ import {
   HARNESS_REQUIRED_HANDOFF_FIELDS,
 } from "../data/runtime-contract.js";
 
-const RUNTIME_COMPATIBILITY_VERSION = "4.2.1";
+const RUNTIME_COMPATIBILITY_VERSION = "4.3.0";
 const RUNTIME_COMPATIBILITY_FILES = [
   "docs/ai-harness/runtime/version-index.json",
   "docs/ai-harness/runtime/compatibility-matrix.json",
@@ -386,7 +386,7 @@ function buildRuntimeVersionIndex(): string {
           ],
         },
         {
-          version: RUNTIME_COMPATIBILITY_VERSION,
+          version: "4.2.1",
           releaseTheme:
             "Safety hardening, runtime truthfulness, and release gate validation",
           capabilities: [
@@ -401,6 +401,46 @@ function buildRuntimeVersionIndex(): string {
             "Runtime session, chunk, and archive identifiers reject Windows reserved file-name aliases before writing state.",
             "Validation summaries now distinguish malformed JSON runtime state from missing artifacts.",
             "Native executor background launches remain non-definitive until a process is known to be running or a spawn failure is recorded.",
+          ],
+        },
+        {
+          version: RUNTIME_COMPATIBILITY_VERSION,
+          releaseTheme:
+            "Live artifacts governance, memory promotion, and runtime guardrails",
+          capabilities: [
+            "live-artifacts-dashboard",
+            "memory-to-skill-promotion",
+            "harness-memory-pattern-miner",
+            "harness-memory-curator-agent",
+            "native-executor-resource-guardrails",
+            "native-executor-process-tree-termination",
+            "semantic-readiness-score-cap",
+            "parallel-chunk-conflict-audit",
+            "atomic-runtime-json-writes",
+            "runtime-compaction-path-containment",
+            "malformed-managed-json-manual-review",
+            "strict-memory-promotion-ownership-roots",
+            "strict-operations-health-evidence",
+            "dashboard-json-atomic-writes",
+            "workspace-path-schema-refinement",
+          ],
+          introducedFiles: [
+            ".github/agents/harness-memory-curator.agent.md",
+            ".github/skills/harness-memory-pattern-miner/SKILL.md",
+            "docs/ai-harness/live-artifacts-dashboard.md",
+            "live-artifacts-dashboard/package.json",
+            "live-artifacts-dashboard/server.js",
+            "live-artifacts-dashboard/public/index.html",
+            "live-artifacts-dashboard/public/app.js",
+          ],
+          upgradeNotes: [
+            "Install the live artifacts dashboard when operators need localhost visibility into governed artifacts and open work markers.",
+            "Use harness-memory-pattern-miner and harness-memory-curator before promoting repeated session patterns into skills or agents.",
+            "Native executor launches can set timeoutMs and maxOutputBytes guardrails; background enforcement attempts process-tree termination.",
+            "Run audit_harness_parallel_chunk_conflicts before assigning parallel workers with declared expectedWritePaths.",
+            "Runtime compaction archives sessions by safe session IDs instead of trusting persisted index paths.",
+            "Malformed managed JSON state should be reviewed manually before reconcile replaces or merges it.",
+            "Strict dashboard governance rejects operational health claims without fresh datasource, DBCP, and latency evidence.",
           ],
         },
       ],
@@ -507,15 +547,32 @@ function buildRuntimeCompatibilityMatrix(): string {
           from: "4.2.0",
           to: RUNTIME_COMPATIBILITY_VERSION,
           requiredActions: [
-            "Regenerate runtime compatibility files so 4.2.1 safety hardening appears in version-index.json.",
+            "Regenerate runtime compatibility files so 4.2.1 safety hardening and 4.3.0 live artifact governance appear in version-index.json.",
             "Re-run validation after reconcile to surface malformed JSON runtime state with operator-facing diagnostics.",
             "Refresh native executor state after background launch failures so dashboards do not retain stale launch state.",
+            "Install live artifacts dashboard and memory promotion governance files.",
           ],
           preserve: [
             "parallel worker context packets",
             "protected source root policy",
             "existing runtime sessions",
             "existing dashboard truth fields",
+          ],
+        },
+        {
+          from: "4.2.1",
+          to: RUNTIME_COMPATIBILITY_VERSION,
+          requiredActions: [
+            "Install the live artifacts dashboard for governed localhost artifact visibility.",
+            "Add memory pattern mining and curation assets for conservative skill or agent promotion.",
+            "Refresh dashboard state, schema, and operations files so memoryPromotion and operationsHealth validation share the same contract.",
+            "Refresh runtime guardrails for native executor resource limits, parallel chunk conflict audits, and atomic JSON state writes.",
+          ],
+          preserve: [
+            "existing runtime sessions",
+            "existing dashboard truth fields",
+            "native executor launch evidence",
+            "managed source-root safety policy",
           ],
         },
       ],

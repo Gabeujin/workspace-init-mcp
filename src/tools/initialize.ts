@@ -21,6 +21,7 @@ import {
   generateEditorConfig,
   generateGitAttributes,
   generateHarnessFiles,
+  generateLiveArtifactsDashboardFiles,
   generateReadinessFiles,
   generateRuntimeOrchestratorFiles,
   generateInitialChangelog,
@@ -73,6 +74,7 @@ export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
   files.push(...generateReadinessFiles(params));
   files.push(...generateDashboardFiles(params));
   files.push(...generateDashboardOperationFiles(params));
+  files.push(...generateLiveArtifactsDashboardFiles(params));
 
   // 7. Initial changelog and work log
   const relativePaths = files.map((file) => file.relativePath);

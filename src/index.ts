@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * workspace-init-mcp MCP Server v4.2.1
+ * workspace-init-mcp MCP Server v4.3.0
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -46,6 +46,7 @@ import {
   getHarnessSessionStatus,
   activateHarnessSession,
   auditHarnessRuntime,
+  auditHarnessParallelChunkConflicts,
   listHarnessRuntimeAdapters,
   listHarnessExecutionBridges,
   listHarnessNativeExecutors,
@@ -86,7 +87,21 @@ function assertAbsoluteWorkspacePath(workspacePath: string): void {
   }
 }
 
+function workspacePathInputSchema(description: string) {
+  return z
+    .string()
+    .refine((value) => path.isAbsolute(value), {
+      message: "workspacePath must be an absolute path",
+    })
+    .describe(description);
+}
+
 const LIVE_GOVERNANCE_STATE_PREFIXES = [
+  ".governance/reports/",
+  ".governance/reviews/",
+  ".governance/sessions/",
+  "live-artifacts-dashboard/.state/",
+  "live-artifacts-dashboard/logs/",
   "docs/ai-harness/runtime/sessions/",
   "docs/ai-harness/runtime/work-packets/",
   "docs/ai-harness/runtime/inbox/",
@@ -97,6 +112,8 @@ const LIVE_GOVERNANCE_STATE_PREFIXES = [
 ] as const;
 
 const LIVE_GOVERNANCE_STATE_FILES = new Set([
+  ".governance/_INDEX.md",
+  ".governance/_PROJECT_STATE.md",
   "docs/ai-harness/dashboard/state/dashboard-state.json",
   "docs/ai-harness/readiness/maturity-scorecard.json",
   "docs/ai-harness/readiness/semantic-audit.json",
@@ -181,9 +198,9 @@ const BaseWorkspaceInputSchema = z.object({
     .describe(
       "Primary purpose and goals of this workspace. Be as specific as possible."
     ),
-  workspacePath: z
-    .string()
-    .describe("Absolute path to the workspace root directory"),
+  workspacePath: workspacePathInputSchema(
+    "Absolute path to the workspace root directory"
+  ),
   projectType: z
     .enum(PROJECT_TYPES)
     .optional()
@@ -284,9 +301,9 @@ const InitializeWorkspaceInputSchema = BaseWorkspaceInputSchema.extend({
 });
 
 const ReconcileWorkspaceInputSchema = BaseWorkspaceInputSchema.partial().extend({
-  workspacePath: z
-    .string()
-    .describe("Absolute path to the workspace root directory"),
+  workspacePath: workspacePathInputSchema(
+    "Absolute path to the workspace root directory"
+  ),
   applyChanges: z
     .boolean()
     .optional()
@@ -349,7 +366,7 @@ const ReconcileWorkspaceInputSchema = BaseWorkspaceInputSchema.partial().extend(
 
 const server = new McpServer({
   name: "workspace-init-mcp",
-  version: "4.2.1",
+  version: "4.3.0",
 });
 
 // ---------------------------------------------------------------------------
@@ -583,9 +600,9 @@ This tool:
 
 Use this before large upgrades, legacy-project onboarding, or any reconcile run where safety matters more than speed.`,
     inputSchema: z.object({
-      workspacePath: z
-        .string()
-        .describe("Absolute path to the workspace root directory"),
+      workspacePath: workspacePathInputSchema(
+        "Absolute path to the workspace root directory"
+      ),
     }),
   },
   async (params) => {
@@ -1023,6 +1040,43 @@ Use it when you want a conservative operator-style judgment instead of a file-ex
           {
             type: "text" as const,
             text: `Workspace readiness semantic audit failed: ${msg}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: audit_harness_parallel_chunk_conflicts
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "audit_harness_parallel_chunk_conflicts",
+  {
+    title: "Audit Harness Parallel Chunk Conflicts",
+    description: `Audit open and queued harness runtime sessions for overlapping expected write paths before running workers in parallel.
+
+Use this after the orchestrator splits work into chunks and before assigning worker agents. A passing audit means the declared expected write scopes do not overlap; it does not replace human review for shared schemas, APIs, databases, or deployment order.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+    }),
+  },
+  async (params) => {
+    try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
+      const result = auditHarnessParallelChunkConflicts(params.workspacePath);
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Harness parallel chunk conflict audit failed: ${msg}`,
           },
         ],
         isError: true,
@@ -1653,6 +1707,10 @@ Use foreground mode when you want an immediate result in the current tool call. 
         .array(z.string())
         .optional()
         .describe("Optional explicit argument list for the native executor launch."),
+      allowUnsafeNativeExecutorOverride: z
+        .boolean()
+        .optional()
+        .describe("Required as true for real launches that use executableOverride, argsOverride, or env. Dry runs do not require it."),
       waitForExit: z
         .boolean()
         .optional()
@@ -1665,6 +1723,18 @@ Use foreground mode when you want an immediate result in the current tool call. 
         .record(z.string(), z.string())
         .optional()
         .describe("Optional environment variable overrides for the native executor process."),
+      timeoutMs: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Optional maximum runtime in milliseconds. Defaults to 600000."),
+      maxOutputBytes: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Optional stdout/stderr byte cap per stream. Defaults to 1048576."),
     }),
   },
   async (params) => {
@@ -1676,9 +1746,12 @@ Use foreground mode when you want an immediate result in the current tool call. 
         sessionId: params.sessionId,
         executableOverride: params.executableOverride,
         argsOverride: params.argsOverride,
+        allowUnsafeNativeExecutorOverride: params.allowUnsafeNativeExecutorOverride,
         waitForExit: params.waitForExit,
         dryRun: params.dryRun,
         env: params.env,
+        timeoutMs: params.timeoutMs,
+        maxOutputBytes: params.maxOutputBytes,
       });
       return { content: [{ type: "text" as const, text: result.summary }] };
     } catch (err) {
@@ -2237,7 +2310,7 @@ server.registerPrompt(
     argsSchema: {
       workspaceName: z.string().describe("Workspace name"),
       purpose: z.string().describe("Project purpose or short objective"),
-      workspacePath: z.string().describe("Absolute workspace path"),
+      workspacePath: workspacePathInputSchema("Absolute workspace path"),
     },
   },
   (args) => buildQuickStartMessages(args)
@@ -2250,7 +2323,9 @@ server.registerPrompt(
     description:
       "Analyze an existing workspace to infer project type, tech stack, and initialization status.",
     argsSchema: {
-      workspacePath: z.string().describe("Absolute path to the workspace being analyzed"),
+      workspacePath: workspacePathInputSchema(
+        "Absolute path to the workspace being analyzed"
+      ),
     },
   },
   (args) => buildAnalyzeMessages(args)
@@ -2410,7 +2485,7 @@ server.registerResource(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-console.error("workspace-init-mcp server v4.2.1 started on stdio");
+console.error("workspace-init-mcp server v4.3.0 started on stdio");
 }
 
 main().catch((err) => {

@@ -10,12 +10,15 @@ import {
   auditWorkspaceManagedSemanticDiff,
   buildManagedInventoryEntryMap,
   computeContentSha256,
+  MANAGED_FILE_INVENTORY_PATH,
   MANAGED_JSON_MERGE_PATHS,
   readManagedFileInventory,
   type WorkspaceManagedSemanticDiffResult,
   type WorkspaceUpgradeRiskAuditResult,
 } from "./managed-inventory.js";
 import {
+  isGeneratedWorkspaceControlPath,
+  isProtectedSourcePath,
   isUnsafeWorkspaceRelativePath,
   normalizeWorkspaceRelativePath,
 } from "./generated-file-safety.js";
@@ -156,7 +159,7 @@ export interface ReconcilePreflightExportResult {
   summary: string;
 }
 
-const RECONCILE_VERSION = "4.2.1";
+const RECONCILE_VERSION = "4.3.0";
 const RECONCILE_POLICY_PATH = ".github/ai-harness/reconcile-policy.json";
 
 const LEGACY_RESOURCE_ROOTS: Array<{
@@ -483,14 +486,14 @@ function loadReconcilePolicy(workspacePath: string): {
         );
       } else {
         document = {
-          ...parsed,
+          ...document,
           defaults: {
-            ...parsed.defaults,
+            ...document.defaults,
             ...(preset.defaults ?? {}),
           },
           rules: [
             ...(preset.rules ?? []),
-            ...parsed.rules,
+            ...document.rules,
           ],
         };
         source = `${RECONCILE_POLICY_PATH}#preset:${parsed.activePreset}`;
@@ -1851,18 +1854,10 @@ export function reconcileWorkspaceInitialization(
         });
         continue;
       } catch {
-        if (!overwriteManagedFiles) {
-          manualReviewFiles.push(file.relativePath);
-          continue;
-        }
-
-        overwrittenFiles.push(file.relativePath);
-        pendingWrites.push({
-          relativePath: file.relativePath,
-          fullPath,
-          content: file.content,
-          archiveBeforeWrite: archiveManagedFiles,
-        });
+        manualReviewFiles.push(file.relativePath);
+        warnings.push(
+          `Managed JSON merge held ${file.relativePath} for manual review because existing or generated JSON could not be parsed.`
+        );
         continue;
       }
     }
@@ -2068,8 +2063,35 @@ export function restoreReconcileBackup(
     throw new Error("No managed backup files were recorded in this reconcile report.");
   }
 
+  const managedInventory = readManagedFileInventory(workspacePath).document;
+  const managedPaths = new Set(
+    (managedInventory?.entries ?? []).map((entry) => normalizeWorkspaceRelativePath(entry.path))
+  );
   const restoredFiles: string[] = [];
   for (const backup of backupFiles) {
+    const normalizedOriginalPath = normalizeWorkspaceRelativePath(backup.originalPath);
+    const normalizedBackupPath = normalizeWorkspaceRelativePath(backup.backupPath);
+    if (
+      isUnsafeWorkspaceRelativePath(backup.originalPath) ||
+      isProtectedSourcePath(backup.originalPath) ||
+      !isGeneratedWorkspaceControlPath(backup.originalPath)
+    ) {
+      throw new Error(`Backup target is outside generated harness ownership: ${backup.originalPath}`);
+    }
+    if (
+      managedPaths.size > 0 &&
+      normalizedOriginalPath !== MANAGED_FILE_INVENTORY_PATH &&
+      !managedPaths.has(normalizedOriginalPath)
+    ) {
+      throw new Error(`Backup target is not tracked by the managed inventory: ${backup.originalPath}`);
+    }
+    if (isUnsafeWorkspaceRelativePath(backup.backupPath)) {
+      throw new Error(`Backup source path escapes the workspace: ${backup.backupPath}`);
+    }
+    if (!normalizedBackupPath.startsWith("docs/ai-harness/migrations/")) {
+      throw new Error(`Backup source is not a managed migration backup: ${backup.backupPath}`);
+    }
+
     const sourcePath = path.resolve(workspacePath, backup.backupPath);
     const targetPath = path.resolve(workspacePath, backup.originalPath);
     if (!isPathInsideDirectory(sourcePath, workspacePath)) {

@@ -5,7 +5,10 @@ import {
   HARNESS_ADAPTER_CONTRACT_VERSION,
   HARNESS_REQUIRED_HANDOFF_FIELDS,
 } from "../data/runtime-contract.js";
-import { normalizeSafeWorkspaceRelativePaths } from "./generated-file-safety.js";
+import {
+  normalizeSafeWorkspaceRelativePaths,
+  normalizeWorkspaceRelativePath,
+} from "./generated-file-safety.js";
 
 type HarnessActorRole = "planner" | "generator" | "evaluator" | "operator";
 type HarnessAction =
@@ -54,7 +57,7 @@ export const HARNESS_RUNTIME_ADAPTER_IDS = [
 type HarnessRuntimeAdapterId = (typeof HARNESS_RUNTIME_ADAPTER_IDS)[number];
 const NATIVE_EXECUTOR_OVERRIDES_PATH =
   ".github/ai-harness/native-executor-overrides.json";
-const HARNESS_RUNTIME_VERSION = "4.2.1";
+const HARNESS_RUNTIME_VERSION = "4.3.0";
 const HARNESS_VERSION_INDEX_PATH = "docs/ai-harness/runtime/version-index.json";
 const HARNESS_COMPATIBILITY_MATRIX_PATH =
   "docs/ai-harness/runtime/compatibility-matrix.json";
@@ -64,6 +67,8 @@ const HARNESS_SESSION_CONTINUITY_PATH =
   "docs/ai-harness/runtime/session-continuity.md";
 const WINDOWS_RESERVED_RUNTIME_PATH_SEGMENT_PATTERN =
   /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+const DEFAULT_NATIVE_EXECUTOR_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_NATIVE_EXECUTOR_MAX_OUTPUT_BYTES = 1024 * 1024;
 
 interface HarnessRuntimeAdapterDescriptor {
   id: HarnessRuntimeAdapterId;
@@ -294,6 +299,29 @@ export interface AuditHarnessRuntimeResult {
   summary: string;
 }
 
+export interface AuditHarnessParallelChunkConflictsResult {
+  valid: boolean;
+  sessions: Array<{
+    sessionId: string;
+    chunkId: string;
+    status: string;
+    expectedWritePaths: string[];
+    dependencyNotes: string;
+  }>;
+  conflicts: Array<{
+    leftSessionId: string;
+    leftChunkId: string;
+    leftPath: string;
+    rightSessionId: string;
+    rightChunkId: string;
+    rightPath: string;
+    reason: string;
+  }>;
+  errors: string[];
+  warnings: string[];
+  summary: string;
+}
+
 export interface HarnessRuntimeValidationResult {
   valid: boolean;
   errors: string[];
@@ -390,9 +418,12 @@ export interface LaunchHarnessNativeExecutorParams {
   sessionId?: string;
   executableOverride?: string;
   argsOverride?: string[];
+  allowUnsafeNativeExecutorOverride?: boolean;
   waitForExit?: boolean;
   dryRun?: boolean;
   env?: Record<string, string>;
+  timeoutMs?: number;
+  maxOutputBytes?: number;
 }
 
 export interface LaunchHarnessNativeExecutorResult {
@@ -985,21 +1016,81 @@ function ensureDir(dirPath: string): void {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
-function readJsonIfExists<T>(filePath: string): T | null {
+interface JsonReadResult<T> {
+  exists: boolean;
+  value: T | null;
+  error: string | null;
+}
+
+function readJsonIfExistsDetailed<T>(filePath: string): JsonReadResult<T> {
   if (!fs.existsSync(filePath)) {
-    return null;
+    return {
+      exists: false,
+      value: null,
+      error: null,
+    };
   }
 
   try {
-    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
-  } catch {
-    return null;
+    return {
+      exists: true,
+      value: JSON.parse(fs.readFileSync(filePath, "utf-8")) as T,
+      error: null,
+    };
+  } catch (error) {
+    const detail =
+      error instanceof Error && error.message.trim().length > 0
+        ? `: ${error.message}`
+        : "";
+    return {
+      exists: true,
+      value: null,
+      error: `Invalid JSON in ${filePath}${detail}`,
+    };
   }
+}
+
+function readJsonIfExists<T>(filePath: string): T | null {
+  const result = readJsonIfExistsDetailed<T>(filePath);
+  if (result.error != null) {
+    throw new Error(result.error);
+  }
+
+  return result.value;
+}
+
+function readJsonForRuntimeAudit<T>(
+  filePath: string,
+  label: string,
+  errors: string[]
+): T | null {
+  const result = readJsonIfExistsDetailed<T>(filePath);
+  if (result.error != null) {
+    errors.push(`${label}: ${result.error}`);
+  }
+
+  return result.value;
 }
 
 function writeJson(filePath: string, value: unknown): void {
   ensureDir(path.dirname(filePath));
-  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
+  const tempPath = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`
+  );
+  try {
+    fs.writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
+    fs.renameSync(tempPath, filePath);
+  } catch (err) {
+    try {
+      if (fs.existsSync(tempPath)) {
+        fs.unlinkSync(tempPath);
+      }
+    } catch {
+      // Ignore cleanup failures so the original write error is preserved.
+    }
+    throw err;
+  }
 }
 
 function writeTextIfMissing(filePath: string, content: string): void {
@@ -1026,6 +1117,80 @@ function normalizeRuntimePathSegment(value: string, label: string): string {
     );
   }
   return normalized;
+}
+
+function normalizePositiveIntegerOption(
+  value: number | undefined,
+  fallback: number,
+  label: string
+): number {
+  if (value == null) {
+    return fallback;
+  }
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+  return value;
+}
+
+function capTextByBytes(text: string, maxBytes: number): {
+  text: string;
+  truncated: boolean;
+} {
+  const buffer = Buffer.from(text, "utf-8");
+  if (buffer.length <= maxBytes) {
+    return { text, truncated: false };
+  }
+  return {
+    text:
+      buffer.subarray(0, maxBytes).toString("utf-8") +
+      `\n[output truncated after ${maxBytes} bytes]\n`,
+    truncated: true,
+  };
+}
+
+function markBackgroundNativeExecutionFailed(
+  workspacePath: string,
+  session: HarnessRuntimeSessionState,
+  bridgeId: HarnessRuntimeAdapterId,
+  nativePaths: ReturnType<typeof buildNativeExecutionPaths>,
+  prepared: PrepareHarnessNativeExecutorResult,
+  executorTitle: string,
+  commandPath: string,
+  processId: number | null,
+  errorCode: string,
+  errorMessage: string
+): void {
+  const failedState = {
+    schemaVersion: "1.0.0",
+    generatedAt: nowIso(),
+    activeSessionId: session.session.id,
+    bridgeId,
+    status: "failed",
+    launchMode: "background",
+    nativeExecutionPlanFile: prepared.nativeExecutionPlanPath,
+    nativeExecutionStateFile: prepared.nativeExecutionStatePath,
+    stdoutLogFile: prepared.stdoutLogPath,
+    stderrLogFile: prepared.stderrLogPath,
+    lastMessageFile: prepared.lastMessagePath,
+    processId,
+    executablePath: commandPath,
+    errorCode,
+    errorMessage,
+    summary: `${executorTitle} failed during background execution. (${errorCode})`,
+  };
+  writeJson(nativePaths.nativeExecutionStatePath, failedState);
+  writeJson(buildRuntimePaths(workspacePath).currentNativeExecutionPath, failedState);
+  syncDashboardNativeExecution(
+    workspacePath,
+    session,
+    bridgeId,
+    prepared.nativeExecutionPlanPath,
+    prepared.nativeExecutionStatePath,
+    prepared.stdoutLogPath,
+    prepared.stderrLogPath,
+    prepared.lastMessagePath
+  );
 }
 
 function buildRuntimePaths(workspacePath: string) {
@@ -1702,6 +1867,33 @@ function isProcessRunning(processId: number): boolean {
   }
 }
 
+function terminateProcessTree(processId: number): void {
+  if (process.platform === "win32") {
+    try {
+      execFileSync("taskkill", ["/PID", String(processId), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      return;
+    } catch {
+      // Fall through to a direct kill attempt.
+    }
+  } else {
+    try {
+      process.kill(-processId, "SIGTERM");
+      return;
+    } catch {
+      // Detached process groups are best-effort across platforms.
+    }
+  }
+
+  try {
+    process.kill(processId, "SIGTERM");
+  } catch {
+    // The process may already be gone.
+  }
+}
+
 function isString(value: unknown): value is string {
   return typeof value === "string";
 }
@@ -1980,22 +2172,49 @@ export function auditHarnessRuntime(
   workspacePath: string
 ): AuditHarnessRuntimeResult {
   const paths = buildRuntimePaths(workspacePath);
+  const jsonErrors: string[] = [];
+  const sessionIndexPayload = readJsonForRuntimeAudit<HarnessSessionIndex>(
+    paths.sessionIndexPath,
+    "session-index.json",
+    jsonErrors
+  );
+  const activeRuntimePayload = readJsonForRuntimeAudit(
+    paths.activeSessionPath,
+    "active-session.json",
+    jsonErrors
+  );
+  const currentWorkPacketPayload = readJsonForRuntimeAudit(
+    paths.currentWorkPacketPath,
+    "current-work-packet.json",
+    jsonErrors
+  );
+  const currentExecutionBridgePayload = readJsonForRuntimeAudit(
+    paths.currentExecutionBridgePath,
+    "current-execution-bridge.json",
+    jsonErrors
+  );
+  const currentNativeExecutionPayload = readJsonForRuntimeAudit(
+    paths.currentNativeExecutionPath,
+    "current-native-execution.json",
+    jsonErrors
+  );
   const indexValidation = validateRuntimeIndexShape(
-    readJsonIfExists(paths.sessionIndexPath)
+    sessionIndexPayload
   );
   const activeValidation = validateActiveRuntimeShape(
-    readJsonIfExists(paths.activeSessionPath)
+    activeRuntimePayload
   );
   const currentWorkPacketValidation = validateCurrentWorkPacketShape(
-    readJsonIfExists(paths.currentWorkPacketPath)
+    currentWorkPacketPayload
   );
   const currentExecutionBridgeValidation = validateCurrentExecutionBridgeShape(
-    readJsonIfExists(paths.currentExecutionBridgePath)
+    currentExecutionBridgePayload
   );
   const currentNativeExecutionValidation = validateCurrentNativeExecutionShape(
-    readJsonIfExists(paths.currentNativeExecutionPath)
+    currentNativeExecutionPayload
   );
   const errors = [
+    ...jsonErrors,
     ...indexValidation.errors.map((error) => `session-index.json: ${error}`),
     ...activeValidation.errors.map((error) => `active-session.json: ${error}`),
     ...currentWorkPacketValidation.errors.map(
@@ -2022,7 +2241,7 @@ export function auditHarnessRuntime(
     };
   }
 
-  const index = loadRuntimeIndex(workspacePath);
+  const index = sessionIndexPayload as HarnessSessionIndex;
   const sessionFiles = fs.existsSync(paths.sessionsRoot)
     ? fs
         .readdirSync(paths.sessionsRoot)
@@ -2055,15 +2274,34 @@ export function auditHarnessRuntime(
   }
 
   for (const entry of index.sessions) {
-    const fullPath = path.join(workspacePath, entry.sessionPath);
+    const fullPath = buildSessionStatePath(workspacePath, entry.id);
+    const expectedSessionPath = relativeToWorkspace(workspacePath, fullPath);
+    const expectedSummaryPath = relativeToWorkspace(
+      workspacePath,
+      buildSessionSummaryPath(workspacePath, entry.id)
+    );
+    if (normalizeWorkspaceRelativePath(entry.sessionPath) !== expectedSessionPath) {
+      errors.push(
+        `session-index.json: sessionPath for "${entry.id}" must be ${expectedSessionPath}`
+      );
+    }
+    if (normalizeWorkspaceRelativePath(entry.summaryPath) !== expectedSummaryPath) {
+      errors.push(
+        `session-index.json: summaryPath for "${entry.id}" must be ${expectedSummaryPath}`
+      );
+    }
     if (!fs.existsSync(fullPath)) {
-      errors.push(`session-index.json: session file missing for "${entry.id}" at ${entry.sessionPath}`);
+      errors.push(`session-index.json: session file missing for "${entry.id}" at ${expectedSessionPath}`);
       continue;
     }
 
-    const session = readJsonIfExists<HarnessRuntimeSessionState>(fullPath);
+    const session = readJsonForRuntimeAudit<HarnessRuntimeSessionState>(
+      fullPath,
+      `session-index.json: session file for "${entry.id}"`,
+      errors
+    );
     if (session == null) {
-      errors.push(`session-index.json: session file for "${entry.id}" could not be parsed`);
+      errors.push(`session-index.json: session file for "${entry.id}" could not be loaded`);
       continue;
     }
     if (session.session.id !== entry.id) {
@@ -2088,13 +2326,12 @@ export function auditHarnessRuntime(
     }
   }
 
-  const activeSnapshot = readJsonIfExists<Record<string, unknown>>(paths.activeSessionPath);
-  const currentWorkPacket = readJsonIfExists<Record<string, unknown>>(
-    paths.currentWorkPacketPath
-  );
-  const currentExecutionBridge = readJsonIfExists<Record<string, unknown>>(
-    paths.currentExecutionBridgePath
-  );
+  const activeSnapshot = activeRuntimePayload as Record<string, unknown> | null;
+  const currentWorkPacket = currentWorkPacketPayload as Record<string, unknown> | null;
+  const currentExecutionBridge = currentExecutionBridgePayload as Record<
+    string,
+    unknown
+  > | null;
   if (index.activeSessionId == null) {
     if (isPlainObject(activeSnapshot) && activeSnapshot.activeSessionId != null) {
       errors.push("active-session.json: expected no activeSessionId while the index is idle");
@@ -2157,6 +2394,108 @@ export function auditHarnessRuntime(
   };
 }
 
+function pathScopesOverlap(leftPath: string, rightPath: string): boolean {
+  const left = normalizeWorkspaceRelativePath(leftPath).toLowerCase();
+  const right = normalizeWorkspaceRelativePath(rightPath).toLowerCase();
+  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+}
+
+export function auditHarnessParallelChunkConflicts(
+  workspacePath: string
+): AuditHarnessParallelChunkConflictsResult {
+  const index = loadRuntimeIndex(workspacePath);
+  const errors: string[] = [];
+  const sessions = index.sessions
+    .filter((entry) => entry.status !== "closed")
+    .map((entry) => {
+      const session = readJsonIfExists<HarnessRuntimeSessionState>(
+        buildSessionStatePath(workspacePath, entry.id)
+      );
+      let expectedWritePaths: string[] = [];
+      if (Array.isArray(session?.chunk.expectedWritePaths)) {
+        try {
+          expectedWritePaths = normalizeSafeWorkspaceRelativePaths(
+            session.chunk.expectedWritePaths.map((item) => String(item)),
+            `expectedWritePaths for session "${entry.id}"`
+          );
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          errors.push(
+            `Session "${entry.id}" has unsafe expectedWritePaths: ${detail}`
+          );
+        }
+      }
+      return {
+        sessionId: entry.id,
+        chunkId: session?.chunk.id ?? entry.chunkId,
+        status: entry.status,
+        expectedWritePaths,
+        dependencyNotes: String(session?.chunk.dependencyNotes ?? ""),
+      };
+    });
+  const conflicts: AuditHarnessParallelChunkConflictsResult["conflicts"] = [];
+  const warnings: string[] = [];
+
+  for (const session of sessions) {
+    if (
+      /parallel-ready/i.test(session.dependencyNotes) &&
+      session.expectedWritePaths.length === 0
+    ) {
+      warnings.push(
+        `Session "${session.sessionId}" is marked parallel-ready but has no expectedWritePaths.`
+      );
+    }
+  }
+
+  for (let leftIndex = 0; leftIndex < sessions.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < sessions.length; rightIndex += 1) {
+      const left = sessions[leftIndex];
+      const right = sessions[rightIndex];
+      for (const leftPath of left.expectedWritePaths) {
+        for (const rightPath of right.expectedWritePaths) {
+          if (pathScopesOverlap(leftPath, rightPath)) {
+            conflicts.push({
+              leftSessionId: left.sessionId,
+              leftChunkId: left.chunkId,
+              leftPath,
+              rightSessionId: right.sessionId,
+              rightChunkId: right.chunkId,
+              rightPath,
+              reason:
+                leftPath === rightPath
+                  ? "same expected write path"
+                  : "parent/child expected write path overlap",
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    valid: conflicts.length === 0 && errors.length === 0,
+    sessions,
+    conflicts,
+    errors,
+    warnings,
+    summary: [
+      conflicts.length === 0 && errors.length === 0
+        ? "Harness parallel chunk conflict audit passed."
+        : "Harness parallel chunk conflict audit failed.",
+      `  - open or queued sessions: ${sessions.length}`,
+      `  - conflicts: ${conflicts.length}`,
+      `  - errors: ${errors.length}`,
+      `  - warnings: ${warnings.length}`,
+      ...errors.map((error) => `  - error: ${error}`),
+      ...conflicts.map(
+        (conflict) =>
+          `  - conflict: ${conflict.leftSessionId}/${conflict.leftChunkId} ${conflict.leftPath} overlaps ${conflict.rightSessionId}/${conflict.rightChunkId} ${conflict.rightPath} (${conflict.reason})`
+      ),
+      ...warnings.map((warning) => `  - warning: ${warning}`),
+    ].join("\n"),
+  };
+}
+
 export function validateHarnessRuntimeFiles(
   workspacePath: string
 ): HarnessRuntimeValidationResult {
@@ -2213,8 +2552,8 @@ export function compactHarnessRuntime(
   const bundlePaths = buildRuntimeArchiveBundlePaths(workspacePath, archiveId);
   const archivedSessionIds: string[] = [];
   const archiveSessions = entriesToArchive.map((entry) => {
-    const sourceSessionPath = path.join(workspacePath, entry.sessionPath);
-    const sourceSummaryPath = path.join(workspacePath, entry.summaryPath);
+    const sourceSessionPath = buildSessionStatePath(workspacePath, entry.id);
+    const sourceSummaryPath = buildSessionSummaryPath(workspacePath, entry.id);
     const archivedSessionPath = buildArchivedSessionStatePath(workspacePath, entry.id);
     const archivedSummaryPath = buildArchivedSessionSummaryPath(workspacePath, entry.id);
     const session = readJsonIfExists<HarnessRuntimeSessionState>(sourceSessionPath);
@@ -5218,6 +5557,20 @@ export function prepareHarnessNativeExecutor(
 export function launchHarnessNativeExecutor(
   params: LaunchHarnessNativeExecutorParams
 ): LaunchHarnessNativeExecutorResult {
+  const hasLaunchOverride =
+    params.executableOverride != null ||
+    (params.argsOverride != null && params.argsOverride.length > 0) ||
+    (params.env != null && Object.keys(params.env).length > 0);
+  if (
+    params.dryRun !== true &&
+    hasLaunchOverride &&
+    params.allowUnsafeNativeExecutorOverride !== true
+  ) {
+    throw new Error(
+      "Native executor launch overrides require allowUnsafeNativeExecutorOverride=true. Use dryRun=true to inspect the resolved command plan safely."
+    );
+  }
+
   const sessionId = resolveSessionId(params.workspacePath, params.sessionId);
   const session = loadSession(params.workspacePath, sessionId);
   const prepared = prepareHarnessNativeExecutor(
@@ -5246,6 +5599,16 @@ export function launchHarnessNativeExecutor(
   const launch = isPlainObject(plan.launch) ? plan.launch : {};
   const commandPath = String(launch.commandPath || "");
   const args = Array.isArray(launch.args) ? launch.args.map((item) => String(item)) : [];
+  const timeoutMs = normalizePositiveIntegerOption(
+    params.timeoutMs,
+    DEFAULT_NATIVE_EXECUTOR_TIMEOUT_MS,
+    "timeoutMs"
+  );
+  const maxOutputBytes = normalizePositiveIntegerOption(
+    params.maxOutputBytes,
+    DEFAULT_NATIVE_EXECUTOR_MAX_OUTPUT_BYTES,
+    "maxOutputBytes"
+  );
   if (!commandPath) {
     throw new Error(
       `${executor.title} is not currently launchable. Install the runtime or pass executableOverride.`
@@ -5266,6 +5629,8 @@ export function launchHarnessNativeExecutor(
         `Native executor dry run: ${executor.title}`,
         `Command: ${commandPath}`,
         `Args: ${args.join(" ")}`,
+        `Timeout: ${timeoutMs}ms`,
+        `Max output bytes: ${maxOutputBytes}`,
         `Plan: ${prepared.nativeExecutionPlanPath}`,
         `Last message: ${prepared.lastMessagePath}`,
       ].join("\n"),
@@ -5290,23 +5655,38 @@ export function launchHarnessNativeExecutor(
       cwd: params.workspacePath,
       env,
       encoding: "utf-8",
+      timeout: timeoutMs,
+      maxBuffer: maxOutputBytes,
       windowsHide: true,
     });
+    const cappedStdout = capTextByBytes(result.stdout ?? "", maxOutputBytes);
+    const cappedStderr = capTextByBytes(result.stderr ?? "", maxOutputBytes);
     fs.appendFileSync(
       nativePaths.stdoutLogPath,
-      result.stdout ?? "",
+      cappedStdout.text,
       "utf-8"
     );
     fs.appendFileSync(
       nativePaths.stderrLogPath,
-      result.stderr ?? "",
+      cappedStderr.text,
       "utf-8"
     );
 
-    const status =
-      result.status === 0 && result.error == null ? "completed" : "failed";
     const spawnError = result.error as NodeJS.ErrnoException | undefined;
-    const errorCode = spawnError?.code ?? null;
+    const outputTruncated =
+      cappedStdout.truncated ||
+      cappedStderr.truncated ||
+      spawnError?.code === "ENOBUFS";
+    const timeoutExceeded = spawnError?.code === "ETIMEDOUT";
+    const status =
+      result.status === 0 && result.error == null && !outputTruncated
+        ? "completed"
+        : "failed";
+    const errorCode = timeoutExceeded
+      ? "timeout"
+      : outputTruncated
+        ? "output-limit"
+        : spawnError?.code ?? null;
     const errorMessage = spawnError?.message ?? null;
     const state = {
       schemaVersion: "1.0.0",
@@ -5325,6 +5705,10 @@ export function launchHarnessNativeExecutor(
       exitCode: result.status,
       errorCode,
       errorMessage,
+      signal: result.signal ?? null,
+      timeoutMs,
+      maxOutputBytes,
+      outputTruncated,
       summary:
         status === "completed"
           ? `${executor.title} completed in foreground mode.`
@@ -5360,6 +5744,9 @@ export function launchHarnessNativeExecutor(
         `Status: ${status}`,
         `Exit code: ${String(result.status)}`,
         `Error code: ${String(errorCode ?? "none")}`,
+        `Signal: ${String(result.signal ?? "none")}`,
+        `Timeout: ${timeoutMs}ms`,
+        `Output truncated: ${outputTruncated ? "yes" : "no"}`,
         `State: ${prepared.nativeExecutionStatePath}`,
         `Last message: ${prepared.lastMessagePath}`,
       ].join("\n"),
@@ -5381,35 +5768,17 @@ export function launchHarnessNativeExecutor(
     fs.closeSync(stdoutFd);
     fs.closeSync(stderrFd);
     const errorMessage = err instanceof Error ? err.message : String(err);
-    const failedState = {
-      schemaVersion: "1.0.0",
-      generatedAt: nowIso(),
-      activeSessionId: sessionId,
-      bridgeId: params.bridgeId,
-      status: "failed",
-      launchMode: "background",
-      nativeExecutionPlanFile: prepared.nativeExecutionPlanPath,
-      nativeExecutionStateFile: prepared.nativeExecutionStatePath,
-      stdoutLogFile: prepared.stdoutLogPath,
-      stderrLogFile: prepared.stderrLogPath,
-      lastMessageFile: prepared.lastMessagePath,
-      processId: null,
-      executablePath: commandPath,
-      errorCode: "spawn-error",
-      errorMessage,
-      summary: `${executor.title} failed before background launch could start.`,
-    };
-    writeJson(nativePaths.nativeExecutionStatePath, failedState);
-    writeJson(buildRuntimePaths(params.workspacePath).currentNativeExecutionPath, failedState);
-    syncDashboardNativeExecution(
+    markBackgroundNativeExecutionFailed(
       params.workspacePath,
       session,
       params.bridgeId,
-      prepared.nativeExecutionPlanPath,
-      prepared.nativeExecutionStatePath,
-      prepared.stdoutLogPath,
-      prepared.stderrLogPath,
-      prepared.lastMessagePath
+      nativePaths,
+      prepared,
+      executor.title,
+      commandPath,
+      null,
+      "spawn-error",
+      errorMessage
     );
     return {
       bridgeId: params.bridgeId,
@@ -5445,36 +5814,77 @@ export function launchHarnessNativeExecutor(
 
   child.once("error", (err) => {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    const failedState = {
-      schemaVersion: "1.0.0",
-      generatedAt: nowIso(),
-      activeSessionId: sessionId,
-      bridgeId: params.bridgeId,
-      status: "failed",
-      launchMode: "background",
-      nativeExecutionPlanFile: prepared.nativeExecutionPlanPath,
-      nativeExecutionStateFile: prepared.nativeExecutionStatePath,
-      stdoutLogFile: prepared.stdoutLogPath,
-      stderrLogFile: prepared.stderrLogPath,
-      lastMessageFile: prepared.lastMessagePath,
-      processId: child.pid ?? null,
-      executablePath: commandPath,
-      errorCode: "spawn-error",
-      errorMessage,
-      summary: `${executor.title} failed after background spawn was requested.`,
-    };
-    writeJson(nativePaths.nativeExecutionStatePath, failedState);
-    writeJson(buildRuntimePaths(params.workspacePath).currentNativeExecutionPath, failedState);
-    syncDashboardNativeExecution(
+    markBackgroundNativeExecutionFailed(
       params.workspacePath,
       session,
       params.bridgeId,
-      prepared.nativeExecutionPlanPath,
-      prepared.nativeExecutionStatePath,
-      prepared.stdoutLogPath,
-      prepared.stderrLogPath,
-      prepared.lastMessagePath
+      nativePaths,
+      prepared,
+      executor.title,
+      commandPath,
+      child.pid ?? null,
+      "spawn-error",
+      errorMessage
     );
+  });
+  child.once("exit", () => {
+    // Status polling records the final exited state; timers only enforce guardrails.
+  });
+
+  const timeoutTimer = setTimeout(() => {
+    if (child.pid == null || !isProcessRunning(child.pid)) {
+      return;
+    }
+    terminateProcessTree(child.pid);
+    markBackgroundNativeExecutionFailed(
+      params.workspacePath,
+      session,
+      params.bridgeId,
+      nativePaths,
+      prepared,
+      executor.title,
+      commandPath,
+      child.pid ?? null,
+      "timeout",
+      `Background native executor exceeded timeoutMs=${timeoutMs}.`
+    );
+  }, timeoutMs);
+  timeoutTimer.unref?.();
+
+  const outputGuardTimer = setInterval(() => {
+    const stdoutBytes = fs.existsSync(nativePaths.stdoutLogPath)
+      ? fs.statSync(nativePaths.stdoutLogPath).size
+      : 0;
+    const stderrBytes = fs.existsSync(nativePaths.stderrLogPath)
+      ? fs.statSync(nativePaths.stderrLogPath).size
+      : 0;
+    if (stdoutBytes <= maxOutputBytes && stderrBytes <= maxOutputBytes) {
+      return;
+    }
+    if (child.pid != null && isProcessRunning(child.pid)) {
+      terminateProcessTree(child.pid);
+    }
+    appendLogHeader(nativePaths.stderrLogPath, [
+      `# ${nowIso()} | output-limit | maxOutputBytes=${maxOutputBytes}`,
+    ]);
+    markBackgroundNativeExecutionFailed(
+      params.workspacePath,
+      session,
+      params.bridgeId,
+      nativePaths,
+      prepared,
+      executor.title,
+      commandPath,
+      child.pid ?? null,
+      "output-limit",
+      `Background native executor exceeded maxOutputBytes=${maxOutputBytes}.`
+    );
+    clearInterval(outputGuardTimer);
+  }, 250);
+  outputGuardTimer.unref?.();
+  child.once("exit", () => {
+    clearTimeout(timeoutTimer);
+    clearInterval(outputGuardTimer);
   });
   child.unref();
 
@@ -5492,6 +5902,8 @@ export function launchHarnessNativeExecutor(
     lastMessageFile: prepared.lastMessagePath,
     processId: child.pid ?? null,
     executablePath: commandPath,
+    timeoutMs,
+    maxOutputBytes,
     summary: `${executor.title} background launch requested; check status for spawn errors or exit state.`,
   };
   writeJson(nativePaths.nativeExecutionStatePath, state);
@@ -5520,6 +5932,8 @@ export function launchHarnessNativeExecutor(
     summary: [
       `Native executor launch requested: ${executor.title}`,
       `PID: ${String(child.pid ?? "unknown")}`,
+      `Timeout: ${timeoutMs}ms`,
+      `Max output bytes: ${maxOutputBytes}`,
       `State: ${prepared.nativeExecutionStatePath}`,
       `Last message: ${prepared.lastMessagePath}`,
     ].join("\n"),

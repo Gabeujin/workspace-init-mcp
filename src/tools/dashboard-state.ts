@@ -3,6 +3,7 @@
  */
 
 import { type ProjectType } from "../types.js";
+import { DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS } from "../data/dashboard-state-contract.js";
 import {
   getDashboardKpiProfile,
   inferDashboardDomainMode,
@@ -125,25 +126,7 @@ export function validateDashboardStateShape(
     return { valid: false, errors };
   }
 
-  const requiredTopLevelKeys = [
-    "meta",
-    "workspace",
-    "executiveSummary",
-    "progressState",
-    "governanceState",
-    "kpiProfile",
-    "kpis",
-    "errors",
-    "gitStatus",
-    "sessionLog",
-    "governedSessions",
-    "artifacts",
-    "domainLens",
-    "timeline",
-    "entities",
-    "versionLedger",
-    "runtimeOrchestration",
-  ];
+  const requiredTopLevelKeys = DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS;
 
   for (const key of requiredTopLevelKeys) {
     if (!(key in root)) {
@@ -831,6 +814,64 @@ export function validateDashboardStateShape(
     }
   }
 
+  const memoryPromotion = requireObject(
+    errors,
+    "dashboardState.memoryPromotion",
+    root.memoryPromotion
+  );
+  if (memoryPromotion != null) {
+    requireStringField(errors, "dashboardState.memoryPromotion", memoryPromotion, "status");
+    requireNumberField(errors, "dashboardState.memoryPromotion", memoryPromotion, "thresholdScore");
+    requireStringArrayField(errors, "dashboardState.memoryPromotion", memoryPromotion, "sourceRoots");
+    const evidenceThreshold = requireObject(
+      errors,
+      "dashboardState.memoryPromotion.evidenceThreshold",
+      memoryPromotion.evidenceThreshold
+    );
+    if (evidenceThreshold != null) {
+      requireNumberField(
+        errors,
+        "dashboardState.memoryPromotion.evidenceThreshold",
+        evidenceThreshold,
+        "minimumOccurrences"
+      );
+      requireNumberField(
+        errors,
+        "dashboardState.memoryPromotion.evidenceThreshold",
+        evidenceThreshold,
+        "minimumGovernedSessions"
+      );
+    }
+    const candidates = requireArray(
+      errors,
+      "dashboardState.memoryPromotion.candidates",
+      memoryPromotion.candidates
+    );
+    if (candidates != null) {
+      for (const [index, item] of candidates.entries()) {
+        const candidate = requireObject(
+          errors,
+          `dashboardState.memoryPromotion.candidates[${index}]`,
+          item
+        );
+        if (candidate == null) {
+          continue;
+        }
+        requireStringField(errors, `dashboardState.memoryPromotion.candidates[${index}]`, candidate, "id");
+        requireStringField(errors, `dashboardState.memoryPromotion.candidates[${index}]`, candidate, "title");
+        requireStringField(errors, `dashboardState.memoryPromotion.candidates[${index}]`, candidate, "status");
+        requireNumberField(errors, `dashboardState.memoryPromotion.candidates[${index}]`, candidate, "score");
+        requireNumberField(errors, `dashboardState.memoryPromotion.candidates[${index}]`, candidate, "occurrences");
+        requireNumberField(errors, `dashboardState.memoryPromotion.candidates[${index}]`, candidate, "governedSessionCount");
+        requireStringField(errors, `dashboardState.memoryPromotion.candidates[${index}]`, candidate, "collisionCheck");
+        requireStringField(errors, `dashboardState.memoryPromotion.candidates[${index}]`, candidate, "decision");
+        requireStringArrayField(errors, `dashboardState.memoryPromotion.candidates[${index}]`, candidate, "evidencePaths");
+        requireStringArrayField(errors, `dashboardState.memoryPromotion.candidates[${index}]`, candidate, "generatedPaths");
+        requireStringField(errors, `dashboardState.memoryPromotion.candidates[${index}]`, candidate, "nextAction");
+      }
+    }
+  }
+
   const artifacts = requireArray(errors, "dashboardState.artifacts", root.artifacts);
   if (artifacts != null) {
     for (const [index, item] of artifacts.entries()) {
@@ -1199,6 +1240,158 @@ export function validateDashboardStateShape(
           event,
           "note"
         );
+      }
+    }
+  }
+
+  const operationsHealth = requireObject(
+    errors,
+    "dashboardState.operationsHealth",
+    root.operationsHealth
+  );
+  if (operationsHealth != null) {
+    requireStringField(errors, "dashboardState.operationsHealth", operationsHealth, "status");
+    requireStringField(errors, "dashboardState.operationsHealth", operationsHealth, "lastUpdated");
+    requireStringField(errors, "dashboardState.operationsHealth", operationsHealth, "summary");
+
+    const traffic = requireObject(
+      errors,
+      "dashboardState.operationsHealth.traffic",
+      operationsHealth.traffic
+    );
+    if (traffic != null) {
+      requireNumberField(errors, "dashboardState.operationsHealth.traffic", traffic, "requestsPerMinute");
+      requireNumberField(errors, "dashboardState.operationsHealth.traffic", traffic, "activeConnections");
+      requireNumberField(errors, "dashboardState.operationsHealth.traffic", traffic, "errorRatePercent");
+      requireStringField(errors, "dashboardState.operationsHealth.traffic", traffic, "source");
+    }
+
+    const requestResponse = requireObject(
+      errors,
+      "dashboardState.operationsHealth.requestResponse",
+      operationsHealth.requestResponse
+    );
+    if (requestResponse != null) {
+      for (const field of [
+        "totalRequests",
+        "successResponses",
+        "errorResponses",
+        "p50Ms",
+        "p95Ms",
+        "p99Ms",
+        "slowRequestThresholdMs",
+      ]) {
+        requireNumberField(
+          errors,
+          "dashboardState.operationsHealth.requestResponse",
+          requestResponse,
+          field
+        );
+      }
+      requireArray(
+        errors,
+        "dashboardState.operationsHealth.requestResponse.recentSamples",
+        requestResponse.recentSamples
+      );
+    }
+
+    const dbcp = requireObject(
+      errors,
+      "dashboardState.operationsHealth.dbcp",
+      operationsHealth.dbcp
+    );
+    if (dbcp != null) {
+      requireStringField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "status");
+      requireStringField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "poolName");
+      requireNumberField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "activeConnections");
+      requireNumberField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "idleConnections");
+      requireNumberField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "maxConnections");
+      requireNumberField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "waiters");
+      requireStringField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "validationQuery");
+      requireStringField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "lastCheckAt");
+    }
+
+    const incidentLogs = requireArray(
+      errors,
+      "dashboardState.operationsHealth.incidentLogs",
+      operationsHealth.incidentLogs
+    );
+    if (incidentLogs != null) {
+      for (const [index, item] of incidentLogs.entries()) {
+        const incident = requireObject(
+          errors,
+          `dashboardState.operationsHealth.incidentLogs[${index}]`,
+          item
+        );
+        if (incident == null) {
+          continue;
+        }
+        for (const field of ["id", "severity", "status", "summary", "source", "firstSeenAt", "lastSeenAt"]) {
+          requireStringField(
+            errors,
+            `dashboardState.operationsHealth.incidentLogs[${index}]`,
+            incident,
+            field
+          );
+        }
+      }
+    }
+
+    const latencyQueries = requireArray(
+      errors,
+      "dashboardState.operationsHealth.latencyQueries",
+      operationsHealth.latencyQueries
+    );
+    if (latencyQueries != null) {
+      for (const [index, item] of latencyQueries.entries()) {
+        const latencyQuery = requireObject(
+          errors,
+          `dashboardState.operationsHealth.latencyQueries[${index}]`,
+          item
+        );
+        if (latencyQuery == null) {
+          continue;
+        }
+        for (const field of ["id", "label", "query", "status", "lastRunAt"]) {
+          requireStringField(
+            errors,
+            `dashboardState.operationsHealth.latencyQueries[${index}]`,
+            latencyQuery,
+            field
+          );
+        }
+        requireNumberField(
+          errors,
+          `dashboardState.operationsHealth.latencyQueries[${index}]`,
+          latencyQuery,
+          "p95Ms"
+        );
+      }
+    }
+
+    const dataSources = requireArray(
+      errors,
+      "dashboardState.operationsHealth.dataSources",
+      operationsHealth.dataSources
+    );
+    if (dataSources != null) {
+      for (const [index, item] of dataSources.entries()) {
+        const dataSource = requireObject(
+          errors,
+          `dashboardState.operationsHealth.dataSources[${index}]`,
+          item
+        );
+        if (dataSource == null) {
+          continue;
+        }
+        for (const field of ["id", "label", "status", "path", "expectedSignal"]) {
+          requireStringField(
+            errors,
+            `dashboardState.operationsHealth.dataSources[${index}]`,
+            dataSource,
+            field
+          );
+        }
       }
     }
   }
