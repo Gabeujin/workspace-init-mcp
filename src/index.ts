@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * workspace-init-mcp MCP Server v4.3.0
+ * workspace-init-mcp MCP Server v4.6.0
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -15,6 +15,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawn } from "node:child_process";
 
 import { type WorkspaceInitParams, PROJECT_TYPE_CONFIGS } from "./types.js";
 import { collectFiles, buildSummary } from "./tools/initialize.js";
@@ -24,6 +25,7 @@ import {
 } from "./tools/agent-skills-install.js";
 import { buildInitFormSchema } from "./tools/form-schema.js";
 import { validateWorkspace } from "./tools/validate.js";
+import { getHarnessDashboardContext } from "./tools/harness-dashboard-context.js";
 import { analyzeWorkspace } from "./tools/status.js";
 import {
   exportReconcilePreflightReport,
@@ -34,7 +36,9 @@ import { assertGeneratedFilesRespectNonDestructivePolicy } from "./tools/generat
 import {
   auditWorkspaceManagedSemanticDiff,
   auditWorkspaceUpgradeRisk,
+  MANAGED_TEXT_MERGE_PATHS,
 } from "./tools/managed-inventory.js";
+import { mergeHarnessInstructionBlock } from "./generators/agent-platform-instructions.js";
 import {
   assessWorkspaceReadiness,
   auditWorkspaceReadinessSemantics,
@@ -151,6 +155,35 @@ function writeFileWithEncoding(
   }
 }
 
+function restoreDashboardListenerOnHarnessActivity(
+  workspacePath: string
+): string {
+  if (process.env.WORKSPACE_INIT_DASHBOARD_AUTOSTART === "0") {
+    return "Harness Dashboard listener autostart disabled by WORKSPACE_INIT_DASHBOARD_AUTOSTART=0.";
+  }
+
+  const scriptPath = path.join(
+    workspacePath,
+    "docs",
+    "ai-harness",
+    "dashboard",
+    "scripts",
+    "dashboard-ops.mjs"
+  );
+  if (!fs.existsSync(scriptPath)) {
+    return "Harness Dashboard listener not started because dashboard-ops.mjs is not present.";
+  }
+
+  const child = spawn(process.execPath, [scriptPath, "ensure-listening"], {
+    cwd: workspacePath,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  child.unref();
+  return "Harness Dashboard listener restore requested via dashboard-ops.mjs ensure-listening.";
+}
+
 // ---------------------------------------------------------------------------
 // Schema definitions (Zod)
 // ---------------------------------------------------------------------------
@@ -183,6 +216,7 @@ const HARNESS_RUNTIME_ACTIONS = [
 ] as const;
 
 const HARNESS_RUNTIME_ACTORS = [
+  "hub",
   "planner",
   "generator",
   "evaluator",
@@ -253,7 +287,7 @@ const BaseWorkspaceInputSchema = z.object({
     .array(z.enum(TARGET_IDE_VALUES))
     .optional()
     .describe(
-      'Target IDEs for Agent Skills file paths (default: ["vscode"]). Select multiple to generate skills into each IDE\'s directory.'
+      'Target AI agent platforms for instruction overlays and Agent Skills paths (default: detected platforms, otherwise ["vscode"]). Examples: ["vscode", "cursor", "claude-code", "codex", "antigravity"].'
     ),
   lineEnding: z
     .enum(["lf", "crlf", "auto"])
@@ -366,7 +400,7 @@ const ReconcileWorkspaceInputSchema = BaseWorkspaceInputSchema.partial().extend(
 
 const server = new McpServer({
   name: "workspace-init-mcp",
-  version: "4.3.0",
+  version: "4.6.0",
 });
 
 // ---------------------------------------------------------------------------
@@ -381,15 +415,17 @@ server.registerTool(
 
 This tool creates a complete workspace setup including:
 - .github/copilot-instructions.md (global Copilot instructions)
+- AGENTS.md (cross-agent and Codex repository instructions)
+- platform-aware instruction overlays for detected Cursor, Claude Code, Antigravity, Codex, and VS Code projects
 - .github/skills/ (Agent Skills - SKILL.md files per the agentskills.io standard)
 - .github/agents/ (Agent definitions - .agent.md files)
 - .github/ai-harness/managed-file-inventory.json (managed baseline for safer future upgrades and reconcile audits)
 - .github/ai-harness/reconcile-policy.json (file-level reconcile safety policy for hold / merge / replace decisions)
 - .github/ai-harness/native-executor-overrides.json (workspace-local handoff and launch tuning for GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, and similar runtimes)
 - docs/ai-harness/readiness/ (remaining-work spec, scoring model, and readiness scorecard template)
-- docs/ai-harness/dashboard/ (JSON-first admin dashboard with progress, KPI, issue, and git visibility)
+- docs/ai-harness/dashboard/ (Harness Dashboard 4.6 Hypertext Project World Model with ledger, projections, single-file HTML, and read-only local API)
 - docs/ai-harness/runtime/ (planner / generator / evaluator runtime state, prompts, and session ledgers)
-- docs/ai-harness/dashboard/scripts/dashboard-ops.mjs (dashboard refresh, strict validation, local preview server, and static export)
+- docs/ai-harness/dashboard/scripts/dashboard-ops.mjs (projection rebuild, strict validation, read-only listener, SSE, VCS collection, and public export)
 - .vscode/settings.json (Copilot custom instruction references)
 - .vscode/*.instructions.md (code generation, test, review, commit, PR instructions)
 - .editorconfig (cross-editor formatting consistency)
@@ -398,7 +434,7 @@ This tool creates a complete workspace setup including:
 - Initial changelog and work log entries
 
 Agent Skills are included by default (set includeAgentSkills: false to skip).
-Use targetIDEs to generate skills for multiple IDEs (vscode, cursor, claude-code, openhands).
+Use targetIDEs to generate skills and platform instructions for multiple AI agent platforms (vscode, cursor, claude/claude-code, codex, antigravity, openhands). If the active platform set is uncertain, initialize with the best detected set and confirm it later through the dashboard Governance tab's agentPlatformGovernance intake.
 Use fileEncoding to set file encoding (default: utf-8). Use lineEnding to set line endings (default: lf).
 Legacy adoption is non-destructive: generated outputs are limited to governance, documentation, IDE, and harness artifacts and must not delete or replace existing application source files.
 
@@ -429,7 +465,10 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
         tokenBudget: params.tokenBudget,
         primaryDomains: params.primaryDomains,
         fileEncoding: params.fileEncoding as WorkspaceInitParams["fileEncoding"],
-        targetIDEs: params.targetIDEs as WorkspaceInitParams["targetIDEs"],
+        targetIDEs: resolveWorkspaceTargetIDEs(
+          params.workspacePath,
+          params.targetIDEs as WorkspaceInitParams["targetIDEs"]
+        ),
         lineEnding: params.lineEnding as WorkspaceInitParams["lineEnding"],
       };
 
@@ -450,6 +489,20 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
           fs.mkdirSync(dir, { recursive: true });
 
           if (!force && fs.existsSync(fullPath)) {
+            if (MANAGED_TEXT_MERGE_PATHS.has(file.relativePath)) {
+              const existingContent = fs.readFileSync(fullPath, "utf-8");
+              const mergedContent = mergeHarnessInstructionBlock(
+                file.content,
+                existingContent
+              );
+              if (mergedContent !== existingContent) {
+                writeFileWithEncoding(fullPath, mergedContent, encoding);
+                written.push(`${file.relativePath} (merged harness instruction block)`);
+              } else {
+                skipped.push(file.relativePath);
+              }
+              continue;
+            }
             skipped.push(file.relativePath);
             continue;
           }
@@ -473,6 +526,11 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
         }
       }
 
+      const listenerRestoreNote =
+        initParams.includeHarnessEngineering === false
+          ? "Harness Dashboard listener not started because harness engineering is disabled."
+          : restoreDashboardListenerOnHarnessActivity(params.workspacePath);
+
       const result = buildSummary(initParams, files);
 
       let text = result.summary;
@@ -480,9 +538,10 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
       // Append environment info
       const envInfo: string[] = [];
       envInfo.push(`File encoding: ${encoding}`);
-      const ides = params.targetIDEs ?? ["vscode"];
-      envInfo.push(`Target IDEs: ${ides.join(", ")}`);
+      const ides = initParams.targetIDEs ?? ["vscode"];
+      envInfo.push(`Target AI platforms: ${ides.join(", ")}`);
       envInfo.push(`Line endings: ${params.lineEnding ?? "lf"}`);
+      envInfo.push(listenerRestoreNote);
       text += `\n\n${envInfo.join("\n")}`;
 
       if (skipped.length > 0) {
@@ -558,7 +617,10 @@ For safer upgrades, prefer requireCleanGitWhenPresent: true, keep overwriteModif
         tokenBudget: params.tokenBudget,
         primaryDomains: params.primaryDomains,
         fileEncoding: params.fileEncoding as WorkspaceInitParams["fileEncoding"],
-        targetIDEs: params.targetIDEs as WorkspaceInitParams["targetIDEs"],
+        targetIDEs: resolveWorkspaceTargetIDEs(
+          params.workspacePath,
+          params.targetIDEs as WorkspaceInitParams["targetIDEs"]
+        ),
         lineEnding: params.lineEnding as WorkspaceInitParams["lineEnding"],
         applyChanges: params.applyChanges,
         archiveManagedFiles: params.archiveManagedFiles,
@@ -779,7 +841,10 @@ Useful for reviewing the planned structure before committing to it.`,
         tokenBudget: params.tokenBudget,
         primaryDomains: params.primaryDomains,
         fileEncoding: params.fileEncoding as WorkspaceInitParams["fileEncoding"],
-        targetIDEs: params.targetIDEs as WorkspaceInitParams["targetIDEs"],
+        targetIDEs: resolveWorkspaceTargetIDEs(
+          params.workspacePath,
+          params.targetIDEs as WorkspaceInitParams["targetIDEs"]
+        ),
         lineEnding: params.lineEnding as WorkspaceInitParams["lineEnding"],
       };
 
@@ -941,6 +1006,73 @@ Checks for the presence of all expected files (.github/copilot-instructions.md,
 );
 
 // ---------------------------------------------------------------------------
+// Tool: get_harness_dashboard_context
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "get_harness_dashboard_context",
+  {
+    title: "Get Harness Dashboard Context",
+    description: `Read the Harness Dashboard 4.6 Hypertext Project World Model projections for AI Agent resume context.
+
+This tool is intentionally read-only. It never starts listeners, refreshes VCS,
+mutates dashboard state, appends ledger events, runs shell commands, or calls an LLM.
+Use it at the beginning of a work session to understand current goals, open decisions,
+blockers, authoritative files, projection freshness, and governance evidence.`,
+    inputSchema: z.object({
+      workspacePath: workspacePathInputSchema(
+        "Absolute path to the workspace root directory"
+      ),
+      view: z
+        .enum(["agent", "stakeholder", "maintainer", "full"])
+        .optional()
+        .describe("Context density and vocabulary. Default: agent"),
+      query: z
+        .string()
+        .optional()
+        .describe("Optional deterministic projection search term"),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(100)
+        .optional()
+        .describe("Maximum query matches to return. Default: 20"),
+    }),
+  },
+  async (params) => {
+    try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
+      const result = getHarnessDashboardContext({
+        workspacePath: params.workspacePath,
+        view: params.view,
+        query: params.query,
+        limit: params.limit,
+      });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Harness Dashboard context read failed: ${msg}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
 // Tool: assess_workspace_readiness
 // ---------------------------------------------------------------------------
 
@@ -1058,7 +1190,7 @@ server.registerTool(
     title: "Audit Harness Parallel Chunk Conflicts",
     description: `Audit open and queued harness runtime sessions for overlapping expected write paths before running workers in parallel.
 
-Use this after the orchestrator splits work into chunks and before assigning worker agents. A passing audit means the declared expected write scopes do not overlap; it does not replace human review for shared schemas, APIs, databases, or deployment order.`,
+Use this after the orchestrator splits work into chunks and before assigning worker agents. A passing audit means the declared expected write scopes do not textually overlap. The audit also warns when multiple sessions touch integration-sensitive surfaces such as dependency manifests, lockfiles, CI workflows, API contracts, DB migrations, or shared project config; those warnings should be handled by making the work sequential or naming one merge owner.`,
     inputSchema: z.object({
       workspacePath: z
         .string()
@@ -1099,8 +1231,8 @@ This tool:
 - opens governed runtime state under docs/ai-harness/runtime/
 - creates a durable session JSON snapshot and markdown summary
 - seeds the first chunk and moves the workflow to plan-1
-- captures dependency notes, expected write paths, verification commands, and context-injection guidance for parallel workers
-- synchronizes the administrator dashboard so non-developers can see the active session
+- captures hub orchestration fields, dependency maps, expected read/write paths, merge owners, verification commands, and context-injection guidance for parallel workers
+- synchronizes durable runtime state and keeps the dashboard boundary clear: admin for server health, live artifacts for harness work status
 
 Use this before meaningful implementation begins. The session is file-system-based and survives context resets, long-running work, and interrupted sessions.`,
     inputSchema: z.object({
@@ -1134,14 +1266,42 @@ Use this before meaningful implementation begins. The session is file-system-bas
         .string()
         .optional()
         .describe("Minimal context packet guidance for the worker: relevant snippets, schemas, API specs, logs, commands, and expected write paths."),
+      expectedReadPaths: z
+        .array(z.string())
+        .optional()
+        .describe("Expected read paths for this chunk. Use this to keep worker context explicit and reviewable without broad repository dumps."),
       expectedWritePaths: z
         .array(z.string())
         .optional()
-        .describe("Expected write paths for this chunk. Use this to keep parallel workers inside disjoint scopes."),
+        .describe("Expected write paths for this chunk. Use this to keep parallel workers inside disjoint scopes. Include shared manifests, lockfiles, schemas, API contracts, and config files when a worker may update them so the conflict audit can warn about integration-sensitive surfaces."),
       verificationCommands: z
         .array(z.string())
         .optional()
         .describe("Commands or checks the worker/evaluator should run for this chunk."),
+      assignedWorker: z
+        .string()
+        .optional()
+        .describe("Optional worker or subagent identifier assigned to this chunk."),
+      dependencyMap: z
+        .array(z.string())
+        .optional()
+        .describe("Chunk dependencies or ordering notes, one entry per dependency edge or prerequisite."),
+      mergeOwner: z
+        .string()
+        .optional()
+        .describe("Named hub/worker responsible for integrating outputs when this chunk touches shared surfaces."),
+      integrationOwner: z
+        .string()
+        .optional()
+        .describe("Named owner responsible for cross-chunk runtime, API, DB, CI, release, or dependency integration."),
+      parallelSafetyStatus: z
+        .enum(["unclassified", "blocked", "sequential", "parallel-ready", "needs-merge-owner"])
+        .optional()
+        .describe("Explicit orchestration classification for this chunk before any worker is launched."),
+      evaluationThreshold: z
+        .string()
+        .optional()
+        .describe("Exit threshold for the work -> evaluate -> improve loop before the hub accepts the chunk."),
       adoptionTrack: z
         .enum(["legacy-modernization", "greenfield"])
         .optional()
@@ -1172,8 +1332,15 @@ Use this before meaningful implementation begins. The session is file-system-bas
         chunkTitle: params.chunkTitle,
         dependencyNotes: params.dependencyNotes,
         contextInjectionNotes: params.contextInjectionNotes,
+        expectedReadPaths: params.expectedReadPaths,
         expectedWritePaths: params.expectedWritePaths,
         verificationCommands: params.verificationCommands,
+        assignedWorker: params.assignedWorker,
+        dependencyMap: params.dependencyMap,
+        mergeOwner: params.mergeOwner,
+        integrationOwner: params.integrationOwner,
+        parallelSafetyStatus: params.parallelSafetyStatus,
+        evaluationThreshold: params.evaluationThreshold,
         adoptionTrack: params.adoptionTrack,
         contextPolicy: params.contextPolicy,
         queueIfBusy: params.queueIfBusy,
@@ -2052,7 +2219,7 @@ server.registerTool(
 Creates a canonical .github/skills/<id>/SKILL.md registry and .github/agents/<id>.agent.md
 registry for the specified skill and agent IDs. When targetIDEs are provided or
 detected from the workspace, the MCP also mirrors those files into the matching
-IDE-specific directories and refreshes the canonical catalog indexes.
+platform-specific directories and refreshes the canonical catalog indexes.
 
 Use recommend_agent_skills or search_agent_skills first to discover available
 skills and agents, then pass the selected IDs to this tool.`,
@@ -2076,7 +2243,7 @@ skills and agents, then pass the selected IDs to this tool.`,
         .array(z.enum(TARGET_IDE_VALUES))
         .optional()
         .describe(
-          'Target IDE mirrors to generate (e.g., ["cursor", "claude-code"]). If omitted, the MCP reuses the workspace machine index or existing skill directories.'
+          'Target platform mirrors to generate (e.g., ["cursor", "claude-code", "antigravity"]). If omitted, the MCP reuses the workspace machine index or existing platform instruction directories.'
         ),
       force: z
         .boolean()
@@ -2150,7 +2317,7 @@ skills and agents, then pass the selected IDs to this tool.`,
 
       const writtenList = written.length > 0 ? written.map((entry) => `  - ${entry}`).join("\n") : "  - none";
       let text = "Agent Skills installation complete.\n\n";
-      text += `Target IDE mirrors: ${targetIDEs.join(", ")}\n`;
+      text += `Target platform mirrors: ${targetIDEs.join(", ")}\n`;
       text += "Canonical registry: .github/skills/ and .github/agents/\n\n";
       text += `Written files (${written.length}):\n${writtenList}\n`;
 
@@ -2485,7 +2652,7 @@ server.registerResource(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-console.error("workspace-init-mcp server v4.3.0 started on stdio");
+  console.error("workspace-init-mcp server v4.6.0 started on stdio");
 }
 
 main().catch((err) => {

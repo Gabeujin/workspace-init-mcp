@@ -12,10 +12,14 @@ import {
   computeContentSha256,
   MANAGED_FILE_INVENTORY_PATH,
   MANAGED_JSON_MERGE_PATHS,
+  MANAGED_TEXT_MERGE_PATHS,
   readManagedFileInventory,
   type WorkspaceManagedSemanticDiffResult,
   type WorkspaceUpgradeRiskAuditResult,
 } from "./managed-inventory.js";
+import {
+  mergeHarnessInstructionBlock,
+} from "../generators/agent-platform-instructions.js";
 import {
   isGeneratedWorkspaceControlPath,
   isProtectedSourcePath,
@@ -159,7 +163,7 @@ export interface ReconcilePreflightExportResult {
   summary: string;
 }
 
-const RECONCILE_VERSION = "4.3.0";
+const RECONCILE_VERSION = "4.6.0";
 const RECONCILE_POLICY_PATH = ".github/ai-harness/reconcile-policy.json";
 
 const LEGACY_RESOURCE_ROOTS: Array<{
@@ -564,7 +568,7 @@ function resolveReconcilePolicyForPath(
   relativePath: string,
   policyDocument: ReconcilePolicyDocument,
   policySource: string,
-  isManagedJson: boolean,
+  isManagedMergeFile: boolean,
   isModifiedManagedFile: boolean
 ): ResolvedReconcilePolicy {
   const protectedSourceRoot = resolveProtectedSourceRootForPath(
@@ -589,11 +593,11 @@ function resolveReconcilePolicyForPath(
     }
   }
 
-  if (isManagedJson) {
+  if (isManagedMergeFile) {
     return {
       policy: policyDocument.defaults.managedJsonState,
       source: `${policySource}:defaults.managedJsonState`,
-      reason: "Default policy for managed JSON state files.",
+      reason: "Default policy for managed merge files.",
     };
   }
 
@@ -1251,7 +1255,7 @@ function buildReconcilePreflightHtml(result: {
         )}</span></p>
       </div>
       <div class="header-meta">
-        <span class="chip">JSON-first</span>
+        <span class="chip">Ledger-first</span>
         <span class="chip">Dry-run plan</span>
         <span class="chip">Pre-apply gate</span>
       </div>
@@ -1597,7 +1601,7 @@ function buildReportMarkdown(report: Record<string, unknown>): string {
     `- Workspace: ${resolvedConfig.workspaceName}`,
     `- Purpose: ${resolvedConfig.purpose}`,
     `- Project type: ${resolvedConfig.projectType ?? "other"}`,
-    `- Target IDEs: ${(resolvedConfig.targetIDEs ?? ["vscode"]).join(", ")}`,
+    `- Target AI platforms: ${(resolvedConfig.targetIDEs ?? ["vscode"]).join(", ")}`,
     `- Reconcile policy: ${reconcilePolicySource}`,
     "",
     "## Actions",
@@ -1771,6 +1775,7 @@ export function reconcileWorkspaceInitialization(
   for (const file of generatedFiles) {
     const fullPath = path.join(options.workspacePath, file.relativePath);
     const isManagedJson = MANAGED_JSON_MERGE_PATHS.has(file.relativePath);
+    const isManagedText = MANAGED_TEXT_MERGE_PATHS.has(file.relativePath);
 
     if (!fs.existsSync(fullPath)) {
       writtenFiles.push(file.relativePath);
@@ -1800,7 +1805,7 @@ export function reconcileWorkspaceInitialization(
       file.relativePath,
       reconcilePolicy.document,
       reconcilePolicy.source,
-      isManagedJson,
+      isManagedJson || isManagedText,
       isModifiedManagedFile
     );
 
@@ -1860,6 +1865,45 @@ export function reconcileWorkspaceInitialization(
         );
         continue;
       }
+    }
+
+    if (isManagedText) {
+      if (policyResolution.policy === "replace") {
+        if (existingContent === file.content) {
+          unchangedFiles.push(file.relativePath);
+          continue;
+        }
+        if (!overwriteManagedFiles) {
+          manualReviewFiles.push(file.relativePath);
+          continue;
+        }
+        overwrittenFiles.push(file.relativePath);
+        pendingWrites.push({
+          relativePath: file.relativePath,
+          fullPath,
+          content: file.content,
+          archiveBeforeWrite: archiveManagedFiles,
+        });
+        continue;
+      }
+
+      const mergedContent = mergeHarnessInstructionBlock(
+        file.content,
+        existingContent
+      );
+      if (mergedContent === existingContent) {
+        unchangedFiles.push(file.relativePath);
+        continue;
+      }
+
+      mergedFiles.push(file.relativePath);
+      pendingWrites.push({
+        relativePath: file.relativePath,
+        fullPath,
+        content: mergedContent,
+        archiveBeforeWrite: archiveManagedFiles,
+      });
+      continue;
     }
 
     if (isModifiedManagedFile && !overwriteModifiedManagedFiles && policyResolution.policy !== "replace") {
@@ -1980,7 +2024,7 @@ export function reconcileWorkspaceInitialization(
       : `Workspace reconcile dry run complete: ${resolvedConfig.workspaceName}`,
     `Tool version: ${RECONCILE_VERSION}`,
     `Project type: ${resolvedConfig.projectType ?? "other"}`,
-    `Target IDEs: ${(resolvedConfig.targetIDEs ?? ["vscode"]).join(", ")}`,
+    `Target AI platforms: ${(resolvedConfig.targetIDEs ?? ["vscode"]).join(", ")}`,
     `Applied changes: ${applyChanges ? "yes" : "no (dry run)"}`,
     `Managed inventory: ${managedInventory.status}`,
     `Reconcile policy: ${reconcilePolicy.source}`,

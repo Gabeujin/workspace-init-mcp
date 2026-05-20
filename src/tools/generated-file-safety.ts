@@ -12,6 +12,7 @@ const GENERATED_CONTROL_PREFIXES = [
 ] as const;
 
 const GENERATED_CONTROL_FILES = new Set([".editorconfig", ".gitattributes"]);
+const GENERATED_CONTROL_ROOT_FILES = new Set(["agents.md", "claude.md"]);
 
 export const PROTECTED_SOURCE_PREFIXES = [
   "src/",
@@ -63,6 +64,7 @@ export function isGeneratedWorkspaceControlPath(relativePath: string): boolean {
   const normalizedPath = canonicalWorkspaceRelativePath(relativePath);
   return (
     GENERATED_CONTROL_FILES.has(normalizedPath) ||
+    GENERATED_CONTROL_ROOT_FILES.has(normalizedPath) ||
     GENERATED_CONTROL_PREFIXES.some((prefix) =>
       normalizedPath.startsWith(prefix)
     )

@@ -15,7 +15,13 @@ export interface ValidationItem {
   path: string;
   label: string;
   status: "present" | "missing" | "outdated";
-  category: "copilot" | "vscode" | "docs" | "governance" | "dashboard";
+  category:
+    | "copilot"
+    | "agent-platform"
+    | "vscode"
+    | "docs"
+    | "governance"
+    | "dashboard";
   severity: "required" | "recommended" | "optional";
   details?: string;
 }
@@ -34,6 +40,12 @@ const EXPECTED_FILES: Omit<ValidationItem, "status">[] = [
     path: ".github/copilot-instructions.md",
     label: "Global copilot instructions",
     category: "copilot",
+    severity: "required",
+  },
+  {
+    path: "AGENTS.md",
+    label: "Cross-agent and Codex instructions",
+    category: "agent-platform",
     severity: "required",
   },
   {
@@ -326,21 +338,93 @@ const EXPECTED_FILES: Omit<ValidationItem, "status">[] = [
   },
   {
     path: "docs/ai-harness/dashboard/index.html",
-    label: "Admin dashboard screen",
+    label: "Harness Dashboard single-file HTML",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/events/harness-events.jsonl",
+    label: "Harness event ledger JSONL",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/events/ledger-manifest.json",
+    label: "Harness ledger manifest",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/entities/project-world-model.json",
+    label: "Project World Model entity snapshot",
     category: "dashboard",
     severity: "required",
   },
   {
     path: "docs/ai-harness/dashboard/state/dashboard-state.json",
-    label: "Dashboard state JSON",
+    label: "Dashboard state projection",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/state/dashboard-index.json",
+    label: "Agent-readable dashboard index",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/state/dashboard-runtime.json",
+    label: "Read-only listener runtime state",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/state/embedding-documents.json",
+    label: "Embedding document projection",
     category: "dashboard",
     severity: "required",
   },
   {
     path: "docs/ai-harness/dashboard/state/dashboard-state.schema.json",
-    label: "Dashboard schema JSON",
+    label: "Dashboard state schema JSON",
     category: "dashboard",
     severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/schemas/events/harness-event.schema.json",
+    label: "Harness event envelope schema",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/schemas/entities/project-world-model.schema.json",
+    label: "Project World Model schema",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/schemas/projections/dashboard-state.schema.json",
+    label: "Projection schema registry entry",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/design-framework.html",
+    label: "Dashboard frontend design framework",
+    category: "dashboard",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/dashboard/state/design-profile.json",
+    label: "Dashboard frontend design profile",
+    category: "dashboard",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/dashboard/backend-app-blueprint.html",
+    label: "Optional backend dashboard blueprint",
+    category: "dashboard",
+    severity: "recommended",
   },
   {
     path: "docs/ai-harness/dashboard/scripts/dashboard-ops.mjs",
@@ -351,36 +435,6 @@ const EXPECTED_FILES: Omit<ValidationItem, "status">[] = [
   {
     path: "docs/ai-harness/dashboard/scripts/README.md",
     label: "Dashboard operations guide",
-    category: "dashboard",
-    severity: "recommended",
-  },
-  {
-    path: "live-artifacts-dashboard/package.json",
-    label: "Live artifacts dashboard package",
-    category: "dashboard",
-    severity: "required",
-  },
-  {
-    path: "live-artifacts-dashboard/server.js",
-    label: "Live artifacts dashboard server",
-    category: "dashboard",
-    severity: "required",
-  },
-  {
-    path: "live-artifacts-dashboard/public/index.html",
-    label: "Live artifacts dashboard screen",
-    category: "dashboard",
-    severity: "required",
-  },
-  {
-    path: "live-artifacts-dashboard/public/app.js",
-    label: "Live artifacts dashboard app",
-    category: "dashboard",
-    severity: "required",
-  },
-  {
-    path: "live-artifacts-dashboard/public/vendor/chart.umd.js",
-    label: "Live artifacts local chart adapter",
     category: "dashboard",
     severity: "recommended",
   },

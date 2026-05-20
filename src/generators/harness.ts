@@ -56,6 +56,14 @@ export function generateHarnessFiles(
       content: buildAdoptionPaths(params, domains),
     },
     {
+      relativePath: ".governance/_INDEX.md",
+      content: buildGovernanceIndex(params),
+    },
+    {
+      relativePath: ".governance/_PROJECT_STATE.md",
+      content: buildGovernanceProjectState(params),
+    },
+    {
       relativePath: "docs/contracts/README.md",
       content: buildContractsReadme(params),
     },
@@ -80,6 +88,46 @@ export function generateHarnessFiles(
       content: buildPlansReadme(params),
     },
   ];
+}
+
+function buildGovernanceIndex(params: WorkspaceInitParams): string {
+  return `# Governance Index
+
+This folder is a lightweight intake and staging area for active governance notes.
+Canonical durable harness state lives under \`docs/ai-harness/\`, especially the
+Harness Dashboard event ledger and runtime session files.
+
+## Workspace
+
+- Name: ${params.workspaceName}
+- Purpose: ${params.purpose}
+
+## Canonical Sources
+
+- Dashboard ledger: \`docs/ai-harness/dashboard/events/harness-events.jsonl\`
+- Dashboard state projection: \`docs/ai-harness/dashboard/state/dashboard-state.json\`
+- Agent dashboard index: \`docs/ai-harness/dashboard/state/dashboard-index.json\`
+- Runtime sessions: \`docs/ai-harness/runtime/state/session-index.json\`
+`;
+}
+
+function buildGovernanceProjectState(params: WorkspaceInitParams): string {
+  return `# Governance Project State
+
+## Current Goal
+
+${params.purpose}
+
+## Status
+
+- Harness Dashboard 4.6 Hypertext Project World Model generated.
+- First governed session is pending.
+- AI Agents should call \`get_harness_dashboard_context\` before starting work.
+
+## Next Review
+
+Confirm the first governed goal, service lifecycle mode, owner, and verification commands.
+`;
 }
 
 function buildReconcilePolicy(): string {
@@ -600,11 +648,14 @@ This workspace uses the **${profileId}** harness profile to keep long-running AI
 
 ## Parallel Orchestration And Context Injection
 
-- The orchestrator agent analyzes the backlog, maps dependencies, and separates independent chunks before worker sessions begin.
-- Parallel chunks are allowed only when their write scopes, runtime side effects, database changes, and API contracts do not conflict.
-- Each worker receives a minimal context packet: task contract, relevant code snippets, affected schemas, API specs, verification command, and expected write paths.
+- The main agent acts as the hub: it analyzes the backlog, maps dependencies, assigns subagents, reviews worker receipts, owns merge/integration decisions, and accepts or rejects outputs.
+- The hub separates independent chunks before worker sessions begin and records \`expectedReadPaths\`, \`expectedWritePaths\`, \`assignedWorker\`, \`dependencyMap\`, \`mergeOwner\`, \`integrationOwner\`, \`parallelSafetyStatus\`, and \`evaluationThreshold\`.
+- Parallel chunks are allowed only when their write scopes, runtime side effects, database changes, API contracts, and integration-sensitive shared files do not conflict.
+- Dependency manifests, lockfiles, CI workflows, shared config, generated clients, DB migrations, and API contracts require one merge owner or sequential execution.
+- Each worker receives a minimal context packet: task contract, relevant code snippets, affected schemas, API specs, verification command, expected write paths, and merge ownership when integration is required.
 - Workers must not read broadly or widen scope just because another worker is active.
 - Integration happens through contracts, evaluator records, receipts, dashboard updates, and atomic commits rather than hidden chat coordination.
+- The hub repeats work -> evaluate -> improve until the contract is satisfied, critical findings are resolved, and world model memory has the evidence needed for future agents to resume.
 
 ## Code Maturity Gate
 
@@ -683,7 +734,7 @@ This directory family defines how AI work is governed for **${params.workspaceNa
 - \`.github/ai-harness/operating-model.md\`: how humans and AI should operate
 - \`.github/ai-harness/context-strategy.md\`: when to compact vs reset context
 - \`.github/ai-harness/evaluation-rubrics.md\`: explicit grading criteria and quality thresholds
-- \`docs/ai-harness/dashboard/\`: JSON-first administrator dashboard and design system
+- \`docs/ai-harness/dashboard/\`: Harness Dashboard 4.6 Hypertext Project World Model, ledger projections, single-file HTML, and read-only local API design system
 - \`docs/ai-harness/runtime/\`: planner / generator / evaluator runtime state, prompts, and session ledgers
 - \`docs/ai-harness/adoption-paths.md\`: legacy-project and greenfield DX/AX adoption playbook
 - \`docs/context/\`: durable context, assumptions, and open questions
@@ -704,7 +755,7 @@ This directory family defines how AI work is governed for **${params.workspaceNa
 7. Write a chunk contract and agree on evaluator thresholds before coding
 8. Execute one chunk or independent chunk set, validate it, review it, remediate it, and update the review ledger
 9. Run the maturity gate: static analysis, boundary tests, version compatibility, dependency audit, maintainability review, self-correction, and atomic commit traceability
-10. Refresh the dashboard snapshot so operators can see progress, KPIs, issues, session governance, and git state
+10. Refresh server health in the admin dashboard and harness work status in the live artifacts dashboard
 11. Close governance artifacts last: work log, review state, handover, contracts, evaluations, and dashboard state
 
 ## Profile
@@ -727,7 +778,7 @@ This workspace is designed so both **existing legacy projects** and **new greenf
 - Three planning and review cycles before broad implementation
 - Planner / generator / evaluator role separation for high-risk or quality-critical work
 - Contract-first chunk execution so every implementation step has explicit done criteria
-- JSON-first dashboard visibility for operators and non-developers
+- Ledger-first, HTML-backed dashboard visibility for operators and non-developers
 - Git-backed traceability for progress, issues, and decisions
 - Chunked delivery so sessions remain resumable
 - Non-destructive adoption so existing project source remains intact while the harness layer is added
@@ -997,7 +1048,8 @@ Use this directory for durable plans that can survive session interruption, envi
 - Each chunk must reference its related review note and handover note
 - Each chunk must define its tests, code review trigger, and remediation path
 - For multi-agent execution, an orchestrator must map dependencies before workers start
-- Parallel chunks must have disjoint write scopes or an explicit merge owner
+- Parallel chunks must have disjoint write scopes; integration-sensitive shared files require a merge owner or sequential execution
+- Run \`audit_harness_parallel_chunk_conflicts\` before launching parallel workers and resolve hard conflicts or integration warnings first
 - Worker plans must include the exact context-injection packet instead of broad repository context
 
 ## Chunking Heuristics
@@ -1026,6 +1078,7 @@ Split the work when any of these are true:
 - Record dependencies, shared files, DB/schema/API impacts, and merge owner.
 - Assign one worker per independent chunk with expected read and write paths.
 - Inject only relevant code snippets, DB schema fragments, API specs, command outputs, and verification commands.
+- Require workers to stop before touching undeclared write paths.
 - Reserve evaluator or reviewer agents for read-only judgment unless remediation is explicitly assigned.
 - Require atomic commits so parallel work history remains traceable.
 

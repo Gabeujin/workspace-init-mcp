@@ -173,7 +173,7 @@ export const DASHBOARD_KPI_DEFINITIONS: DashboardKpiDefinition[] = [
   {
     id: "ax-dx-adoption",
     label: "DX / AX Operating Readiness",
-    target: "Operators can trace goals, progress, KPIs, issues, and decisions without chat history",
+    target: "Stakeholders and AI Agents can trace the project world model, briefs, evidence, KPIs, issues, and decisions without chat history",
     defaultValue: "foundation-present",
     defaultStatus: "ok",
     defaultInterpretation:

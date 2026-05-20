@@ -11,7 +11,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type ProjectType, PROJECT_TYPE_CONFIGS } from "../types.js";
+import { type ProjectType, PROJECT_TYPE_CONFIGS, type TargetIDE } from "../types.js";
+import { resolveWorkspaceTargetIDEs } from "./agent-skills-install.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,6 +29,7 @@ export interface WorkspaceAnalysis {
     hasDockerfile: boolean;
     hasMonorepoMarkers: boolean;
     existingDocs: string[];
+    aiAgentPlatforms: TargetIDE[];
     fileCount: number;
     topLevelDirs: string[];
   };
@@ -36,6 +38,7 @@ export interface WorkspaceAnalysis {
     projectType: ProjectType;
     techStack: string[];
     isMultiRepo: boolean;
+    targetIDEs: TargetIDE[];
   };
   /** Human-readable analysis */
   summary: string;
@@ -214,6 +217,7 @@ export function analyzeWorkspace(workspacePath: string): WorkspaceAnalysis {
 
   const techStack = Array.from(detectedTech);
   const isMultiRepo = hasMonorepoMarkers || hasWorkspacePackages;
+  const aiAgentPlatforms = resolveWorkspaceTargetIDEs(workspacePath);
 
   const summary = buildAnalysisSummary({
     workspacePath,
@@ -222,6 +226,7 @@ export function analyzeWorkspace(workspacePath: string): WorkspaceAnalysis {
     hasGit,
     isMultiRepo,
     existingDocs,
+    aiAgentPlatforms,
     fileCount,
     topLevelDirs,
   });
@@ -236,6 +241,7 @@ export function analyzeWorkspace(workspacePath: string): WorkspaceAnalysis {
       hasDockerfile: topLevelFiles.includes("Dockerfile"),
       hasMonorepoMarkers: hasMonorepoMarkers || hasWorkspacePackages,
       existingDocs,
+      aiAgentPlatforms,
       fileCount,
       topLevelDirs,
     },
@@ -243,6 +249,7 @@ export function analyzeWorkspace(workspacePath: string): WorkspaceAnalysis {
       projectType: projectType ?? "other",
       techStack,
       isMultiRepo,
+      targetIDEs: aiAgentPlatforms,
     },
     summary,
   };
@@ -297,6 +304,7 @@ function buildAnalysisSummary(opts: {
   hasGit: boolean;
   isMultiRepo: boolean;
   existingDocs: string[];
+  aiAgentPlatforms: TargetIDE[];
   fileCount: number;
   topLevelDirs: string[];
 }): string {
@@ -319,8 +327,11 @@ ${opts.isMultiRepo ? "📦 멀티 레포지토리 구조 감지됨" : "📦 단�
 
 📄 기존 문서: ${opts.existingDocs.length > 0 ? "\n" + opts.existingDocs.map((d) => `  - ${d}`).join("\n") : "없음"}
 
+🤖 감지된 AI Agent 플랫폼: ${opts.aiAgentPlatforms.join(", ") || "vscode"}
+
 💡 추천 설정:
   projectType: "${opts.projectType ?? "other"}"
   techStack: [${opts.techStack.map((t) => `"${t}"`).join(", ")}]
-  isMultiRepo: ${opts.isMultiRepo}`;
+  isMultiRepo: ${opts.isMultiRepo}
+  targetIDEs: [${opts.aiAgentPlatforms.map((platform) => `"${platform}"`).join(", ")}]`;
 }

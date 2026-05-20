@@ -8,6 +8,10 @@ import {
   type GeneratedFile,
   PROJECT_TYPE_CONFIGS,
 } from "../types.js";
+import {
+  HARNESS_INSTRUCTION_BLOCK_END,
+  HARNESS_INSTRUCTION_BLOCK_START,
+} from "./agent-platform-instructions.js";
 
 export function generateCopilotInstructions(
   params: WorkspaceInitParams
@@ -20,7 +24,8 @@ export function generateCopilotInstructions(
     ? params.techStack
     : config.defaultTechStack;
 
-  const content = `# Workspace Copilot Instructions
+  const content = `${HARNESS_INSTRUCTION_BLOCK_START}
+# Workspace Copilot Instructions
 
 These instructions apply across the entire workspace unless a more specific local instruction file overrides them.
 
@@ -44,14 +49,32 @@ ${renderAdditionalContext(params)}
 - Do not start coding until the goal is explicit, review-backed, and frozen.
 - If work is too large for one safe session, split it into resumable chunks before coding.
 - Every chunk must end with updated review, verification, and handover state.
-- Keep the admin dashboard JSON current so non-developers can see progress, KPIs, issues, and git visibility.
+- Keep the admin dashboard JSON current for server health, and use the live artifacts dashboard for harness work status, artifacts, user confirmation, and real-world action tracking.
+
+## Harness World Model Dashboard
+
+- Treat \`docs/ai-harness/dashboard/\` as the shared project world model for stakeholders and AI Agents.
+- Before meaningful work, read \`docs/ai-harness/dashboard/state/dashboard-index.json\` or call \`get_harness_dashboard_context\` so the Agent is oriented to the same dashboard state the user sees.
+- Improve \`governanceActionabilityScore.score\` gradually by clarifying goals, owners, active work, decisions, tab responsibilities, and resumable Agent contracts.
+- Improve \`governanceActionabilityScore.operationalEvidenceScore\` gradually by linking real VCS, CI, release, service-health, incident, SLO/SLI, database, telemetry, and runbook evidence.
+- Never improve a score by hiding warnings, deleting missing evidence, or treating declared/tacit context as observed fact.
+- Use \`worldModelImprovementContract\` as the standing contract for maturity loops, tacit-context intake, score improvement, tab ownership, and non-duplication.
+- Use \`agentPlatformGovernance\` to confirm the real active AI platforms; record user-declared platforms with \`dashboard-ops.mjs record-agent-platforms\` and treat non-active platform files as \`unused-instruction\`.
+- If repository artifacts do not explain stakeholder intent, operational constraints, domain vocabulary, release windows, external account state, or support expectations, ask for that tacit context and record it as declared context with owner, timestamp, confidence, and reversal condition.
+- Keep dashboard tabs non-duplicative: Overview summarizes, Work sequences, Evidence proves, Governance decides, Operations runs, and Tech Stack explains project composition.
+- When the user asks about a dashboard tab, task, score, blocker, claim, or decision, answer with the relevant tab, item id or label, evidence path, score impact, and safest next action.
 
 ## Parallel Agent Work
 
-- The orchestrator agent analyzes the backlog, maps dependencies, and separates parallel-ready chunks from sequential or blocked work.
+- The main agent acts as the hub: it analyzes the backlog, maps dependencies, separates parallel-ready chunks from sequential or blocked work, assigns subagents, reviews their receipts, and decides whether another improvement pass is required.
 - Run workers in parallel only when their write scopes, DB/schema impacts, API contracts, and runtime side effects do not conflict.
-- Inject each worker with only task-relevant context: approved contract, relevant code snippets, schemas, API specs, logs, verification commands, and expected write paths.
+- Include every file a worker may write in \`expectedWritePaths\`, including shared manifests, lockfiles, schemas, API contracts, CI workflows, generated files, and project config.
+- Capture \`expectedReadPaths\`, \`assignedWorker\`, \`dependencyMap\`, \`mergeOwner\`, \`integrationOwner\`, \`parallelSafetyStatus\`, and \`evaluationThreshold\` in the harness session or work packet when work is delegated.
+- Run \`audit_harness_parallel_chunk_conflicts\` before launching parallel workers. Hard conflicts must be split or made sequential; warnings on integration-sensitive surfaces require one merge owner or an explicit integration contract.
+- Inject each worker with only task-relevant context: approved contract, relevant code snippets, schemas, API specs, logs, verification commands, expected write paths, and merge owner when integration is required.
 - Workers must not widen scope or coordinate through hidden chat state; integration returns through contracts, evaluations, receipts, dashboard updates, and atomic commits.
+- If a worker discovers it must touch an undeclared path, it must stop and update the chunk contract before editing.
+- The hub repeats work -> evaluate -> improve until the chunk contract is satisfied, critical findings are resolved, and world model memory is updated with lessons, decisions, and next safest action.
 
 ## Delivery Workflow
 
@@ -161,7 +184,7 @@ ${isMulti ? "|-- <project-a>/\n|-- <project-b>/\n" : "|-- src/\n"}\`-- ${params.
 1. Read the latest governance artifacts before acting.
 2. Continue unfinished work only if the current goal and handover state are still clear.
 3. Open or refresh the active work log for new meaningful work.
-4. Refresh the dashboard state before starting if progress, KPI, or git data is stale.
+4. Read \`docs/ai-harness/dashboard/state/dashboard-index.json\` or call \`get_harness_dashboard_context\` before starting if dashboard context may be stale.
 
 ### During Work
 
@@ -169,13 +192,13 @@ ${isMulti ? "|-- <project-a>/\n|-- <project-b>/\n" : "|-- src/\n"}\`-- ${params.
 2. Update documents as soon as decisions or scope change.
 3. Run narrow verification early and often.
 4. Escalate when cross-domain or high-risk decisions appear.
-5. Update dashboard state when progress, blockers, KPIs, or git visibility changes.
+5. Update dashboard projections when service telemetry, VCS evidence, decisions, blockers, or harness work state changes.
 
 ### Session End
 
 1. Refresh review, verification, and handover artifacts.
 2. Record residual risks and the exact next step.
-3. Refresh dashboard progress, issue, KPI, and git status snapshots.
+3. Refresh dashboard projections, issue/task queues, KPI/readiness signals, and Git/SVN visibility snapshots.
 4. Do not mark the work complete until governance and verification agree.
 
 ## Language and Encoding
@@ -195,6 +218,7 @@ ${isMulti ? "|-- <project-a>/\n|-- <project-b>/\n" : "|-- src/\n"}\`-- ${params.
 - For parallel work, assign independent chunks through an orchestrator and inject only the context each worker needs.
 - Require self-correction, independent evaluation, and atomic commits before closure.
 - Do not treat a task as complete until documentation, verification, and handover all agree on the final state.
+${HARNESS_INSTRUCTION_BLOCK_END}
 `;
 
   return {

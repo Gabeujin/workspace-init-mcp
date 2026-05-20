@@ -12,6 +12,7 @@ import {
 } from "../types.js";
 import {
   generateAgentSkills,
+  generateAgentPlatformInstructionFiles,
   generateCodeGenInstructions,
   generateCommitInstructions,
   generateCopilotInstructions,
@@ -20,8 +21,8 @@ import {
   generateDocsStructure,
   generateEditorConfig,
   generateGitAttributes,
+  generateHarnessCoreAgentSkills,
   generateHarnessFiles,
-  generateLiveArtifactsDashboardFiles,
   generateReadinessFiles,
   generateRuntimeOrchestratorFiles,
   generateInitialChangelog,
@@ -43,6 +44,7 @@ export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
 
   // 1. Copilot/global instructions
   files.push(generateCopilotInstructions(params));
+  files.push(...generateAgentPlatformInstructionFiles(params));
 
   // 2. VS Code settings and custom instruction files
   files.push(generateSettings(params));
@@ -66,6 +68,8 @@ export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
         userIntent: params.agentSkillsIntent,
       })
     );
+  } else if (params.includeHarnessEngineering !== false) {
+    files.push(...generateHarnessCoreAgentSkills(params));
   }
 
   // 6. AI harness engineering artifacts
@@ -74,7 +78,6 @@ export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
   files.push(...generateReadinessFiles(params));
   files.push(...generateDashboardFiles(params));
   files.push(...generateDashboardOperationFiles(params));
-  files.push(...generateLiveArtifactsDashboardFiles(params));
 
   // 7. Initial changelog and work log
   const relativePaths = files.map((file) => file.relativePath);
@@ -113,30 +116,32 @@ export function buildSummary(
     params.includeHarnessEngineering === false
       ? [
           "  1. Review .github/copilot-instructions.md and the generated editor instruction files.",
-          "  2. Start from .github/AGENT-SKILLS.md, AGENT-SKILLS-BY-ROLE.md, and AGENT-SKILLS-BY-DOMAIN.md to trim or extend the catalog.",
-          "  3. Review docs/work-logs and docs/changelog for the initialization record.",
-          "  4. If this is a legacy project, keep workspace-init-mcp as a non-destructive documentation and IDE overlay unless you explicitly enable the full AI harness later.",
-          "  5. Re-run initialization with includeHarnessEngineering: true when you want dashboard, runtime, readiness, reconcile, and governed parallel-agent workflows.",
+          "  2. Review AGENTS.md and any detected platform overlays such as CLAUDE.md, .cursor/rules/, or .agents/plugins/ so every AI agent starts from the same harness contract.",
+          "  3. Start from .github/AGENT-SKILLS.md, AGENT-SKILLS-BY-ROLE.md, and AGENT-SKILLS-BY-DOMAIN.md to trim or extend the catalog.",
+          "  4. Review docs/work-logs and docs/changelog for the initialization record.",
+          "  5. If this is a legacy project, keep workspace-init-mcp as a non-destructive documentation and IDE overlay unless you explicitly enable the full AI harness later.",
+          "  6. Re-run initialization with includeHarnessEngineering: true when you want dashboard, runtime, readiness, reconcile, and governed parallel-agent workflows.",
         ]
       : [
-          "  1. Review .github/copilot-instructions.md and the AI harness files.",
-          "  2. Review .github/ai-harness/context-strategy.md and evaluation-rubrics.md before long-running work begins, especially the context-injection and post-work maturity gate rules.",
+          "  1. Review .github/copilot-instructions.md, AGENTS.md, and detected platform overlays so Copilot, Codex, Claude Code, Cursor, Antigravity, and other agents share the same harness contract.",
+          "  2. Review .github/ai-harness/context-strategy.md and evaluation-rubrics.md before long-running work begins, especially context injection, hub review, parallel chunking, and post-work maturity gate rules.",
           "  3. Review .github/ai-harness/managed-file-inventory.json and .github/ai-harness/reconcile-policy.json so future reconcile runs can distinguish managed baseline files from user customization and apply the right hold/merge/replace policy.",
           "  4. Start from .github/AGENT-SKILLS.md, AGENT-SKILLS-BY-ROLE.md, and AGENT-SKILLS-BY-DOMAIN.md to trim or extend the catalog.",
-          "  5. Open docs/ai-harness/dashboard/index.html and replace the template JSON state with real project signals.",
-          "  6. Use docs/contracts/ and docs/evaluations/ to record chunk contracts and independent evaluator evidence.",
-          "  7. Use docs/ai-harness/dashboard/templates/*.state.json when you need a domain-specific starting point.",
-          "  8. Run node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh to auto-sync artifacts and git state.",
-          "  9. Run node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs export-static --out docs/ai-harness/dashboard/exports/latest when stakeholders need a portable snapshot.",
-          "  10. Use start_harness_session, advance_harness_session, and get_harness_session_status to run real planner/generator/evaluator sessions.",
-          "  11. Review docs/ai-harness/readiness/remaining-work-spec.md and score the workspace against the readiness model.",
-          "  12. Run the semantic readiness audit when you need a stricter operator view of placeholder pressure, evidence freshness, and dashboard truthfulness.",
-          "  13. Run audit_workspace_upgrade_risk before major reconcile operations or legacy adoption.",
-          "  14. For legacy projects, treat workspace-init-mcp as a non-destructive harness overlay: do not delete or replace existing application source while adopting the governance artifacts.",
-          "  15. For parallel delivery, have an orchestrator split independent chunks, inject only task-relevant context into each worker, and reconcile worker outputs through contracts, evaluations, and atomic commits.",
-          "  16. Tailor skill selection, dashboard KPIs, runtime adapters, and operating rules to your real workflows.",
-          "  17. Use runtime archive compaction when closed sessions accumulate and the active ledgers need to stay lightweight.",
-          "  18. Keep docs/work-logs, docs/reviews, docs/contracts, docs/evaluations, docs/handovers, runtime session files, readiness scorecards, semantic audits, and dashboard state current as work evolves.",
+          "  5. Open docs/ai-harness/dashboard/index.html to inspect the single-file Project World Model snapshot.",
+          "  6. Confirm active AI agent platforms in the Governance tab, then run node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs record-agent-platforms --platforms <platforms> --source user-declaration when detection is uncertain.",
+          "  7. Use docs/contracts/ and docs/evaluations/ to record chunk contracts and independent evaluator evidence.",
+          "  8. Use docs/ai-harness/dashboard/templates/*.state.json when you need a domain-specific starting point.",
+          "  9. Run node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs ensure-listening to restore the read-only local dashboard listener on an available port.",
+          "  10. Run node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh to rebuild projections from ledger-backed state and collect Git/SVN evidence.",
+          "  11. Use start_harness_session, advance_harness_session, and get_harness_session_status to run real planner/generator/evaluator sessions.",
+          "  12. Review docs/ai-harness/readiness/remaining-work-spec.md and score the workspace against the readiness model.",
+          "  13. Run the semantic readiness audit when you need a stricter operator view of placeholder pressure, evidence freshness, and dashboard truthfulness.",
+          "  14. Run audit_workspace_upgrade_risk before major reconcile operations or legacy adoption.",
+          "  15. For legacy projects, treat workspace-init-mcp as a non-destructive harness overlay: do not delete or replace existing application source while adopting the governance artifacts.",
+          "  16. For parallel delivery, have the main agent act as hub: split independent chunks, assign suitable subagents, inject only task-relevant context, audit expectedWritePaths, review worker receipts, and repeat work-evaluate-improve until the exit criteria are satisfied.",
+          "  17. Tailor skill selection, dashboard KPIs, runtime adapters, and operating rules to your real workflows.",
+          "  18. Use runtime archive compaction when closed sessions accumulate and the active ledgers need to stay lightweight.",
+          "  19. Keep docs/work-logs, docs/reviews, docs/contracts, docs/evaluations, docs/handovers, runtime session files, readiness scorecards, semantic audits, and dashboard state current as work evolves.",
         ];
 
   const summary = [
@@ -153,7 +158,7 @@ export function buildSummary(
     `  - Documentation language: ${params.docLanguage ?? "Korean"}`,
     `  - Code comment language: ${params.codeCommentLanguage ?? "English"}`,
     `  - File encoding: ${params.fileEncoding ?? "utf-8"}`,
-    `  - Target IDEs: ${(params.targetIDEs ?? ["vscode"]).join(", ")}`,
+    `  - Target AI platforms: ${(params.targetIDEs ?? ["vscode"]).join(", ")}`,
     `  - Line endings: ${params.lineEnding ?? "lf"}`,
     `  - Harness engineering: ${harnessStatus}`,
     `  - Governance profile: ${params.governanceProfile ?? "strict"}`,

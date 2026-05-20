@@ -14,7 +14,7 @@ import {
 
 export const MANAGED_FILE_INVENTORY_PATH = ".github/ai-harness/managed-file-inventory.json";
 export const MANAGED_INVENTORY_SCHEMA_VERSION = "1.0.0";
-const TOOL_VERSION = "4.3.0";
+const TOOL_VERSION = "4.6.0";
 
 export const MANAGED_JSON_MERGE_PATHS = new Set([
   "docs/ai-harness/dashboard/state/dashboard-state.json",
@@ -26,6 +26,14 @@ export const MANAGED_JSON_MERGE_PATHS = new Set([
   "docs/ai-harness/runtime/archive/archive-index.json",
 ]);
 
+export const MANAGED_TEXT_MERGE_PATHS = new Set([
+  ".github/copilot-instructions.md",
+  "AGENTS.md",
+  "CLAUDE.md",
+  ".cursor/rules/harness-world-model.mdc",
+  ".agents/plugins/workspace-init-harness/rules/harness-world-model.md",
+]);
+
 const LEGACY_RESOURCE_ROOTS = [
   ".cursor/skills",
   ".claude/skills",
@@ -33,6 +41,8 @@ const LEGACY_RESOURCE_ROOTS = [
   ".cursor/agents",
   ".claude/agents",
   ".agents/agents",
+  ".cursor/rules",
+  ".agents/plugins",
 ];
 
 export interface ManagedFileInventoryEntry {
@@ -150,11 +160,13 @@ function classifyManagedPath(relativePath: string): string {
     return "canonical-catalog";
   }
   if (
+    relativePath === "AGENTS.md" ||
+    relativePath === "CLAUDE.md" ||
     relativePath.startsWith(".cursor/") ||
     relativePath.startsWith(".claude/") ||
     relativePath.startsWith(".agents/")
   ) {
-    return "ide-mirror";
+    return "agent-platform";
   }
   if (relativePath.startsWith(".vscode/")) {
     return "ide-config";
@@ -563,7 +575,7 @@ function buildReconcilePreflightHtml(result: {
         )}</span></p>
       </div>
       <div class="header-meta">
-        <span class="chip">JSON-first</span>
+        <span class="chip">Ledger-first</span>
         <span class="chip">HTML export</span>
         <span class="chip">Pre-apply gate</span>
       </div>
@@ -679,7 +691,10 @@ export function buildManagedFileInventoryFile(files: GeneratedFile[]): Generated
       path: file.relativePath,
       contentSha256: computeContentSha256(file.content),
       bytes: Buffer.byteLength(file.content, "utf-8"),
-      strategy: (MANAGED_JSON_MERGE_PATHS.has(file.relativePath) ? "merge" : "replace") as
+      strategy: (MANAGED_JSON_MERGE_PATHS.has(file.relativePath) ||
+      MANAGED_TEXT_MERGE_PATHS.has(file.relativePath)
+        ? "merge"
+        : "replace") as
         | "merge"
         | "replace",
       category: classifyManagedPath(file.relativePath),

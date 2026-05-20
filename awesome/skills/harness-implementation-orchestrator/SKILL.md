@@ -19,7 +19,7 @@ Use this skill for multi-file, high-risk, or long-running implementation work th
 5. Keep each chunk limited to one verifiable outcome.
 6. Add or update tests for behavior that changes.
 7. Treat legacy adoption as a non-destructive harness overlay; do not delete or replace existing application source during setup.
-8. For parallel work, classify dependencies and assign only independent chunks to workers.
+8. For parallel work, the main agent is the hub: classify dependencies, assign only independent chunks to workers, review receipts, and accept integration only after evidence is sufficient.
 
 ## Recommended Delegation Roles
 
@@ -38,16 +38,20 @@ Split the work when any of these are true:
 - the blast radius is unclear
 - test scope is larger than one focused verification pass
 - a session interruption would lose hidden context
-- independent chunks can run in parallel without shared write paths, DB/schema changes, API contract conflicts, or runtime side effects
+- independent chunks can run in parallel without shared write paths, DB/schema changes, API contract conflicts, runtime side effects, or integration-sensitive shared files
+- dependency manifests, lockfiles, CI workflows, shared config, generated clients, DB migrations, and API contracts require one merge owner or sequential execution even when text paths do not overlap
 
 ## Parallel Execution
 
 1. Build a dependency map for the backlog.
 2. Mark chunks as blocked, sequential, or parallel-ready.
 3. Assign one worker per independent chunk.
-4. Define expected write paths and merge owner.
-5. Inject only relevant code snippets, DB schema fragments, API specs, logs, commands, and verification instructions.
-6. Integrate through evaluator evidence, receipts, dashboard updates, and atomic commits.
+4. Define expected read paths, expected write paths, assigned worker, dependency map, merge owner, integration owner, parallel safety status, and evaluation threshold.
+5. Run `audit_harness_parallel_chunk_conflicts`; resolve hard conflicts and treat integration warnings as requiring sequentialization or a named merge owner.
+6. Inject only relevant code snippets, DB schema fragments, API specs, logs, commands, and verification instructions.
+7. Require worker receipts with changed paths, verification evidence, residual risk, confidence, and undeclared path requests.
+8. Integrate through evaluator evidence, receipts, dashboard updates, and atomic commits.
+9. Repeat work -> evaluate -> improve until the hub can explain why the chunk is accepted or blocked.
 
 ## Per-Chunk Workflow
 
@@ -57,4 +61,5 @@ Split the work when any of these are true:
 4. Run targeted verification and update or add tests.
 5. Run independent evaluation or code review and remediate findings immediately.
 6. Run the maturity gate: static analysis, boundary testing, environment compatibility, dependency audit, maintainability review, self-correction, and atomic commit traceability.
-7. Refresh handover and governance state before closing the chunk.
+7. Update world model memory with lessons, decisions, tacit context, evidence links, and next safest action.
+8. Refresh handover and governance state before closing the chunk.

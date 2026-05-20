@@ -386,9 +386,9 @@ export const AGENT_REGISTRY: AgentEntry[] = [
   {
     id: "harness-dashboard-operator",
     name: "Harness Dashboard Operator",
-    description: "Maintains the administrator dashboard, JSON state snapshots, KPI cards, issue visibility, and git traceability for AI work",
+    description: "Maintains and matures the Harness Dashboard 4.6 Hypertext Project World Model, ledger projections, governance/evidence scores, briefs, VCS evidence, and read-only local listener",
     categories: ["documentation", "meta", "platform"],
-    tags: ["dashboard", "kpi", "progress", "git", "state", "operators", "ax", "dx", "json"],
+    tags: ["dashboard", "project-world-model", "ledger", "governance-score", "operational-evidence", "stakeholder-brief", "agent-resume", "vcs", "sse", "json"],
     relevantProjectTypes: ["*"],
     techKeywords: ["JSON", "Git"],
     priority: 1,
@@ -665,9 +665,9 @@ export const AGENT_REGISTRY: AgentEntry[] = [
   {
     id: "harness-orchestrator",
     name: "Harness Orchestrator",
-    description: "Analyzes the full backlog, maps dependencies, splits independent chunks, assigns worker agents, and defines minimal context packets for parallel execution",
+    description: "Acts as the hub for backlog analysis, dependency mapping, parallel chunking, worker assignment, receipt review, merge ownership, and minimal context packets",
     categories: ["meta", "planning"],
-    tags: ["orchestrator", "workflow", "multi-agent", "parallel", "chunking", "context-injection", "dependencies", "harness"],
+    tags: ["orchestrator", "hub", "workflow", "multi-agent", "parallel", "chunking", "context-injection", "dependencies", "harness"],
     relevantProjectTypes: ["*"],
     techKeywords: ["AI", "LLM"],
     priority: 1,
@@ -1170,9 +1170,9 @@ export const SKILL_REGISTRY: SkillEntry[] = [
   {
     id: "harness-dashboard-state-manager",
     name: "Harness Dashboard State Manager",
-    description: "Maintains JSON-based dashboard state for progress, KPIs, issues, governed sessions, contract coverage, and git visibility without using a database",
+    description: "Maintains HTML-backed Harness Dashboard 4.6 world-model projections, maturity contracts, briefs, dictionary, VCS records, and listener state without using a database",
     categories: ["analysis", "document-gen", "governance"],
-    tags: ["dashboard", "json", "progress-state", "kpi", "issues", "git", "operator-view", "ax", "dx", "contracts", "governed-sessions"],
+    tags: ["dashboard", "json", "project-world-model", "maturity-loop", "governance-score", "operational-evidence", "agent-resume", "stakeholder-brief", "ontology", "vcs", "operator-view", "ax", "dx"],
     relevantProjectTypes: ["*"],
     techKeywords: ["JSON", "Git"],
     hasResources: false,
@@ -1258,9 +1258,9 @@ export const SKILL_REGISTRY: SkillEntry[] = [
   {
     id: "harness-implementation-orchestrator",
     name: "Harness Implementation Orchestrator",
-    description: "Coordinates three planning and review cycles, contract-first chunking, and planner-generator-evaluator handoffs before implementation begins",
+    description: "Coordinates three planning and review cycles, contract-first chunking, hub-led subagent delegation, work-evaluate-improve loops, and planner-generator-evaluator handoffs before implementation begins",
     categories: ["analysis", "prompt", "project-setup"],
-    tags: ["orchestration", "planning", "chunking", "harness", "execution", "contracts", "planner", "generator", "evaluator", "context-reset"],
+    tags: ["orchestration", "hub", "planning", "chunking", "harness", "execution", "contracts", "planner", "generator", "evaluator", "context-reset"],
     relevantProjectTypes: ["*"],
     techKeywords: ["AI", "LLM"],
     hasResources: true,
@@ -1701,7 +1701,7 @@ ${skillList || "  - none"}
 
 Install selected items with \`install_agent_skills\` to generate a canonical
 registry under \`.github/skills/\` and \`.github/agents/\`, plus mirrors for
-any selected target IDEs.
+any selected target platforms.
 `.trim();
 
   return { agents: scoredAgents, skills: scoredSkills, summary };

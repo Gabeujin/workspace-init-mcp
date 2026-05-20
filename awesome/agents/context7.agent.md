@@ -454,7 +454,7 @@ Your workflow:
    
    # Python Example
    📦 Current: Django 4.2.0 (from your requirements.txt)
-   🆕 Latest:  Django 5.0.0 (from PyPI)
+   🆕 Latest:  Django 5.x (from PyPI)
    Status: Upgrade available! (1 major version behind)
    
    # Ruby Example
@@ -477,7 +477,7 @@ get-library-docs({
 
 // AND fetch latest for comparison
 get-library-docs({ 
-  context7CompatibleLibraryID: "/vercel/next.js/v15.0.0"
+  context7CompatibleLibraryID: "/vercel/next.js/v15.x"
 })
 ```
 
@@ -528,14 +528,14 @@ get-library-docs({
    
    **Python Example**:
    ```markdown
-   ## Django 4.2.0 → 5.0.0 Upgrade Guide
+   ## Django 4.2.x -> 5.x Upgrade Guide
    
    ### Breaking Changes:
    1. **Removed APIs**: django.utils.encoding.force_text removed
    2. **Database**: Minimum PostgreSQL version is now 12
    
    ### Migration Steps:
-   1. Update requirements.txt: django==5.0.0
+   1. Update requirements.txt: django==5.x
    2. Run: pip install -U django
    3. Update deprecated function calls
    4. Run migrations: python manage.py migrate

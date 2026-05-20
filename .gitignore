@@ -3,6 +3,8 @@ dist/
 *.tgz
 .env
 docs/
+tmp-*/
+.playwright-mcp/
 
 # Local AI code review artifacts
 docs/agent-code-review/

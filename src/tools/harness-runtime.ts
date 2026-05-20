@@ -10,7 +10,7 @@ import {
   normalizeWorkspaceRelativePath,
 } from "./generated-file-safety.js";
 
-type HarnessActorRole = "planner" | "generator" | "evaluator" | "operator";
+type HarnessActorRole = "hub" | "planner" | "generator" | "evaluator" | "operator";
 type HarnessAction =
   | "complete"
   | "request_changes"
@@ -57,7 +57,7 @@ export const HARNESS_RUNTIME_ADAPTER_IDS = [
 type HarnessRuntimeAdapterId = (typeof HARNESS_RUNTIME_ADAPTER_IDS)[number];
 const NATIVE_EXECUTOR_OVERRIDES_PATH =
   ".github/ai-harness/native-executor-overrides.json";
-const HARNESS_RUNTIME_VERSION = "4.3.0";
+const HARNESS_RUNTIME_VERSION = "4.6.0";
 const HARNESS_VERSION_INDEX_PATH = "docs/ai-harness/runtime/version-index.json";
 const HARNESS_COMPATIBILITY_MATRIX_PATH =
   "docs/ai-harness/runtime/compatibility-matrix.json";
@@ -214,8 +214,30 @@ interface HarnessRuntimeSessionState {
     outputs: string[];
     dependencyNotes?: string | null;
     contextInjectionNotes?: string | null;
+    expectedReadPaths?: string[];
     expectedWritePaths?: string[];
     verificationCommands?: string[];
+    assignedWorker?: string | null;
+    dependencyMap?: string[];
+    mergeOwner?: string | null;
+    integrationOwner?: string | null;
+    parallelSafetyStatus?:
+      | "unclassified"
+      | "blocked"
+      | "sequential"
+      | "parallel-ready"
+      | "needs-merge-owner";
+    evaluationLoop?: {
+      iteration: number;
+      threshold: string;
+      status: "not-started" | "running" | "passed" | "blocked";
+      history: Array<{
+        at: string;
+        actor: HarnessActorRole;
+        verdict: string;
+        improvementAction: string;
+      }>;
+    };
   };
   phases: HarnessPhaseRecord[];
   events: HarnessRuntimeEvent[];
@@ -261,8 +283,20 @@ export interface StartHarnessSessionParams {
   chunkTitle?: string;
   dependencyNotes?: string;
   contextInjectionNotes?: string;
+  expectedReadPaths?: string[];
   expectedWritePaths?: string[];
   verificationCommands?: string[];
+  assignedWorker?: string;
+  dependencyMap?: string[];
+  mergeOwner?: string;
+  integrationOwner?: string;
+  parallelSafetyStatus?:
+    | "unclassified"
+    | "blocked"
+    | "sequential"
+    | "parallel-ready"
+    | "needs-merge-owner";
+  evaluationThreshold?: string;
   adoptionTrack?: AdoptionTrack;
   contextPolicy?: ContextPolicy;
   queueIfBusy?: boolean;
@@ -306,7 +340,11 @@ export interface AuditHarnessParallelChunkConflictsResult {
     chunkId: string;
     status: string;
     expectedWritePaths: string[];
+    expectedReadPaths: string[];
     dependencyNotes: string;
+    parallelSafetyStatus: string;
+    mergeOwner: string | null;
+    integrationOwner: string | null;
   }>;
   conflicts: Array<{
     leftSessionId: string;
@@ -2400,6 +2438,77 @@ function pathScopesOverlap(leftPath: string, rightPath: string): boolean {
   return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
 }
 
+function integrationSensitiveSurfaceForPath(workspaceRelativePath: string): string | null {
+  const normalized = normalizeWorkspaceRelativePath(workspaceRelativePath).toLowerCase();
+  const basename = normalized.split("/").pop() ?? normalized;
+
+  if (
+    [
+      "package.json",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+      "bun.lock",
+      "bun.lockb",
+      "requirements.txt",
+      "poetry.lock",
+      "pyproject.toml",
+      "cargo.toml",
+      "cargo.lock",
+      "go.mod",
+      "go.sum",
+    ].includes(basename)
+  ) {
+    return "dependency manifest or lockfile";
+  }
+
+  if (
+    normalized.startsWith(".github/workflows/") ||
+    normalized.startsWith(".gitlab-ci") ||
+    normalized === "azure-pipelines.yml" ||
+    normalized === "bitbucket-pipelines.yml"
+  ) {
+    return "CI/CD workflow";
+  }
+
+  if (
+    normalized.startsWith("migrations/") ||
+    normalized.includes("/migrations/") ||
+    normalized.startsWith("supabase/") ||
+    normalized.startsWith("prisma/") ||
+    normalized.includes("schema.sql") ||
+    normalized.endsWith(".prisma")
+  ) {
+    return "database schema or migration";
+  }
+
+  if (
+    normalized.includes("openapi") ||
+    normalized.includes("swagger") ||
+    normalized.endsWith(".proto") ||
+    normalized.includes("/api/") ||
+    normalized.includes("/contracts/")
+  ) {
+    return "API contract";
+  }
+
+  if (
+    basename.startsWith("tsconfig") ||
+    basename.startsWith("vite.config") ||
+    basename.startsWith("webpack.config") ||
+    basename.startsWith("rollup.config") ||
+    basename.startsWith("next.config") ||
+    basename.startsWith("eslint.config") ||
+    basename === ".eslintrc" ||
+    basename === ".prettierrc" ||
+    normalized.startsWith(".vscode/")
+  ) {
+    return "shared project configuration";
+  }
+
+  return null;
+}
+
 export function auditHarnessParallelChunkConflicts(
   workspacePath: string
 ): AuditHarnessParallelChunkConflictsResult {
@@ -2430,7 +2539,21 @@ export function auditHarnessParallelChunkConflicts(
         chunkId: session?.chunk.id ?? entry.chunkId,
         status: entry.status,
         expectedWritePaths,
+        expectedReadPaths: Array.isArray(session?.chunk.expectedReadPaths)
+          ? session.chunk.expectedReadPaths.map((item) => String(item))
+          : [],
         dependencyNotes: String(session?.chunk.dependencyNotes ?? ""),
+        parallelSafetyStatus: String(
+          session?.chunk.parallelSafetyStatus ?? "unclassified"
+        ),
+        mergeOwner:
+          typeof session?.chunk.mergeOwner === "string"
+            ? session.chunk.mergeOwner
+            : null,
+        integrationOwner:
+          typeof session?.chunk.integrationOwner === "string"
+            ? session.chunk.integrationOwner
+            : null,
       };
     });
   const conflicts: AuditHarnessParallelChunkConflictsResult["conflicts"] = [];
@@ -2438,11 +2561,56 @@ export function auditHarnessParallelChunkConflicts(
 
   for (const session of sessions) {
     if (
-      /parallel-ready/i.test(session.dependencyNotes) &&
+      (session.parallelSafetyStatus === "parallel-ready" ||
+        /parallel-ready/i.test(session.dependencyNotes)) &&
       session.expectedWritePaths.length === 0
     ) {
       warnings.push(
         `Session "${session.sessionId}" is marked parallel-ready but has no expectedWritePaths.`
+      );
+    }
+  }
+
+  const integrationSurfaceOwners = new Map<
+    string,
+    Array<{ sessionId: string; chunkId: string; path: string }>
+  >();
+
+  for (const session of sessions) {
+    for (const writePath of session.expectedWritePaths) {
+      const surface = integrationSensitiveSurfaceForPath(writePath);
+      if (surface == null) {
+        continue;
+      }
+      const owners = integrationSurfaceOwners.get(surface) ?? [];
+      owners.push({
+        sessionId: session.sessionId,
+        chunkId: session.chunkId,
+        path: writePath,
+      });
+      integrationSurfaceOwners.set(surface, owners);
+
+      if (
+        (session.parallelSafetyStatus === "parallel-ready" ||
+          /parallel-ready/i.test(session.dependencyNotes)) &&
+        session.mergeOwner == null &&
+        session.integrationOwner == null &&
+        !/merge owner|integration owner|sequential/i.test(session.dependencyNotes)
+      ) {
+        warnings.push(
+          `Session "${session.sessionId}" is parallel-ready but writes ${surface} path "${writePath}" without an explicit merge/integration owner.`
+        );
+      }
+    }
+  }
+
+  for (const [surface, owners] of integrationSurfaceOwners.entries()) {
+    const uniqueSessions = new Set(owners.map((owner) => owner.sessionId));
+    if (uniqueSessions.size > 1) {
+      warnings.push(
+        `Multiple open or queued sessions touch ${surface}: ${owners
+          .map((owner) => `${owner.sessionId}/${owner.chunkId}:${owner.path}`)
+          .join(", ")}. Treat these as sequential or assign one merge owner even when paths do not textually overlap.`
       );
     }
   }
@@ -3102,12 +3270,24 @@ function buildRoleBrief(session: HarnessRuntimeSessionState): string {
   ];
 
   switch (session.session.nextActor) {
+    case "hub":
+      return [
+        ...baseLines,
+        "Hub brief:",
+        "- Own decomposition, worker assignment, merge ownership, and final integration judgment.",
+        "- Run conflict audit before parallel work and stop workers that need undeclared write paths.",
+        "- Review worker receipts, evidence, changed paths, and residual risk before accepting output.",
+        "- Repeat work -> evaluate -> improve until the chunk threshold is met or a blocker is recorded.",
+        "- Update dashboard memory, decisions, and next safest action before closeout.",
+      ].join("\n");
     case "planner":
       return [
         ...baseLines,
-        "Planner brief:",
-        "- Act as orchestrator for multi-chunk work: classify dependencies and parallel-safe chunks.",
+        "Planner / hub brief:",
+        "- Act as hub for multi-chunk work: classify dependencies, worker fit, merge ownership, and parallel-safe chunks.",
         "- Prepare minimal context-injection packets for each worker.",
+        "- Require worker receipts and evidence before accepting subagent output.",
+        "- Repeat work -> evaluate -> improve when the evaluator or hub finds gaps.",
         "- Keep the next step bounded, testable, and resumable.",
         "- Preserve the three-plan / three-review ladder before implementation.",
         "- Freeze the goal only when the chunk is explicit enough for contract review.",
@@ -3138,6 +3318,8 @@ function buildRoleBrief(session: HarnessRuntimeSessionState): string {
 
 function rolePromptRelativePath(actor: HarnessActorRole): string {
   switch (actor) {
+    case "hub":
+      return "docs/ai-harness/runtime/prompts/planner-brief.md";
     case "planner":
       return "docs/ai-harness/runtime/prompts/planner-brief.md";
     case "generator":
@@ -3170,6 +3352,7 @@ function buildPhaseReadPaths(session: HarnessRuntimeSessionState): string[] {
     rolePromptRelativePath(session.session.nextActor),
     activePhase?.artifactPath ?? null,
     session.context.lastHandoverPath,
+    ...(session.chunk.expectedReadPaths ?? []),
     "docs/ai-harness/runtime/state/session-index.json",
     "docs/ai-harness/runtime/state/active-session.json",
     HARNESS_VERSION_INDEX_PATH,
@@ -3214,6 +3397,12 @@ function buildWorkPacketMarkdown(packet: Record<string, unknown>): string {
   const verificationCommands = Array.isArray(packet.verificationCommands)
     ? (packet.verificationCommands as string[])
     : [];
+  const dependencyMap = Array.isArray(packet.dependencyMap)
+    ? (packet.dependencyMap as string[])
+    : [];
+  const evaluationLoop = isPlainObject(packet.evaluationLoop)
+    ? packet.evaluationLoop
+    : {};
 
   return `# Work Packet: ${String(packet.sessionId || "unknown")}
 
@@ -3223,6 +3412,9 @@ function buildWorkPacketMarkdown(packet: Record<string, unknown>): string {
 - Current phase: ${String(packet.currentPhase || "awaiting-session-start")}
 - Goal: ${String(packet.goal || "n/a")}
 - Chunk: ${String(packet.chunkId || "n/a")} (${String(packet.chunkTitle || "n/a")})
+- Parallel safety: ${String(packet.parallelSafetyStatus || "unclassified")}
+- Assigned worker: ${String(packet.assignedWorker || "unassigned")}
+- Merge owner: ${String(packet.mergeOwner || "not assigned")}
 
 ## Current Instruction
 
@@ -3242,10 +3434,24 @@ ${expectedWrites.map((item) => `- ${item}`).join("\n") || "- none"}
 
 ## Parallel Execution
 
+- Hub role: ${String(parallelExecution.hubRole || "The main agent owns orchestration and integration.")}
 - Orchestrator required for multi-chunk work: ${String(parallelExecution.orchestratorRequiredForMultiChunkWork ?? "true")}
+- Assigned worker: ${String(parallelExecution.assignedWorker || "unassigned")}
+- Parallel safety status: ${String(parallelExecution.parallelSafetyStatus || "unclassified")}
+- Merge owner: ${String(parallelExecution.mergeOwner || "not assigned")}
+- Integration owner: ${String(parallelExecution.integrationOwner || "not assigned")}
 - Dependency status: ${String(parallelExecution.dependencyStatus || "unclassified")}
+- Dependency map:
+${dependencyMap.map((item) => `  - ${item}`).join("\n") || "  - none"}
 - Safety rule: ${String(parallelExecution.parallelSafetyRule || "n/a")}
 - Merge rule: ${String(parallelExecution.mergeRule || "n/a")}
+- Review loop: ${String(parallelExecution.reviewLoop || "Repeat work -> evaluate -> improve until accepted.")}
+
+## Evaluation Loop
+
+- Iteration: ${String(evaluationLoop.iteration ?? "0")}
+- Status: ${String(evaluationLoop.status || "not-started")}
+- Threshold: ${String(evaluationLoop.threshold || "Contract satisfied and evidence reviewed by the hub.")}
 
 ## Context Injection
 
@@ -3700,7 +3906,15 @@ function writeWorkPacket(
     chunkSummary: session.chunk.summary,
     dependencyNotes: session.chunk.dependencyNotes ?? null,
     contextInjectionNotes: session.chunk.contextInjectionNotes ?? null,
+    expectedReadPaths: session.chunk.expectedReadPaths ?? [],
+    expectedWritePaths: session.chunk.expectedWritePaths ?? [],
     verificationCommands: session.chunk.verificationCommands ?? [],
+    assignedWorker: session.chunk.assignedWorker ?? null,
+    dependencyMap: session.chunk.dependencyMap ?? [],
+    mergeOwner: session.chunk.mergeOwner ?? null,
+    integrationOwner: session.chunk.integrationOwner ?? null,
+    parallelSafetyStatus: session.chunk.parallelSafetyStatus ?? "unclassified",
+    evaluationLoop: session.chunk.evaluationLoop ?? null,
     rolePromptFile: rolePromptRelativePath(session.session.nextActor),
     stateFile: relativeToWorkspace(workspacePath, sessionPath),
     summaryFile: relativeToWorkspace(workspacePath, summaryPath),
@@ -3716,19 +3930,29 @@ function writeWorkPacket(
     requiredReads: buildPhaseReadPaths(session),
     expectedWrites: buildPhaseWritePaths(session),
     parallelExecution: {
+      hubRole:
+        "The main agent is the hub: it decomposes the request, assigns independent chunks, reviews worker receipts, integrates evidence, and decides whether another improvement pass is required.",
       orchestratorRequiredForMultiChunkWork: true,
+      assignedWorker: session.chunk.assignedWorker ?? null,
+      dependencyMap: session.chunk.dependencyMap ?? [],
+      parallelSafetyStatus: session.chunk.parallelSafetyStatus ?? "unclassified",
+      mergeOwner: session.chunk.mergeOwner ?? null,
+      integrationOwner: session.chunk.integrationOwner ?? null,
       dependencyStatus:
         session.chunk.dependencyNotes ??
         "Classify this chunk as blocked, sequential, or parallel-ready before assigning workers.",
       parallelSafetyRule:
-        "Parallel execution is allowed only when expected write paths, runtime side effects, database/schema changes, and API contracts do not conflict.",
+        "Parallel execution is allowed only when expected write paths, runtime side effects, database/schema changes, API contracts, and integration-sensitive shared files do not conflict.",
       mergeRule:
-        "Worker outputs must return through receipts, evaluations, dashboard updates, and atomic commits before integration is complete.",
+        "Worker outputs must return through receipts, evaluations, dashboard updates, and atomic commits. Dependency manifests, lockfiles, CI workflows, shared config, DB migrations, generated clients, and API contracts require one merge owner before integration is complete.",
+      reviewLoop:
+        session.chunk.evaluationLoop?.threshold ??
+        "Repeat work -> evaluate -> improve until exit criteria are met or a blocker is recorded.",
     },
     contextInjection: {
       rule:
         session.chunk.contextInjectionNotes ??
-        "Inject only task-relevant code snippets, DB schema fragments, API specs, logs, commands, and expected write paths.",
+        "Inject only task-relevant code snippets, DB schema fragments, API specs, logs, commands, expected write paths, and merge ownership when integration is required.",
       forbidden:
         "Do not rely on hidden chat state, unrelated repository areas, or another worker's private scratch context.",
       escalation:
@@ -3742,6 +3966,7 @@ function writeWorkPacket(
       "Maintainability review for SOLID, duplication, abstraction level, constants, and layer separation",
       "Generator self-correction with uncertainty report",
       "Atomic commit traceability for the active chunk or remediation",
+      "Merge-owner verification when shared integration surfaces changed",
     ],
     atomicCommitPolicy:
       "Use one logical change per commit and reference the session, chunk, plan, or issue when available.",
@@ -4189,6 +4414,191 @@ function syncDashboardFromSession(
   }
   dashboardState.errors = issues;
 
+  dashboardState.agentResumeBrief = {
+    ...(isPlainObject(dashboardState.agentResumeBrief)
+      ? dashboardState.agentResumeBrief
+      : {}),
+    currentProjectGoal: session.session.goal,
+    activeService: String(
+      (isPlainObject(dashboardState.serviceRegistry) &&
+      Array.isArray(dashboardState.serviceRegistry.services) &&
+      isPlainObject(dashboardState.serviceRegistry.services[0])
+        ? dashboardState.serviceRegistry.services[0].id
+        : "primary-service") ?? "primary-service"
+    ),
+    activeSession: setActive ? session.session.id : null,
+    lastSafeCheckpoint: `Runtime phase ${currentPhase} recorded at ${updatedAt}.`,
+    nextSafestAction: session.notes.current,
+    openDecisions: session.session.status === "blocked" ? [runtimeIssueId] : [],
+    blockers: session.session.status === "blocked" ? [runtimeIssueId] : [],
+    validationCommands: [
+      "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections",
+      "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+    ],
+    authoritativeFiles: uniqueStrings([
+      "docs/ai-harness/dashboard/events/harness-events.jsonl",
+      "docs/ai-harness/dashboard/state/dashboard-state.json",
+      "docs/ai-harness/dashboard/state/dashboard-index.json",
+      "docs/ai-harness/runtime/state/session-index.json",
+      "docs/ai-harness/runtime/state/active-session.json",
+      workPacketPath,
+    ]),
+    dirtyStateWarning:
+      "Refresh dashboard-ops.mjs after VCS changes to keep Git/SVN evidence current.",
+    staleStateWarning: "Dashboard runtime projection was updated from the active harness session.",
+    confidence: "high",
+  };
+
+  dashboardState.stakeholderBrief = {
+    ...(isPlainObject(dashboardState.stakeholderBrief)
+      ? dashboardState.stakeholderBrief
+      : {}),
+    currentGoal: session.session.goal,
+    whatChangedSinceLastReview: `Harness session ${session.session.id} is now ${session.session.status} at ${currentPhase}.`,
+    whyItMatters:
+      "The project dashboard and AI runtime now share the same resumable work state.",
+    currentRisk:
+      session.session.status === "blocked"
+        ? session.notes.current
+        : "No active blocker recorded in the harness runtime.",
+    requiredDecision:
+      session.session.status === "blocked"
+        ? session.notes.current
+        : "Continue through the next governed runtime phase.",
+    owner: session.session.nextActor,
+    nextMilestone: currentPhase,
+    evidenceLinks: sessionOutputs,
+  };
+
+  dashboardState.taskQueues = {
+    waiting: runtimeIndex.queuedSessionIds,
+    inProgress:
+      setActive && !["closed", "complete"].includes(session.session.status)
+        ? [session.session.id]
+        : [],
+    completed: session.session.status === "closed" ? [session.session.id] : [],
+    blocked: session.session.status === "blocked" ? [session.session.id] : [],
+    needsUser:
+      session.session.nextActor === "operator" || session.session.status === "blocked"
+        ? [session.session.id]
+        : [],
+    realWorld: [],
+    failed: [],
+  };
+
+  const dashboardAgile = isPlainObject(dashboardState.agile)
+    ? dashboardState.agile
+    : {};
+  const backlog = Array.isArray(dashboardAgile.backlog)
+    ? (dashboardAgile.backlog as Array<Record<string, unknown>>)
+    : [];
+  const taskId = `task-${session.session.id}`;
+  const taskIndex = backlog.findIndex((item) => String(item.id || "") === taskId);
+  const taskEntry = {
+    id: taskId,
+    status:
+      session.session.status === "closed"
+        ? "completed"
+        : session.session.status === "blocked"
+          ? "blocked"
+          : "in-progress",
+    title: session.session.title,
+    owner: session.session.nextActor,
+    evidenceRefs: sessionOutputs,
+  };
+  if (taskIndex >= 0) {
+    backlog[taskIndex] = { ...backlog[taskIndex], ...taskEntry };
+  } else {
+    backlog.push(taskEntry);
+  }
+  dashboardState.agile = {
+    ...dashboardAgile,
+    iteration: isPlainObject(dashboardAgile.iteration)
+      ? { ...dashboardAgile.iteration, status: "active", goal: session.session.goal }
+      : { id: "iteration-current", status: "active", goal: session.session.goal },
+    backlog,
+  };
+  dashboardState.agileCadence = dashboardState.agile;
+
+  const timelineRoot = isPlainObject(dashboardState.workTimeline)
+    ? dashboardState.workTimeline
+    : {};
+  const timelineItems = Array.isArray(timelineRoot.items)
+    ? (timelineRoot.items as Array<Record<string, unknown>>)
+    : [];
+  const timelineIndex = timelineItems.findIndex(
+    (item) => String(item.id || "") === session.session.id
+  );
+  const timelineEntry = {
+    id: session.session.id,
+    title: session.session.title,
+    status:
+      session.session.status === "closed"
+        ? "completed"
+        : session.session.status === "blocked"
+          ? "blocked"
+          : "in-progress",
+    lane: "Governed Sessions",
+    owner: session.session.nextActor,
+    startAt: session.session.createdAt,
+    plannedStartAt: session.session.createdAt,
+    plannedEndAt:
+      session.session.status === "closed"
+        ? session.session.updatedAt
+        : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    endAt: session.session.status === "closed" ? session.session.updatedAt : null,
+    progressPercent: Math.max(
+      5,
+      Math.round(
+        (PHASE_DEFINITIONS.findIndex((phase) => phase.id === currentPhase) /
+          (PHASE_DEFINITIONS.length - 1)) *
+          100
+      )
+    ),
+    kpiTags: ["cycle-time", "wip-aging", "handover-latency"],
+    evidenceRefs: sessionOutputs,
+  };
+  if (timelineIndex >= 0) {
+    timelineItems[timelineIndex] = {
+      ...timelineItems[timelineIndex],
+      ...timelineEntry,
+    };
+  } else {
+    timelineItems.push(timelineEntry);
+  }
+  dashboardState.workTimeline = {
+    ...timelineRoot,
+    schemaVersion: HARNESS_RUNTIME_VERSION,
+    defaultRange: String(timelineRoot.defaultRange || "this-month"),
+    items: timelineItems,
+  };
+
+  const timeline = Array.isArray(dashboardState.operationsTimeline)
+    ? (dashboardState.operationsTimeline as Array<Record<string, unknown>>)
+    : [];
+  timeline.push({
+    id: `runtime-${session.session.id}-${session.events.length}`,
+    type: "session-event",
+    status: session.session.status,
+    occurredAt: updatedAt,
+    summary: `${session.session.id} moved through ${currentPhase}: ${session.notes.current}`,
+    evidenceRefs: sessionOutputs,
+  });
+  dashboardState.operationsTimeline = timeline.slice(-50);
+
+  dashboardState.governanceEvidenceBrief = {
+    ...(isPlainObject(dashboardState.governanceEvidenceBrief)
+      ? dashboardState.governanceEvidenceBrief
+      : {}),
+    evidenceCoverage: "runtime-current",
+    unresolvedDecisions: session.session.status === "blocked" ? [runtimeIssueId] : [],
+    staleProjections: [],
+    failedValidations:
+      session.verification.testsStatus === "failed"
+        ? [`session-${session.session.id}`]
+        : [],
+  };
+
   writeJson(paths.dashboardStatePath, dashboardState);
 }
 
@@ -4632,6 +5042,10 @@ export function startHarnessSession(
   params: StartHarnessSessionParams
 ): HarnessRuntimeResult {
   const workspacePath = params.workspacePath;
+  const expectedReadPaths = normalizeSafeWorkspaceRelativePaths(
+    params.expectedReadPaths ?? [],
+    "harness expected read paths"
+  );
   const expectedWritePaths = normalizeSafeWorkspaceRelativePaths(
     params.expectedWritePaths ?? [],
     "harness expected write paths"
@@ -4707,8 +5121,22 @@ export function startHarnessSession(
       outputs: [],
       dependencyNotes: params.dependencyNotes ?? null,
       contextInjectionNotes: params.contextInjectionNotes ?? null,
+      expectedReadPaths,
       expectedWritePaths,
       verificationCommands: params.verificationCommands ?? [],
+      assignedWorker: params.assignedWorker ?? null,
+      dependencyMap: params.dependencyMap ?? [],
+      mergeOwner: params.mergeOwner ?? null,
+      integrationOwner: params.integrationOwner ?? null,
+      parallelSafetyStatus: params.parallelSafetyStatus ?? "unclassified",
+      evaluationLoop: {
+        iteration: 0,
+        threshold:
+          params.evaluationThreshold ??
+          "Repeat work -> evaluate -> improve until the contract is satisfied, critical findings are resolved, and the hub can explain residual risk.",
+        status: "not-started",
+        history: [],
+      },
     },
     phases: buildPhaseRecords(
       {

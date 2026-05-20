@@ -24,8 +24,15 @@ export type ProjectType =
 /** Supported file encodings for generated files. */
 export type FileEncoding = "utf-8" | "utf-8-bom" | "ascii" | "latin1";
 
-/** Supported target IDEs for Agent Skills path generation. */
-export type TargetIDE = "vscode" | "cursor" | "claude-code" | "openhands";
+/** Supported AI agent platforms for instruction and Agent Skills path generation. */
+export type TargetIDE =
+  | "vscode"
+  | "cursor"
+  | "claude"
+  | "claude-code"
+  | "codex"
+  | "antigravity"
+  | "openhands";
 
 /** Supported line ending styles. */
 export type LineEnding = "lf" | "crlf" | "auto";
@@ -80,7 +87,7 @@ export interface WorkspaceInitParams {
   /** File encoding for generated files. */
   fileEncoding?: FileEncoding;
 
-  /** Target IDEs for Agent Skills file generation. */
+  /** Target AI agent platforms for instruction overlays and Agent Skills file generation. */
   targetIDEs?: TargetIDE[];
 
   /** Line ending style for generated files. */

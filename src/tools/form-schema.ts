@@ -342,13 +342,13 @@ export function buildInitFormSchema(): FormSchema {
     },
     {
       name: "targetIDEs",
-      label: "Target IDEs",
+      label: "Target AI platforms",
       type: "tags",
       required: false,
       description:
-        "Where skill and agent files should be generated.",
+        "Existing or desired AI agent platforms for instruction overlays, skills, agents, and dashboard agentPlatformGovernance. If detection is uncertain, confirm them later in the dashboard Governance tab.",
       default: ["vscode"],
-      placeholder: "vscode, cursor, claude-code, openhands",
+      placeholder: "vscode, cursor, claude-code, codex, antigravity, openhands",
     },
     {
       name: "lineEnding",

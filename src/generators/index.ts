@@ -3,6 +3,7 @@
  */
 
 export { generateCopilotInstructions } from "./copilot-instructions.js";
+export { generateAgentPlatformInstructionFiles } from "./agent-platform-instructions.js";
 export {
   generateSettings,
   generateCodeGenInstructions,
@@ -20,6 +21,7 @@ export {
 } from "./changelog.js";
 export {
   generateAgentSkills,
+  generateHarnessCoreAgentSkills,
   generateSelectedSkills,
 } from "./agent-skills.js";
 export { generateHarnessFiles } from "./harness.js";

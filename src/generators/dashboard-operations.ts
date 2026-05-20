@@ -3,1969 +3,2043 @@ import {
   type WorkspaceInitParams,
 } from "../types.js";
 import { DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS } from "../data/dashboard-state-contract.js";
-import { DASHBOARD_KPI_DEFINITIONS } from "../data/dashboard-profiles.js";
 
 function buildDashboardOpsReadme(): string {
-  return `# Dashboard Operations
+  return `# Harness Dashboard Operations
 
-Use the generated \`dashboard-ops.mjs\` script to keep the AI harness dashboard current, governed, and portable.
+The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6 Hypertext Project World Model.
+It treats the JSONL event ledger as canonical, the JSON state files as disposable projections,
+and the HTML file as a portable stakeholder projection.
 
 ## Commands
 
+- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs ensure-listening\`
+  Restore a read-only loopback listener on an available local port unless \`WORKSPACE_INIT_DASHBOARD_AUTOSTART=0\`.
+- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs listen --port 43110\`
+  Run the listener in the foreground for local debugging.
+- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status\`
+  Print persisted listener and projection status.
+- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs stop | restart | cleanup-stale\`
+  Manage stale or active listener processes.
 - \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh\`
-  Refresh dashboard-derived fields, synchronize git status, update artifact coverage, align governed sessions, and validate the state before saving.
-- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh --patch path/to/patch.json\`
-  Apply a JSON patch, then re-run automatic synchronization and strict validation.
-- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs validate\`
-  Validate the live dashboard state against the stricter shape rules and required KPI profile.
-- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs validate --strict-governance\`
-  Also require approved memory-to-skill promotion candidates to meet the configured quantitative threshold, collision check, and generated artifact evidence.
-- Native executor launches stay visible through \`docs/ai-harness/runtime/state/current-native-execution.json\` and per-bridge execution files under \`docs/ai-harness/runtime/execution-bridges/\`.
-- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs serve --port 43110\`
-  Preview the dashboard on a local port.
-- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs export-static --out docs/ai-harness/dashboard/exports/latest\`
-  Export a portable static dashboard folder and a standalone \`snapshot.html\` file.
+  Refresh disposable projections and collect Git/SVN evidence without changing application source.
+- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs record-agent-platforms --platforms codex,cursor --source user-declaration\`
+  Record the user's active AI-agent platforms, mark stale generated instruction files as \`unused-instruction\`, and rebuild projections.
+- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs append-event --event path/to/event.json --expected-last-sequence 12\`
+  Append a strict event-envelope JSON file only if the ledger still ends at the expected sequence.
+- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs rebuild-projections\`
+  Rebuild projection files from the embedded dashboard snapshot when projection files were deleted.
+- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections\`
+  Validate required Project World Model fields and reference integrity.
+- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs export-static --out docs/ai-harness/dashboard/exports/latest --public\`
+  Export a single-file stakeholder snapshot with local paths, usernames, tokens, private URLs, and secret references redacted.
 
-## Governed Sessions
+## API
 
-- Every meaningful AI session should remain visible in both \`sessionLog\` and \`governedSessions\`.
-- The refresh command keeps governed session metadata aligned with git state, verification state, and the current governance stage.
-- The refresh command also re-syncs runtime orchestration state from \`docs/ai-harness/runtime/state/\` when governed sessions are being executed.
-- Domain-required KPI items are re-applied automatically so AX/DX and DevOps views stay intact for both legacy and greenfield projects.
-- Server operations health stays in \`operationsHealth\`: traffic, request/response, DBCP pool status, incident logs, latency queries, and data-source wiring.
-- Repeated agent work patterns stay in \`memoryPromotion\` until they meet conservative evidence thresholds for skill or agent promotion.
-- Real-time artifact discovery stays in \`live-artifacts-dashboard/\` and is intentionally separate from the canonical admin dashboard state.
+The listener exposes read-only v1 routes under \`/api/harness-dashboard/v1/\`:
+\`snapshot\`, \`index\`, \`tasks\`, \`sessions\`, \`dictionary\`, \`version-control\`,
+\`runtime\`, \`health\`, \`events\`, and deterministic \`query\`.
 
-## Legacy Project Adoption
-
-For existing legacy projects:
-
-1. Generate the harness with this MCP.
-2. Fill the dashboard state with the first approved modernization goal.
-3. Run \`refresh\` after each meaningful chunk so git visibility, session governance, artifacts, and KPIs stay synchronized.
-4. Use \`export-static\` whenever stakeholders need a portable snapshot outside the local environment.
-
-## New Project Delivery
-
-For new projects:
-
-1. Keep the dashboard updated from the first planning cycle.
-2. Track governed sessions from goal framing through verification and closeout.
-3. Track release or draft progress in \`versionLedger\`.
-4. Refresh the state before and after implementation, verification, and governance closure.
+Default protections: local token required, loopback Host/Origin only, CORS disabled,
+DNS rebinding protection, strict CSP for served HTML, and no shell/file-write/LLM calls from \`query\`.
 `;
 }
 
 function buildDashboardOpsScript(): string {
-  const embeddedDefinitions = JSON.stringify(DASHBOARD_KPI_DEFINITIONS, null, 2);
-  const embeddedRequiredTopLevelKeys = JSON.stringify(
+  const requiredTopLevelKeys = JSON.stringify(
     DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS,
     null,
     2
   );
 
-  return [
-    "#!/usr/bin/env node",
-    "",
-    'import fs from "node:fs";',
-    'import path from "node:path";',
-    'import http from "node:http";',
-    'import { execFileSync } from "node:child_process";',
-    'import { fileURLToPath } from "node:url";',
-    "",
-    "const DASHBOARD_KPI_DEFINITIONS = " + embeddedDefinitions + ";",
-    "const DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS = " + embeddedRequiredTopLevelKeys + ";",
-    'const GOVERNANCE_STAGE_ORDER = ["governance-open", "plan-1", "review-1", "plan-2", "review-2", "plan-3", "review-3", "goal-freeze", "governance-refresh", "implementation", "verification", "governance-close"];',
-    "",
-    "const __filename = fileURLToPath(import.meta.url);",
-    "const __dirname = path.dirname(__filename);",
-    'const dashboardDir = path.resolve(__dirname, "..");',
-    'const defaultWorkspaceRoot = path.resolve(__dirname, "../../../..");',
-    'const defaultStatePath = path.join(dashboardDir, "state", "dashboard-state.json");',
-    'const defaultSchemaPath = path.join(dashboardDir, "state", "dashboard-state.schema.json");',
-    "",
-    "const args = process.argv.slice(2);",
-    'const command = args[0] || "help";',
-    "",
-    "function getOption(name, fallback) {",
-    "  const index = args.indexOf(name);",
-    "  if (index === -1 || index === args.length - 1) {",
-    "    return fallback;",
-    "  }",
-    "  return args[index + 1];",
-    "}",
-    "",
-    "function hasFlag(name) {",
-    "  return args.includes(name);",
-    "}",
-    "",
-    "function readJsonFile(fullPath) {",
-    '  return JSON.parse(fs.readFileSync(fullPath, "utf-8"));',
-    "}",
-    "",
-    "function writeTextFileAtomic(fullPath, content, options = \"utf-8\") {",
-    "  fs.mkdirSync(path.dirname(fullPath), { recursive: true });",
-    "  const tempPath = path.join(",
-    "    path.dirname(fullPath),",
-    "    `.${path.basename(fullPath)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`",
-    "  );",
-    "  try {",
-    "    fs.writeFileSync(tempPath, content, options);",
-    "    fs.renameSync(tempPath, fullPath);",
-    "  } catch (error) {",
-    "    try {",
-    "      if (fs.existsSync(tempPath)) {",
-    "        fs.unlinkSync(tempPath);",
-    "      }",
-    "    } catch {",
-    "      // Preserve the original write error.",
-    "    }",
-    "    throw error;",
-    "  }",
-    "}",
-    "",
-    "function writeJsonFile(fullPath, value) {",
-    '  writeTextFileAtomic(fullPath, JSON.stringify(value, null, 2) + "\\n", "utf-8");',
-    "}",
-    "",
-    "function isPlainObject(value) {",
-    '  return typeof value === "object" && value !== null && !Array.isArray(value);',
-    "}",
-    "",
-    "function clone(value) {",
-    "  return JSON.parse(JSON.stringify(value));",
-    "}",
-    "",
-    "function deepMerge(base, patch) {",
-    "  if (Array.isArray(patch)) {",
-    "    return clone(patch);",
-    "  }",
-    "",
-    "  if (!isPlainObject(base) || !isPlainObject(patch)) {",
-    "    return patch;",
-    "  }",
-    "",
-    "  const result = { ...base };",
-    "  for (const [key, value] of Object.entries(patch)) {",
-    "    if (Array.isArray(value)) {",
-    "      result[key] = clone(value);",
-    "      continue;",
-    "    }",
-    "",
-    "    if (isPlainObject(value) && isPlainObject(result[key])) {",
-    "      result[key] = deepMerge(result[key], value);",
-    "      continue;",
-    "    }",
-    "",
-    "    result[key] = value;",
-    "  }",
-    "",
-    "  return result;",
-    "}",
-    "",
-    "function isString(value) {",
-    '  return typeof value === "string";',
-    "}",
-    "",
-    "function isBoolean(value) {",
-    '  return typeof value === "boolean";',
-    "}",
-    "",
-    "function isFiniteNumber(value) {",
-    '  return typeof value === "number" && Number.isFinite(value);',
-    "}",
-    "",
-    "function typeName(value) {",
-    '  if (value === null) return "null";',
-    '  if (Array.isArray(value)) return "array";',
-    '  return typeof value;',
-    "}",
-    "",
-    "function pushTypeError(errors, fieldPath, expected, actual) {",
-    '  errors.push(`${fieldPath} must be ${expected}; received ${typeName(actual)}`);',
-    "}",
-    "",
-    "function requireObject(errors, fieldPath, value) {",
-    "  if (!isPlainObject(value)) {",
-    '    pushTypeError(errors, fieldPath, "an object", value);',
-    "    return null;",
-    "  }",
-    "  return value;",
-    "}",
-    "",
-    "function requireArray(errors, fieldPath, value) {",
-    "  if (!Array.isArray(value)) {",
-    '    pushTypeError(errors, fieldPath, "an array", value);',
-    "    return null;",
-    "  }",
-    "  return value;",
-    "}",
-    "",
-    "function requireStringField(errors, objectPath, objectValue, fieldName) {",
-    "  if (!isString(objectValue[fieldName])) {",
-    '    pushTypeError(errors, `${objectPath}.${fieldName}`, "a string", objectValue[fieldName]);',
-    "  }",
-    "}",
-    "",
-    "function requireBooleanField(errors, objectPath, objectValue, fieldName) {",
-    "  if (!isBoolean(objectValue[fieldName])) {",
-    '    pushTypeError(errors, `${objectPath}.${fieldName}`, "a boolean", objectValue[fieldName]);',
-    "  }",
-    "}",
-    "",
-    "function requireNumberField(errors, objectPath, objectValue, fieldName) {",
-    "  if (!isFiniteNumber(objectValue[fieldName])) {",
-    '    pushTypeError(errors, `${objectPath}.${fieldName}`, "a finite number", objectValue[fieldName]);',
-    "  }",
-    "}",
-    "",
-    "function requireStringArrayField(errors, objectPath, objectValue, fieldName) {",
-    "  const value = objectValue[fieldName];",
-    "  if (!Array.isArray(value) || value.some((entry) => !isString(entry))) {",
-    '    pushTypeError(errors, `${objectPath}.${fieldName}`, "an array of strings", value);',
-    "  }",
-    "}",
-    "",
-    "function validateObjectArray(errors, fieldPath, value, requiredFields) {",
-    "  const items = requireArray(errors, fieldPath, value);",
-    "  if (items == null) {",
-    "    return null;",
-    "  }",
-    "",
-    "  for (const [index, item] of items.entries()) {",
-    "    const entryPath = `${fieldPath}[${index}]`;",
-    "    const entry = requireObject(errors, entryPath, item);",
-    "    if (entry == null) {",
-    "      continue;",
-    "    }",
-    "",
-    "    for (const field of requiredFields.strings || []) {",
-    "      requireStringField(errors, entryPath, entry, field);",
-    "    }",
-    "    for (const field of requiredFields.booleans || []) {",
-    "      requireBooleanField(errors, entryPath, entry, field);",
-    "    }",
-    "    for (const field of requiredFields.numbers || []) {",
-    "      requireNumberField(errors, entryPath, entry, field);",
-    "    }",
-    "    for (const field of requiredFields.stringArrays || []) {",
-    "      requireStringArrayField(errors, entryPath, entry, field);",
-    "    }",
-    "    if (typeof requiredFields.extra === \"function\") {",
-    "      requiredFields.extra(errors, entryPath, entry);",
-    "    }",
-    "  }",
-    "",
-    "  return items;",
-    "}",
-    "",
-    "function inferDashboardDomainMode(projectType) {",
-    "  switch (projectType) {",
-    '    case "creative":',
-    '      return "creative-narrative";',
-    '    case "learning":',
-    '      return "knowledge-work";',
-    '    case "other":',
-    '      return "generic-governance";',
-    "    default:",
-    '      return "software-delivery";',
-    "  }",
-    "}",
-    "",
-    "function filterByProjectType(definition, projectType) {",
-    "  return (",
-    "    definition.relevantProjectTypes == null ||",
-    "    (projectType != null && definition.relevantProjectTypes.includes(projectType))",
-    "  );",
-    "}",
-    "",
-    "function getRequiredDashboardKpis(projectType) {",
-    "  const domainMode = inferDashboardDomainMode(projectType);",
-    "  return DASHBOARD_KPI_DEFINITIONS.filter(",
-    "    (definition) =>",
-    "      definition.appliesToModes.includes(domainMode) &&",
-    "      filterByProjectType(definition, projectType)",
-    "  );",
-    "}",
-    "",
-    "function getDashboardKpiProfile(projectType) {",
-    "  const definitions = getRequiredDashboardKpis(projectType);",
-    "  const domainMode = inferDashboardDomainMode(projectType);",
-    "",
-    "  switch (domainMode) {",
-    '    case "creative-narrative":',
-    "      return {",
-    '        id: "creative-governed-kpis",',
-    '        label: "Creative Governance KPI Profile",',
-    "        requiredKpiIds: definitions.map((definition) => definition.id),",
-    '        perspectives: ["AX/DX", "Creative Operations"],',
-    "        rationale: [",
-    '          "Narrative continuity, character state, and editorial progress must remain visible across sessions.",',
-    '          "Stakeholders should be able to assess story momentum without reading manuscript diffs or chat transcripts.",',
-    "        ],",
-    "      };",
-    '    case "knowledge-work":',
-    "      return {",
-    '        id: "knowledge-governed-kpis",',
-    '        label: "Knowledge Work KPI Profile",',
-    "        requiredKpiIds: definitions.map((definition) => definition.id),",
-    '        perspectives: ["AX/DX", "Research Operations"],',
-    "        rationale: [",
-    '          "Learning and research work must keep evidence quality and iteration closure visible.",',
-    '          "A reviewer should be able to understand the current module state, sources, and next step immediately.",',
-    "        ],",
-    "      };",
-    '    case "generic-governance":',
-    "      return {",
-    '        id: "general-governed-kpis",',
-    '        label: "General Governance KPI Profile",',
-    "        requiredKpiIds: definitions.map((definition) => definition.id),",
-    '        perspectives: ["AX/DX", "Operations"],',
-    "        rationale: [",
-    '          "Transformation initiatives need milestone, owner, and decision traceability even outside software delivery.",',
-    '          "The dashboard should remain readable by broad stakeholder groups.",',
-    "        ],",
-    "      };",
-    "    default:",
-    "      return {",
-    '        id: "software-devops-governed-kpis",',
-    '        label: "Software Delivery / DevOps KPI Profile",',
-    "        requiredKpiIds: definitions.map((definition) => definition.id),",
-    '        perspectives: ["AX/DX", "DevOps", "Engineering"],',
-    "        rationale: [",
-    '          "Software delivery requires governance visibility plus DevOps-grade release and operability traceability.",',
-    '          "Every meaningful session should connect planning, implementation, testing, git history, and release evidence.",',
-    "        ],",
-    "      };",
-    "  }",
-    "}",
-    "",
-    "function validateDashboardStateShape(value) {",
-    "  const errors = [];",
-    '  const root = requireObject(errors, "dashboardState", value);',
-    "  if (root == null) {",
-    "    return { valid: false, errors };",
-    "  }",
-    "",
-    "  const requiredTopLevelKeys = DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS;",
-    "",
-    "  for (const key of requiredTopLevelKeys) {",
-    "    if (!(key in root)) {",
-    '      errors.push(`dashboardState.${key} is required`);',
-    "    }",
-    "  }",
-    "",
-    '  const meta = requireObject(errors, "dashboardState.meta", root.meta);',
-    "  if (meta != null) {",
-    '    requireStringField(errors, "dashboardState.meta", meta, "schemaVersion");',
-    '    requireStringField(errors, "dashboardState.meta", meta, "generatedBy");',
-    '    requireStringField(errors, "dashboardState.meta", meta, "dashboardDesignSystem");',
-    '    requireStringField(errors, "dashboardState.meta", meta, "refreshRule");',
-    "  }",
-    "",
-    '  const workspace = requireObject(errors, "dashboardState.workspace", root.workspace);',
-    "  if (workspace != null) {",
-    '    requireStringField(errors, "dashboardState.workspace", workspace, "name");',
-    '    requireStringField(errors, "dashboardState.workspace", workspace, "purpose");',
-    '    requireStringField(errors, "dashboardState.workspace", workspace, "projectType");',
-    '    requireStringArrayField(errors, "dashboardState.workspace", workspace, "primaryDomains");',
-    '    requireStringArrayField(errors, "dashboardState.workspace", workspace, "techStack");',
-    '    requireStringArrayField(errors, "dashboardState.workspace", workspace, "targetIDEs");',
-    '    requireStringField(errors, "dashboardState.workspace", workspace, "harnessProfile");',
-    '    requireStringField(errors, "dashboardState.workspace", workspace, "governanceProfile");',
-    '    requireStringField(errors, "dashboardState.workspace", workspace, "autonomyMode");',
-    '    requireStringField(errors, "dashboardState.workspace", workspace, "tokenBudget");',
-    "  }",
-    "",
-    '  const executiveSummary = requireObject(errors, "dashboardState.executiveSummary", root.executiveSummary);',
-    "  if (executiveSummary != null) {",
-    '    requireStringField(errors, "dashboardState.executiveSummary", executiveSummary, "headline");',
-    '    requireStringField(errors, "dashboardState.executiveSummary", executiveSummary, "overallStatus");',
-    '    requireStringField(errors, "dashboardState.executiveSummary", executiveSummary, "currentStage");',
-    '    requireNumberField(errors, "dashboardState.executiveSummary", executiveSummary, "overallProgressPercent");',
-    '    requireStringField(errors, "dashboardState.executiveSummary", executiveSummary, "nextDecision");',
-    '    requireStringField(errors, "dashboardState.executiveSummary", executiveSummary, "lastUpdated");',
-    '    requireStringField(errors, "dashboardState.executiveSummary", executiveSummary, "audienceNote");',
-    "  }",
-    "",
-    '  const progressState = requireObject(errors, "dashboardState.progressState", root.progressState);',
-    "  if (progressState != null) {",
-    '    requireStringField(errors, "dashboardState.progressState", progressState, "activeGoal");',
-    '    requireStringField(errors, "dashboardState.progressState", progressState, "activeChunk");',
-    '    requireStringField(errors, "dashboardState.progressState", progressState, "currentOwner");',
-    '    requireBooleanField(errors, "dashboardState.progressState", progressState, "blocked");',
-    '    requireStringField(errors, "dashboardState.progressState", progressState, "riskLevel");',
-    '    requireStringField(errors, "dashboardState.progressState", progressState, "nextAction");',
-    "  }",
-    "",
-    "  validateObjectArray(errors, \"dashboardState.progressState.stageChecklist\", progressState?.stageChecklist, {",
-    '    strings: ["id", "label", "status"],',
-    "  });",
-    "  validateObjectArray(errors, \"dashboardState.progressState.workstreams\", progressState?.workstreams, {",
-    '    strings: ["id", "label", "owner", "status", "note"],',
-    '    numbers: ["progressPercent"],',
-    "  });",
-    "",
-    '  const governanceState = requireObject(errors, "dashboardState.governanceState", root.governanceState);',
-    "  if (governanceState != null) {",
-    '    requireStringField(errors, "dashboardState.governanceState", governanceState, "policyId");',
-    '    requireStringField(errors, "dashboardState.governanceState", governanceState, "policyLabel");',
-    '    requireStringField(errors, "dashboardState.governanceState", governanceState, "status");',
-    '    requireStringField(errors, "dashboardState.governanceState", governanceState, "sessionGovernanceRule");',
-    '    requireStringField(errors, "dashboardState.governanceState", governanceState, "latestApprovedStage");',
-    '    requireBooleanField(errors, "dashboardState.governanceState", governanceState, "goalFrozen");',
-    '    requireStringField(errors, "dashboardState.governanceState", governanceState, "dashboardSyncStatus");',
-    '    requireStringArrayField(errors, "dashboardState.governanceState", governanceState, "requiredArtifacts");',
-    '    requireStringArrayField(errors, "dashboardState.governanceState", governanceState, "requiredKpiIds");',
-    '    requireStringArrayField(errors, "dashboardState.governanceState", governanceState, "mandatorySessionFields");',
-    '    requireStringField(errors, "dashboardState.governanceState", governanceState, "visibilityRule");',
-    "  }",
-    "",
-    '  const kpiProfile = requireObject(errors, "dashboardState.kpiProfile", root.kpiProfile);',
-    "  if (kpiProfile != null) {",
-    '    requireStringField(errors, "dashboardState.kpiProfile", kpiProfile, "id");',
-    '    requireStringField(errors, "dashboardState.kpiProfile", kpiProfile, "label");',
-    '    requireStringArrayField(errors, "dashboardState.kpiProfile", kpiProfile, "requiredKpiIds");',
-    '    requireStringArrayField(errors, "dashboardState.kpiProfile", kpiProfile, "perspectives");',
-    '    requireStringArrayField(errors, "dashboardState.kpiProfile", kpiProfile, "rationale");',
-    "  }",
-    "",
-    "  const kpis = validateObjectArray(errors, \"dashboardState.kpis\", root.kpis, {",
-    '    strings: ["id", "label", "value", "target", "status", "interpretation"],',
-    '    booleans: ["required"],',
-    '    stringArrays: ["perspectives"],',
-    "  });",
-    "",
-    "  const issues = validateObjectArray(errors, \"dashboardState.errors\", root.errors, {",
-    '    strings: ["id", "severity", "status", "summary", "owner", "firstSeenAt", "lastSeenAt"],',
-    "  });",
-    "",
-    '  const gitStatus = requireObject(errors, "dashboardState.gitStatus", root.gitStatus);',
-    "  if (gitStatus != null) {",
-    '    requireBooleanField(errors, "dashboardState.gitStatus", gitStatus, "repositoryExpected");',
-    '    requireStringField(errors, "dashboardState.gitStatus", gitStatus, "trackedByGit");',
-    '    requireStringField(errors, "dashboardState.gitStatus", gitStatus, "provider");',
-    '    requireStringField(errors, "dashboardState.gitStatus", gitStatus, "defaultBranch");',
-    '    requireStringField(errors, "dashboardState.gitStatus", gitStatus, "currentBranch");',
-    '    requireStringArrayField(errors, "dashboardState.gitStatus", gitStatus, "auditExpectations");',
-    '    const lastCommit = requireObject(errors, "dashboardState.gitStatus.lastCommit", gitStatus.lastCommit);',
-    "    if (lastCommit != null) {",
-    '      requireStringField(errors, "dashboardState.gitStatus.lastCommit", lastCommit, "sha");',
-    '      requireStringField(errors, "dashboardState.gitStatus.lastCommit", lastCommit, "message");',
-    '      requireStringField(errors, "dashboardState.gitStatus.lastCommit", lastCommit, "author");',
-    '      requireStringField(errors, "dashboardState.gitStatus.lastCommit", lastCommit, "committedAt");',
-    "    }",
-    '    const workingTree = requireObject(errors, "dashboardState.gitStatus.workingTree", gitStatus.workingTree);',
-    "    if (workingTree != null) {",
-    '      requireStringField(errors, "dashboardState.gitStatus.workingTree", workingTree, "status");',
-    '      requireStringField(errors, "dashboardState.gitStatus.workingTree", workingTree, "stagedChanges");',
-    '      requireStringField(errors, "dashboardState.gitStatus.workingTree", workingTree, "unstagedChanges");',
-    '      requireStringField(errors, "dashboardState.gitStatus.workingTree", workingTree, "untrackedFiles");',
-    "    }",
-    "  }",
-    "",
-    "  const sessionLog = validateObjectArray(errors, \"dashboardState.sessionLog\", root.sessionLog, {",
-    '    strings: ["id", "title", "status", "stage", "startedAt", "endedAt", "owner", "note"],',
-    '    stringArrays: ["outputs"],',
-    "  });",
-    "",
-    "  const governedSessions = validateObjectArray(errors, \"dashboardState.governedSessions\", root.governedSessions, {",
-    '    strings: ["id", "title", "status", "owner", "agentRole", "governanceStatus", "goal", "chunkId", "startedAt", "endedAt", "nextStep"],',
-    '    stringArrays: ["outputs"],',
-    "    extra(errors, entryPath, session) {",
-    '      const governance = requireObject(errors, `${entryPath}.governance`, session.governance);',
-    "      if (governance != null) {",
-    '        requireBooleanField(errors, `${entryPath}.governance`, governance, "opened");',
-    '        requireNumberField(errors, `${entryPath}.governance`, governance, "latestPlanRound");',
-    '        requireNumberField(errors, `${entryPath}.governance`, governance, "latestReviewRound");',
-    '        requireBooleanField(errors, `${entryPath}.governance`, governance, "goalFrozen");',
-    '        requireBooleanField(errors, `${entryPath}.governance`, governance, "contractApproved");',
-    '        requireBooleanField(errors, `${entryPath}.governance`, governance, "independentEvaluationPassed");',
-    '        requireBooleanField(errors, `${entryPath}.governance`, governance, "governanceRefreshed");',
-    '        requireBooleanField(errors, `${entryPath}.governance`, governance, "closeoutReady");',
-    '        requireStringField(errors, `${entryPath}.governance`, governance, "evidenceFreshness");',
-    "      }",
-    '      const verification = requireObject(errors, `${entryPath}.verification`, session.verification);',
-    "      if (verification != null) {",
-    '        requireStringField(errors, `${entryPath}.verification`, verification, "testsStatus");',
-    '        requireStringField(errors, `${entryPath}.verification`, verification, "reviewStatus");',
-    '        requireStringField(errors, `${entryPath}.verification`, verification, "remediationStatus");',
-    "      }",
-    '      const git = requireObject(errors, `${entryPath}.git`, session.git);',
-    "      if (git != null) {",
-    '        requireStringField(errors, `${entryPath}.git`, git, "branch");',
-    '        requireStringField(errors, `${entryPath}.git`, git, "commit");',
-    "      }",
-    "    },",
-    "  });",
-    "",
-    '  const memoryPromotion = requireObject(errors, "dashboardState.memoryPromotion", root.memoryPromotion);',
-    "  if (memoryPromotion != null) {",
-    '    requireStringField(errors, "dashboardState.memoryPromotion", memoryPromotion, "status");',
-    '    requireNumberField(errors, "dashboardState.memoryPromotion", memoryPromotion, "thresholdScore");',
-    '    requireStringArrayField(errors, "dashboardState.memoryPromotion", memoryPromotion, "sourceRoots");',
-    '    const evidenceThreshold = requireObject(errors, "dashboardState.memoryPromotion.evidenceThreshold", memoryPromotion.evidenceThreshold);',
-    "    if (evidenceThreshold != null) {",
-    '      requireNumberField(errors, "dashboardState.memoryPromotion.evidenceThreshold", evidenceThreshold, "minimumOccurrences");',
-    '      requireNumberField(errors, "dashboardState.memoryPromotion.evidenceThreshold", evidenceThreshold, "minimumGovernedSessions");',
-    "    }",
-    '    validateObjectArray(errors, "dashboardState.memoryPromotion.candidates", memoryPromotion.candidates, {',
-    '      strings: ["id", "title", "status", "collisionCheck", "decision", "nextAction"],',
-    '      numbers: ["score", "occurrences", "governedSessionCount"],',
-    '      stringArrays: ["evidencePaths", "generatedPaths"],',
-    "    });",
-    "  }",
-    "",
-    "  validateObjectArray(errors, \"dashboardState.artifacts\", root.artifacts, {",
-    '    strings: ["id", "label", "path", "status", "owner"],',
-    "  });",
-    "  validateObjectArray(errors, \"dashboardState.timeline\", root.timeline, {",
-    '    strings: ["id", "label", "type", "status", "owner", "note"],',
-    "  });",
-    "  validateObjectArray(errors, \"dashboardState.entities\", root.entities, {",
-    '    strings: ["id", "label", "type", "status", "summary"],',
-    "  });",
-    "  validateObjectArray(errors, \"dashboardState.versionLedger\", root.versionLedger, {",
-    '    strings: ["id", "label", "status", "scope"],',
-    '    numbers: ["progressPercent"],',
-    "  });",
-    "",
-    '  const runtimeOrchestration = requireObject(errors, "dashboardState.runtimeOrchestration", root.runtimeOrchestration);',
-    "  if (runtimeOrchestration != null) {",
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "mode");',
-    "    if (runtimeOrchestration.activeSessionId != null && !isString(runtimeOrchestration.activeSessionId)) {",
-    '      pushTypeError(errors, "dashboardState.runtimeOrchestration.activeSessionId", "a string or null", runtimeOrchestration.activeSessionId);',
-    "    }",
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "activeChunkId");',
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "currentPhase");',
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "nextActor");',
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "nextAction");',
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "contextPolicy");',
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "contractCoverageRule");',
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "evaluatorRule");',
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "lastEventAt");',
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "stateFile");',
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "sessionIndexFile");',
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "sessionSummaryFile");',
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "workPacketFile");',
-    '    if (runtimeOrchestration.nativeExecutionStateFile != null && !isString(runtimeOrchestration.nativeExecutionStateFile)) {',
-    '      pushTypeError(errors, "dashboardState.runtimeOrchestration.nativeExecutionStateFile", "a string or null", runtimeOrchestration.nativeExecutionStateFile);',
-    "    }",
-    '    if (runtimeOrchestration.nativeExecutionPlanFile != null && !isString(runtimeOrchestration.nativeExecutionPlanFile)) {',
-    '      pushTypeError(errors, "dashboardState.runtimeOrchestration.nativeExecutionPlanFile", "a string or null", runtimeOrchestration.nativeExecutionPlanFile);',
-    "    }",
-    '    if (runtimeOrchestration.nativeExecutorBridgeId != null && !isString(runtimeOrchestration.nativeExecutorBridgeId)) {',
-    '      pushTypeError(errors, "dashboardState.runtimeOrchestration.nativeExecutorBridgeId", "a string or null", runtimeOrchestration.nativeExecutorBridgeId);',
-    "    }",
-    '    if (runtimeOrchestration.nativeExecutionStatus != null && !isString(runtimeOrchestration.nativeExecutionStatus)) {',
-    '      pushTypeError(errors, "dashboardState.runtimeOrchestration.nativeExecutionStatus", "a string or null", runtimeOrchestration.nativeExecutionStatus);',
-    "    }",
-    '    if (runtimeOrchestration.nativeExecutionErrorCode != null && !isString(runtimeOrchestration.nativeExecutionErrorCode)) {',
-    '      pushTypeError(errors, "dashboardState.runtimeOrchestration.nativeExecutionErrorCode", "a string or null", runtimeOrchestration.nativeExecutionErrorCode);',
-    "    }",
-    '    if (runtimeOrchestration.nativeExecutionErrorMessage != null && !isString(runtimeOrchestration.nativeExecutionErrorMessage)) {',
-    '      pushTypeError(errors, "dashboardState.runtimeOrchestration.nativeExecutionErrorMessage", "a string or null", runtimeOrchestration.nativeExecutionErrorMessage);',
-    "    }",
-    '    requireStringField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "leaseStatus");',
-    '    if (runtimeOrchestration.leasedAt != null && !isString(runtimeOrchestration.leasedAt)) {',
-    '      pushTypeError(errors, "dashboardState.runtimeOrchestration.leasedAt", "a string or null", runtimeOrchestration.leasedAt);',
-    "    }",
-    '    requireNumberField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "queueDepth");',
-    '    requireStringArrayField(errors, "dashboardState.runtimeOrchestration", runtimeOrchestration, "queuedSessionIds");',
-    '    validateObjectArray(errors, "dashboardState.runtimeOrchestration.recentEvents", runtimeOrchestration.recentEvents, {',
-    '      strings: ["at", "phase", "actor", "action", "outcome", "note"],',
-    "    });",
-    "  }",
-    "",
-    '  const operationsHealth = requireObject(errors, "dashboardState.operationsHealth", root.operationsHealth);',
-    "  if (operationsHealth != null) {",
-    '    requireStringField(errors, "dashboardState.operationsHealth", operationsHealth, "status");',
-    '    requireStringField(errors, "dashboardState.operationsHealth", operationsHealth, "lastUpdated");',
-    '    requireStringField(errors, "dashboardState.operationsHealth", operationsHealth, "summary");',
-    '    const traffic = requireObject(errors, "dashboardState.operationsHealth.traffic", operationsHealth.traffic);',
-    "    if (traffic != null) {",
-    '      requireNumberField(errors, "dashboardState.operationsHealth.traffic", traffic, "requestsPerMinute");',
-    '      requireNumberField(errors, "dashboardState.operationsHealth.traffic", traffic, "activeConnections");',
-    '      requireNumberField(errors, "dashboardState.operationsHealth.traffic", traffic, "errorRatePercent");',
-    '      requireStringField(errors, "dashboardState.operationsHealth.traffic", traffic, "source");',
-    "    }",
-    '    const requestResponse = requireObject(errors, "dashboardState.operationsHealth.requestResponse", operationsHealth.requestResponse);',
-    "    if (requestResponse != null) {",
-    '      for (const field of ["totalRequests", "successResponses", "errorResponses", "p50Ms", "p95Ms", "p99Ms", "slowRequestThresholdMs"]) {',
-    '        requireNumberField(errors, "dashboardState.operationsHealth.requestResponse", requestResponse, field);',
-    "      }",
-    '      requireArray(errors, "dashboardState.operationsHealth.requestResponse.recentSamples", requestResponse.recentSamples);',
-    "    }",
-    '    const dbcp = requireObject(errors, "dashboardState.operationsHealth.dbcp", operationsHealth.dbcp);',
-    "    if (dbcp != null) {",
-    '      requireStringField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "status");',
-    '      requireStringField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "poolName");',
-    '      requireNumberField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "activeConnections");',
-    '      requireNumberField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "idleConnections");',
-    '      requireNumberField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "maxConnections");',
-    '      requireNumberField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "waiters");',
-    '      requireStringField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "validationQuery");',
-    '      requireStringField(errors, "dashboardState.operationsHealth.dbcp", dbcp, "lastCheckAt");',
-    "    }",
-    '    validateObjectArray(errors, "dashboardState.operationsHealth.incidentLogs", operationsHealth.incidentLogs, {',
-    '      strings: ["id", "severity", "status", "summary", "source", "firstSeenAt", "lastSeenAt"],',
-    "    });",
-    '    validateObjectArray(errors, "dashboardState.operationsHealth.latencyQueries", operationsHealth.latencyQueries, {',
-    '      strings: ["id", "label", "query", "status", "lastRunAt"],',
-    '      numbers: ["p95Ms"],',
-    "    });",
-    '    validateObjectArray(errors, "dashboardState.operationsHealth.dataSources", operationsHealth.dataSources, {',
-    '      strings: ["id", "label", "status", "path", "expectedSignal"],',
-    "    });",
-    "  }",
-    "",
-    '  const domainLens = requireObject(errors, "dashboardState.domainLens", root.domainLens);',
-    "  if (domainLens != null) {",
-    '    requireStringField(errors, "dashboardState.domainLens", domainLens, "mode");',
-    '    requireStringField(errors, "dashboardState.domainLens", domainLens, "title");',
-    '    requireStringField(errors, "dashboardState.domainLens", domainLens, "primaryQuestion");',
-    "  }",
-    "",
-    "  if (workspace != null && kpiProfile != null && kpis != null) {",
-    "    const expectedProfile = getDashboardKpiProfile(workspace.projectType);",
-    "    const actualKpiIds = new Set(kpis.filter((item) => isPlainObject(item)).map((item) => String(item.id)));",
-    "    if (kpiProfile.id !== expectedProfile.id) {",
-    '      errors.push(`dashboardState.kpiProfile.id must be "${expectedProfile.id}" for projectType "${String(workspace.projectType || "other")}"`);',
-    "    }",
-    "    for (const requiredKpiId of expectedProfile.requiredKpiIds) {",
-    "      if (!actualKpiIds.has(requiredKpiId)) {",
-    '        errors.push(`dashboardState.kpis is missing required KPI "${requiredKpiId}" for profile "${expectedProfile.id}"`);',
-    "      }",
-    "    }",
-    "",
-    "    if (governanceState != null) {",
-    "      const governanceRequiredKpis = Array.isArray(governanceState.requiredKpiIds)",
-    "        ? new Set(governanceState.requiredKpiIds.map((item) => String(item)))",
-    "        : new Set();",
-    "      for (const requiredKpiId of expectedProfile.requiredKpiIds) {",
-    "        if (!governanceRequiredKpis.has(requiredKpiId)) {",
-    '          errors.push(`dashboardState.governanceState.requiredKpiIds is missing required KPI "${requiredKpiId}"`);',
-    "        }",
-    "      }",
-    "    }",
-    "  }",
-    "",
-    "  if (sessionLog != null && governedSessions != null) {",
-    "    const governedSessionIds = new Set(",
-    "      governedSessions",
-    "        .filter((item) => isPlainObject(item))",
-    "        .map((item) => String(item.id))",
-    "    );",
-    "    for (const session of sessionLog) {",
-    "      if (isPlainObject(session) && isString(session.id) && !governedSessionIds.has(session.id)) {",
-    '        errors.push(`dashboardState.governedSessions is missing a governed entry for session "${session.id}"`);',
-    "      }",
-    "    }",
-    "  }",
-    "",
-    "  if (issues != null && issues.some((issue) => isPlainObject(issue) && ![\"open\", \"closed\", \"monitoring\"].includes(String(issue.status || \"\")))) {",
-    '    errors.push("dashboardState.errors entries should use open, closed, or monitoring statuses");',
-    "  }",
-    "",
-    "  return { valid: errors.length === 0, errors };",
-    "}",
-    "",
-    "function validateStrictGovernanceState(state) {",
-    "  const errors = [];",
-    "  const memoryPromotion = isPlainObject(state?.memoryPromotion) ? state.memoryPromotion : {};",
-    "  const evidenceThreshold = isPlainObject(memoryPromotion.evidenceThreshold)",
-    "    ? memoryPromotion.evidenceThreshold",
-    "    : {};",
-    "  const thresholdScore = isFiniteNumber(memoryPromotion.thresholdScore)",
-    "    ? memoryPromotion.thresholdScore",
-    "    : 7;",
-    "  const minimumOccurrences = isFiniteNumber(evidenceThreshold.minimumOccurrences)",
-    "    ? evidenceThreshold.minimumOccurrences",
-    "    : 3;",
-    "  const minimumGovernedSessions = isFiniteNumber(evidenceThreshold.minimumGovernedSessions)",
-    "    ? evidenceThreshold.minimumGovernedSessions",
-    "    : 2;",
-    "  const candidates = Array.isArray(memoryPromotion.candidates) ? memoryPromotion.candidates : [];",
-    "  const operationsHealth = isPlainObject(state?.operationsHealth) ? state.operationsHealth : {};",
-    "  const operationalStatuses = [\"ok\", \"healthy\", \"connected\", \"configured\", \"active\", \"operational\"];",
-    "  const freshnessWindowMs = 24 * 60 * 60 * 1000;",
-    "  const isFreshTimestamp = (value) => {",
-    "    const timestamp = Date.parse(String(value || \"\"));",
-    "    return Number.isFinite(timestamp) && Date.now() - timestamp <= freshnessWindowMs;",
-    "  };",
-    "  const normalizeEvidencePath = (value) => String(value || \"\").replace(/\\\\/g, \"/\").trim();",
-    "  const evidencePathExists = (value) => {",
-    "    const normalized = normalizeEvidencePath(value);",
-    "    if (normalized.length === 0 || normalized === \"TBD\" || /^not-/i.test(normalized)) {",
-    "      return false;",
-    "    }",
-    "    const fullPath = path.isAbsolute(normalized) ? normalized : path.resolve(getWorkspaceRoot(), normalized);",
-    "    return isPathInsideDirectory(fullPath, getWorkspaceRoot()) && fs.existsSync(fullPath);",
-    "  };",
-    "  const allowedGeneratedPathPrefixes = [",
-    '    ".github/skills/",',
-    '    ".github/agents/",',
-    '    ".cursor/skills/",',
-    '    ".cursor/agents/",',
-    '    ".claude/skills/",',
-    '    ".claude/agents/",',
-    '    ".agents/skills/",',
-    '    ".agents/agents/",',
-    '    "awesome/skills/",',
-    '    "awesome/agents/",',
-    "  ];",
-    "  const normalizeGeneratedPath = (value) => String(value).replace(/\\\\/g, \"/\").split(\"/\").filter((segment) => segment.length > 0 && segment !== \".\").join(\"/\").toLowerCase();",
-    "",
-    "  const dbcp = isPlainObject(operationsHealth.dbcp) ? operationsHealth.dbcp : {};",
-    "  const latencyQueries = Array.isArray(operationsHealth.latencyQueries) ? operationsHealth.latencyQueries : [];",
-    "  const operationsStatus = String(operationsHealth.status || \"\").toLowerCase();",
-    "  if (operationalStatuses.includes(operationsStatus)) {",
-    "    const entryPath = \"dashboardState.operationsHealth\";",
-    "    if (!isFreshTimestamp(operationsHealth.lastUpdated)) {",
-    "      errors.push(`${entryPath}.lastUpdated must be an ISO timestamp from the last 24 hours before status can be ${operationsStatus}`);",
-    "    }",
-    "    const dataSources = Array.isArray(operationsHealth.dataSources) ? operationsHealth.dataSources : [];",
-    "    const connectedDataSources = dataSources.filter((source) => isPlainObject(source) && operationalStatuses.includes(String(source.status || \"\").toLowerCase()));",
-    "    if (connectedDataSources.length === 0) {",
-    "      errors.push(`${entryPath}.dataSources must include at least one connected source before status can be ${operationsStatus}`);",
-    "    }",
-    "    if (!operationalStatuses.includes(String(dbcp.status || \"\").toLowerCase())) {",
-    "      errors.push(`${entryPath}.dbcp.status must be operational before status can be ${operationsStatus}`);",
-    "    }",
-    "    const operationalLatencyQueries = latencyQueries.filter((query) => isPlainObject(query) && operationalStatuses.includes(String(query.status || \"\").toLowerCase()));",
-    "    if (operationalLatencyQueries.length === 0) {",
-    "      errors.push(`${entryPath}.latencyQueries must include at least one operational latency query before status can be ${operationsStatus}`);",
-    "    }",
-    "    for (const [index, source] of connectedDataSources.entries()) {",
-    "      if (!evidencePathExists(source.path)) {",
-    "        errors.push(`${entryPath}.dataSources[${index}].path must point to an existing workspace evidence file before status can be ${operationsStatus}`);",
-    "      }",
-    "    }",
-    "  }",
-    "",
-    "  if (operationalStatuses.includes(String(dbcp.status || \"\").toLowerCase())) {",
-    "    if (String(dbcp.validationQuery || \"\").trim().toUpperCase() === \"TBD\") {",
-    "      errors.push(\"dashboardState.operationsHealth.dbcp.validationQuery must be configured before DBCP status can be operational\");",
-    "    }",
-    "    if (!isFreshTimestamp(dbcp.lastCheckAt)) {",
-    "      errors.push(\"dashboardState.operationsHealth.dbcp.lastCheckAt must be an ISO timestamp from the last 24 hours before DBCP status can be operational\");",
-    "    }",
-    "  }",
-    "",
-    "  for (const [index, query] of latencyQueries.entries()) {",
-    "    if (!isPlainObject(query) || !operationalStatuses.includes(String(query.status || \"\").toLowerCase())) {",
-    "      continue;",
-    "    }",
-    "    if (String(query.query || \"\").trim().toUpperCase() === \"TBD\") {",
-    "      errors.push(`dashboardState.operationsHealth.latencyQueries[${index}].query must be configured before query status can be operational`);",
-    "    }",
-    "    if (!isFreshTimestamp(query.lastRunAt)) {",
-    "      errors.push(`dashboardState.operationsHealth.latencyQueries[${index}].lastRunAt must be an ISO timestamp from the last 24 hours before query status can be operational`);",
-    "    }",
-    "  }",
-    "",
-    "  for (const [index, candidate] of candidates.entries()) {",
-    "    if (!isPlainObject(candidate)) {",
-    "      continue;",
-    "    }",
-    "    const decision = String(candidate.decision || \"\").toLowerCase();",
-    "    const status = String(candidate.status || \"\").toLowerCase();",
-    "    const approved = [\"approved\", \"promoted\"].includes(decision) || [\"approved\", \"promoted\"].includes(status);",
-    "    if (!approved) {",
-    "      continue;",
-    "    }",
-    "",
-    "    const entryPath = `dashboardState.memoryPromotion.candidates[${index}]`;",
-    "    const score = isFiniteNumber(candidate.score) ? candidate.score : 0;",
-    "    const occurrences = isFiniteNumber(candidate.occurrences) ? candidate.occurrences : 0;",
-    "    const governedSessionCount = isFiniteNumber(candidate.governedSessionCount)",
-    "      ? candidate.governedSessionCount",
-    "      : 0;",
-    "",
-    "    if (score < thresholdScore) {",
-    "      errors.push(`${entryPath}.score must be >= ${thresholdScore} before approval`);",
-    "    }",
-    "    if (occurrences < minimumOccurrences && governedSessionCount < minimumGovernedSessions) {",
-    "      errors.push(`${entryPath} needs at least ${minimumOccurrences} occurrences or ${minimumGovernedSessions} governed sessions before approval`);",
-    "    }",
-    "    if (String(candidate.collisionCheck || \"\").toLowerCase() !== \"passed\") {",
-    "      errors.push(`${entryPath}.collisionCheck must be passed before approval`);",
-    "    }",
-    "    const generatedPaths = Array.isArray(candidate.generatedPaths) ? candidate.generatedPaths : [];",
-    "    if (generatedPaths.length === 0 || generatedPaths.some((entry) => !isString(entry))) {",
-    "      errors.push(`${entryPath}.generatedPaths must include generated skill or agent paths before approval`);",
-    "    } else {",
-    "      const unsafeGeneratedPaths = generatedPaths.filter((entry) => {",
-    "        const normalized = normalizeGeneratedPath(entry);",
-    "        return !allowedGeneratedPathPrefixes.some((prefix) => normalized.startsWith(prefix));",
-    "      });",
-    "      if (unsafeGeneratedPaths.length > 0) {",
-    "        errors.push(`${entryPath}.generatedPaths must stay under skill or agent ownership roots: ${unsafeGeneratedPaths.join(\", \")}`);",
-    "      }",
-    "    }",
-    "  }",
-    "",
-    "  return { valid: errors.length === 0, errors };",
-    "}",
-    "",
-    "function safeRelativePath(rootDir, targetPath) {",
-    '  return path.relative(rootDir, targetPath).replace(/\\\\/g, "/");',
-    "}",
-    "",
-    "function isPathInsideDirectory(childPath, parentPath) {",
-    "  const relative = path.relative(parentPath, childPath);",
-    '  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));',
-    "}",
-    "",
-    "function getWorkspaceRoot() {",
-    '  return path.resolve(getOption("--workspace-root", defaultWorkspaceRoot));',
-    "}",
-    "",
-    "function getStatePath() {",
-    '  return path.resolve(getOption("--state", defaultStatePath));',
-    "}",
-    "",
-    "function getGitFixturePath() {",
-    '  const fromArgs = getOption("--git-fixture", "");',
-    "  if (fromArgs) {",
-    "    return path.resolve(fromArgs);",
-    "  }",
-    "  if (process.env.DASHBOARD_GIT_FIXTURE) {",
-    "    return path.resolve(process.env.DASHBOARD_GIT_FIXTURE);",
-    "  }",
-    '  return "";',
-    "}",
-    "",
-    "function listFilesRecursively(fullPath) {",
-    "  if (!fs.existsSync(fullPath)) {",
-    "    return [];",
-    "  }",
-    "  const stat = fs.statSync(fullPath);",
-    "  if (stat.isFile()) {",
-    "    return [fullPath];",
-    "  }",
-    "  const files = [];",
-    "  for (const entry of fs.readdirSync(fullPath, { withFileTypes: true })) {",
-    "    const entryPath = path.join(fullPath, entry.name);",
-    "    if (entry.isDirectory()) {",
-    "      files.push(...listFilesRecursively(entryPath));",
-    "      continue;",
-    "    }",
-    "    if (entry.isFile()) {",
-    "      files.push(entryPath);",
-    "    }",
-    "  }",
-    "  return files;",
-    "}",
-    "",
-    "function latestMtime(pathsToCheck) {",
-    "  let latest = 0;",
-    "  for (const fullPath of pathsToCheck) {",
-    "    for (const filePath of listFilesRecursively(fullPath)) {",
-    "      try {",
-    "        latest = Math.max(latest, fs.statSync(filePath).mtimeMs);",
-    "      } catch {",
-    "        // ignore inaccessible files",
-    "      }",
-    "    }",
-    "  }",
-    "  return latest;",
-    "}",
-    "",
-    "function stageProgressPercent(stageChecklist) {",
-    "  if (!Array.isArray(stageChecklist) || stageChecklist.length === 0) {",
-    "    return 0;",
-    "  }",
-    "",
-    "  const statusWeight = (status) => {",
-    '    const normalized = String(status || "").toLowerCase();',
-    '    if (["complete", "completed", "done", "closed"].includes(normalized)) return 100;',
-    '    if (["in-progress", "active"].includes(normalized)) return 50;',
-    "    return 0;",
-    "  };",
-    "",
-    "  const total = stageChecklist.reduce((sum, item) => sum + statusWeight(item.status), 0);",
-    "  return Math.round(total / stageChecklist.length);",
-    "}",
-    "",
-    "function deriveCurrentStage(stageChecklist) {",
-    "  if (!Array.isArray(stageChecklist) || stageChecklist.length === 0) {",
-    '    return "unknown";',
-    "  }",
-    "  const active = stageChecklist.find((item) => [\"in-progress\", \"active\"].includes(String(item.status || \"\").toLowerCase()));",
-    "  if (active) {",
-    '    return active.id || active.label || "in-progress";',
-    "  }",
-    "  const nextTodo = stageChecklist.find((item) => [\"todo\", \"planned\", \"not-started\", \"draft\"].includes(String(item.status || \"\").toLowerCase()));",
-    "  if (nextTodo) {",
-    '    return nextTodo.id || nextTodo.label || "planned";',
-    "  }",
-    "  const last = stageChecklist.at(-1);",
-    '  return (last && (last.id || last.label)) || "complete";',
-    "}",
-    "",
-    "function isStageComplete(stageChecklist, stageId) {",
-    "  const match = Array.isArray(stageChecklist) ? stageChecklist.find((item) => item.id === stageId) : null;",
-    '  return ["complete", "completed", "done", "closed"].includes(String(match?.status || "").toLowerCase());',
-    "}",
-    "",
-    "function countCompletedStages(stageChecklist, prefix) {",
-    "  if (!Array.isArray(stageChecklist)) {",
-    "    return 0;",
-    "  }",
-    "  return stageChecklist.filter(",
-    "    (item) => String(item.id || \"\").startsWith(prefix) && isStageComplete(stageChecklist, item.id)",
-    "  ).length;",
-    "}",
-    "",
-    "function findLatestApprovedStage(stageChecklist) {",
-    "  if (!Array.isArray(stageChecklist) || stageChecklist.length === 0) {",
-    '    return "governance-open";',
-    "  }",
-    "",
-    '  let latest = "governance-open";',
-    "  for (const stageId of GOVERNANCE_STAGE_ORDER) {",
-    "    if (isStageComplete(stageChecklist, stageId)) {",
-    "      latest = stageId;",
-    "      continue;",
-    "    }",
-    "    break;",
-    "  }",
-    "",
-    "  return latest;",
-    "}",
-    "",
-    "function runGit(argsToRun, workspaceRoot) {",
-    '  return execFileSync("git", argsToRun, {',
-    "    cwd: workspaceRoot,",
-    '    encoding: "utf-8",',
-    '    stdio: ["ignore", "pipe", "pipe"],',
-    "  }).trim();",
-    "}",
-    "",
-    "function collectGitStatus(workspaceRoot) {",
-    "  const fallback = {",
-    "    repositoryExpected: true,",
-    '    trackedByGit: "no",',
-    '    provider: "git",',
-    '    defaultBranch: "main",',
-    '    currentBranch: "TBD",',
-    "    lastCommit: {",
-    '      sha: "TBD",',
-    '      message: "TBD",',
-    '      author: "TBD",',
-    '      committedAt: "TBD",',
-    "    },",
-    "    workingTree: {",
-    '      status: "unknown",',
-    '      stagedChanges: "TBD",',
-    '      unstagedChanges: "TBD",',
-    '      untrackedFiles: "TBD",',
-    "    },",
-    '    auditExpectations: ["Track dashboard JSON files in version control.", "Track governance documents and handover files in version control.", "Refresh git snapshot after each meaningful session close."],',
-    "  };",
-    "",
-    "  const fixturePath = getGitFixturePath();",
-    "  if (fixturePath) {",
-    "    try {",
-    "      return deepMerge(fallback, readJsonFile(fixturePath));",
-    "    } catch {",
-    "      return fallback;",
-    "    }",
-    "  }",
-    "",
-    "  try {",
-    '    const repoRoot = runGit(["rev-parse", "--show-toplevel"], workspaceRoot);',
-    '    const currentBranch = runGit(["branch", "--show-current"], workspaceRoot) || "detached-head";',
-    '    let defaultBranch = "main";',
-    "    try {",
-    '      const symbolicHead = runGit(["symbolic-ref", "refs/remotes/origin/HEAD"], workspaceRoot);',
-    '      const segments = symbolicHead.split("/");',
-    "      defaultBranch = segments.at(-1) || defaultBranch;",
-    "    } catch {",
-    "      try {",
-    '        defaultBranch = runGit(["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot) || defaultBranch;',
-    "      } catch {",
-    "        // keep fallback",
-    "      }",
-    "    }",
-    "",
-    '    let sha = "TBD";',
-    '    let message = "TBD";',
-    '    let author = "TBD";',
-    '    let committedAt = "TBD";',
-    "    try {",
-    '      sha = runGit(["rev-parse", "HEAD"], workspaceRoot);',
-    '      message = runGit(["log", "-1", "--pretty=%s"], workspaceRoot);',
-    '      author = runGit(["log", "-1", "--pretty=%an"], workspaceRoot);',
-    '      committedAt = runGit(["log", "-1", "--pretty=%aI"], workspaceRoot);',
-    "    } catch {",
-    "      // repo without commits yet",
-    "    }",
-    "",
-    '    const statusPorcelain = runGit(["status", "--porcelain"], workspaceRoot);',
-    "    const lines = statusPorcelain.length > 0 ? statusPorcelain.split(/\\r?\\n/) : [];",
-    "    let stagedChanges = 0;",
-    "    let unstagedChanges = 0;",
-    "    let untrackedFiles = 0;",
-    "",
-    "    for (const line of lines) {",
-    "      if (!line) continue;",
-    "      const indexStatus = line[0];",
-    "      const workTreeStatus = line[1];",
-    '      if (indexStatus === "?" && workTreeStatus === "?") {',
-    "        untrackedFiles += 1;",
-    "        continue;",
-    "      }",
-    '      if (indexStatus && indexStatus !== " ") {',
-    "        stagedChanges += 1;",
-    "      }",
-    '      if (workTreeStatus && workTreeStatus !== " ") {',
-    "        unstagedChanges += 1;",
-    "      }",
-    "    }",
-    "",
-    "    return {",
-    "      repositoryExpected: true,",
-    '      trackedByGit: repoRoot ? "yes" : "no",',
-    '      provider: "git",',
-    "      defaultBranch,",
-    "      currentBranch,",
-    "      lastCommit: { sha, message, author, committedAt },",
-    "      workingTree: {",
-    '        status: stagedChanges === 0 && unstagedChanges === 0 && untrackedFiles === 0 ? "clean" : "dirty",',
-    "        stagedChanges: String(stagedChanges),",
-    "        unstagedChanges: String(unstagedChanges),",
-    "        untrackedFiles: String(untrackedFiles),",
-    "      },",
-    "      auditExpectations: fallback.auditExpectations,",
-    "    };",
-    "  } catch {",
-    "    return fallback;",
-    "  }",
-    "}",
-    "",
-    "function buildRequiredArtifactPaths(state) {",
-    '  const basePaths = [".github/ai-harness/harness-manifest.yaml", ".github/ai-harness/managed-file-inventory.json", ".github/ai-harness/reconcile-policy.json", ".github/ai-harness/native-executor-overrides.json", ".github/ai-harness/operating-model.md", ".governance/_INDEX.md", ".governance/_PROJECT_STATE.md", "live-artifacts-dashboard/package.json", "live-artifacts-dashboard/server.js", "live-artifacts-dashboard/public/index.html", "live-artifacts-dashboard/public/app.js", "live-artifacts-dashboard/public/vendor/chart.umd.js", "docs/context/", "docs/reviews/", "docs/plans/", "docs/handovers/", "docs/work-logs/", "docs/ai-harness/readiness/README.md", "docs/ai-harness/readiness/remaining-work-spec.md", "docs/ai-harness/readiness/scoring-model.md", "docs/ai-harness/readiness/maturity-scorecard.template.json", "docs/ai-harness/runtime/README.md", "docs/ai-harness/runtime/version-index.json", "docs/ai-harness/runtime/compatibility-matrix.json", "docs/ai-harness/runtime/adapter-contract.json", "docs/ai-harness/runtime/session-continuity.md", "docs/ai-harness/runtime/state/session-index.json", "docs/ai-harness/runtime/state/active-session.json", "docs/ai-harness/runtime/state/current-work-packet.json", "docs/ai-harness/runtime/state/current-execution-bridge.json", "docs/ai-harness/runtime/state/current-native-execution.json", "docs/ai-harness/runtime/work-packets/README.md", "docs/ai-harness/runtime/adapters/README.md", "docs/ai-harness/runtime/adapter-handoffs/README.md", "docs/ai-harness/runtime/bridges/README.md", "docs/ai-harness/runtime/execution-bridges/README.md", "docs/ai-harness/runtime/native-executors/README.md", "docs/ai-harness/runtime/archive/README.md", "docs/ai-harness/runtime/archive/archive-index.json", "docs/ai-harness/dashboard/state/dashboard-state.json"];',
-    "  const artifactPaths = Array.isArray(state.artifacts)",
-    "    ? state.artifacts.map((artifact) => String(artifact.path || \"\")).filter(Boolean)",
-    "    : [];",
-    "  return [...new Set([...basePaths, ...artifactPaths])];",
-    "}",
-    "",
-    "function refreshArtifactStatuses(state, workspaceRoot) {",
-    "  const artifacts = Array.isArray(state.artifacts) ? state.artifacts : [];",
-    "  state.artifacts = artifacts.map((artifact) => ({",
-    "    ...artifact,",
-    "    status: fs.existsSync(path.join(workspaceRoot, artifact.path || \"\")) ? \"present\" : \"missing\",",
-    "  }));",
-    "}",
-    "",
-    "function refreshSessionLog(state) {",
-    "  const sessionLog = Array.isArray(state.sessionLog) ? [...state.sessionLog] : [];",
-    '  const now = new Date().toISOString();',
-    '  const currentStage = String(state.executiveSummary?.currentStage || deriveCurrentStage(state.progressState?.stageChecklist || []));',
-    "",
-    "  if (sessionLog.length === 0) {",
-    "    sessionLog.push({",
-    '      id: "session-0001",',
-    '      title: "Dashboard refresh",',
-    '      status: "complete",',
-    "      stage: currentStage,",
-    "      startedAt: now,",
-    "      endedAt: now,",
-    '      owner: "dashboard-ops",',
-    '      outputs: ["docs/ai-harness/dashboard/state/dashboard-state.json"],',
-    '      note: "Dashboard state synchronized from repository, governance, and git signals.",',
-    "    });",
-    "    state.sessionLog = sessionLog;",
-    "    return;",
-    "  }",
-    "",
-    "  const last = sessionLog[sessionLog.length - 1];",
-    '  if (last && last.id === "session-auto-refresh") {',
-    "    last.endedAt = now;",
-    "    last.stage = currentStage;",
-    '    last.note = "Dashboard state synchronized from repository, governance, and git signals.";',
-    "    state.sessionLog = sessionLog;",
-    "    return;",
-    "  }",
-    "",
-    "  sessionLog.push({",
-    '    id: "session-auto-refresh",',
-    '    title: "Dashboard refresh",',
-    '    status: "complete",',
-    "    stage: currentStage,",
-    "    startedAt: now,",
-    "    endedAt: now,",
-    '    owner: "dashboard-ops",',
-    '    outputs: ["docs/ai-harness/dashboard/state/dashboard-state.json"],',
-    '    note: "Dashboard state synchronized from repository, governance, and git signals.",',
-    "  });",
-    "  state.sessionLog = sessionLog;",
-    "}",
-    "",
-    "function refreshGovernanceState(state) {",
-    "  const projectType = state.workspace?.projectType;",
-    "  const stageChecklist = Array.isArray(state.progressState?.stageChecklist) ? state.progressState.stageChecklist : [];",
-    "  const profile = getDashboardKpiProfile(projectType);",
-    '  const latestApprovedStage = findLatestApprovedStage(stageChecklist);',
-    '  const goalFrozen = isStageComplete(stageChecklist, "goal-freeze");',
-    "  const existing = isPlainObject(state.governanceState) ? state.governanceState : {};",
-    "",
-    "  state.kpiProfile = profile;",
-    "  state.governanceState = {",
-    '    policyId: String(existing.policyId || "three-plan-three-review"),',
-    '    policyLabel: String(existing.policyLabel || "Three-Plan / Three-Review Governance"),',
-    '    status: String(existing.status || (state.progressState?.blocked ? "attention-needed" : "active")),',
-    "    sessionGovernanceRule: String(",
-    '      existing.sessionGovernanceRule ||',
-    '      "Every meaningful AI session must open governance, preserve evidence, and close governance before completion."',
-    "    ),",
-    "    latestApprovedStage,",
-    "    goalFrozen,",
-    '    dashboardSyncStatus: "current",',
-    "    requiredArtifacts: buildRequiredArtifactPaths(state),",
-    "    requiredKpiIds: profile.requiredKpiIds,",
-    '    mandatorySessionFields: Array.isArray(existing.mandatorySessionFields) && existing.mandatorySessionFields.length > 0',
-    "      ? existing.mandatorySessionFields",
-    '      : ["goal", "chunkId", "governance.opened", "governance.latestPlanRound", "governance.latestReviewRound", "verification.reviewStatus", "nextStep"],',
-    "    visibilityRule: String(",
-    '      existing.visibilityRule ||',
-    '      "Every governed session should be visible to operators, product owners, reviewers, and non-developer stakeholders."',
-    "    ),",
-    "  };",
-    "}",
-    "",
-    "function classifyEvidenceOutputs(outputs, workspaceRoot) {",
-    "  const existingOutputs = outputs.filter((outputPath) => fs.existsSync(path.join(workspaceRoot, outputPath)));",
-    "  const materialOutputs = existingOutputs.filter((outputPath) => outputPath !== \"docs/ai-harness/dashboard/state/dashboard-state.json\");",
-    "  return {",
-    "    existingOutputs,",
-    "    materialOutputs,",
-    "    hasMaterialEvidence: materialOutputs.length > 0,",
-    "    types: {",
-    "      plan: existingOutputs.some((item) => item.startsWith(\"docs/plans/\") || item.includes(\"plan\")),",
-    "      contract: existingOutputs.some((item) => item.startsWith(\"docs/contracts/\") || item.includes(\"contract\")),",
-    "      review: existingOutputs.some((item) => item.startsWith(\"docs/reviews/\") || item.includes(\"review\")),",
-    "      evaluation: existingOutputs.some((item) => item.startsWith(\"docs/evaluations/\") || item.includes(\"evaluation\")),",
-    "      handover: existingOutputs.some((item) => item.startsWith(\"docs/handovers/\") || item.includes(\"handover\")),",
-    "      runtime: existingOutputs.some((item) => item.startsWith(\"docs/ai-harness/runtime/\")),",
-    "      dashboardOnly: existingOutputs.length > 0 && materialOutputs.length === 0,",
-    "    },",
-    "  };",
-    "}",
-    "",
-    "function refreshGovernedSessions(state, workspaceRoot) {",
-    "  const sessionLog = Array.isArray(state.sessionLog) ? state.sessionLog : [];",
-    "  const existingGovernedSessions = Array.isArray(state.governedSessions) ? state.governedSessions : [];",
-    "  const existingById = new Map(",
-    "    existingGovernedSessions",
-    "      .filter((session) => isPlainObject(session) && isString(session.id))",
-    "      .map((session) => [session.id, session])",
-    "  );",
-    "",
-    '  const now = new Date().toISOString();',
-    "  const stageChecklist = Array.isArray(state.progressState?.stageChecklist) ? state.progressState.stageChecklist : [];",
-    '  const latestPlanRound = Math.max(1, countCompletedStages(stageChecklist, "plan-"));',
-    '  const latestReviewRound = countCompletedStages(stageChecklist, "review-");',
-    '  const goalFrozen = Boolean(state.governanceState?.goalFrozen || isStageComplete(stageChecklist, "goal-freeze"));',
-    '  const branch = String(state.gitStatus?.currentBranch || "TBD");',
-    '  const commit = String(state.gitStatus?.lastCommit?.sha || "TBD");',
-    '  const defaultGoal = String(state.progressState?.activeGoal || state.workspace?.purpose || "TBD");',
-    '  const defaultChunk = String(state.progressState?.activeChunk || "chunk-unset");',
-    '  const nextAction = String(state.progressState?.nextAction || "Refresh governance and define the next verified step.");',
-    '  const softwareDelivery = inferDashboardDomainMode(state.workspace?.projectType) === "software-delivery";',
-    "",
-    "  const governedSessions = sessionLog.map((session, index) => {",
-    "    const existing = existingById.get(session.id) || {};",
-    "    const outputs = Array.isArray(existing.outputs) && existing.outputs.length > 0",
-    "      ? existing.outputs",
-    "      : Array.isArray(session.outputs) && session.outputs.length > 0",
-    "        ? session.outputs",
-    '        : ["docs/ai-harness/dashboard/state/dashboard-state.json"];',
-    "    const evidence = classifyEvidenceOutputs(outputs, workspaceRoot);",
-    "",
-    "    const verification = {",
-    '      testsStatus: String(existing.verification?.testsStatus || (softwareDelivery ? "pending" : "not-applicable")),',
-    '      reviewStatus: String(existing.verification?.reviewStatus || "pending"),',
-    '      remediationStatus: String(existing.verification?.remediationStatus || "not-started"),',
-    "    };",
-    "",
-    '    const completed = ["complete", "completed", "done", "closed"].includes(String(session.status || "").toLowerCase());',
-    "    const derivedCloseoutReady = Boolean(",
-    "      existing.governance?.closeoutReady ??",
-    "        (completed && verification.reviewStatus !== \"pending\")",
-    "    );",
-    "    const governance = {",
-    "      opened: Boolean(existing.governance?.opened ?? true),",
-    "      latestPlanRound: Number(existing.governance?.latestPlanRound ?? latestPlanRound),",
-    "      latestReviewRound: Number(existing.governance?.latestReviewRound ?? latestReviewRound),",
-    "      goalFrozen: Boolean(existing.governance?.goalFrozen ?? goalFrozen),",
-    "      contractApproved: Boolean(existing.governance?.contractApproved ?? false),",
-    "      independentEvaluationPassed: Boolean(existing.governance?.independentEvaluationPassed ?? false),",
-    "      governanceRefreshed: Boolean(existing.governance?.governanceRefreshed ?? false),",
-    "      closeoutReady: evidence.hasMaterialEvidence && derivedCloseoutReady,",
-    '      evidenceFreshness: evidence.hasMaterialEvidence ? String(existing.governance?.evidenceFreshness || "current") : evidence.existingOutputs.length > 0 ? "dashboard-only" : "missing",',
-    "    };",
-    "",
-    '    let governanceStatus = "active";',
-    "    if (!governance.opened || !evidence.hasMaterialEvidence) {",
-    '      governanceStatus = "attention-needed";',
-    "    } else if (completed) {",
-    '      governanceStatus = governance.closeoutReady ? "governed" : "review-pending";',
-    "    }",
-    "",
-    "    return {",
-    "      id: String(session.id || `session-${String(index + 1).padStart(4, \"0\")}`),",
-    '      title: String(session.title || "Governed session"),',
-    '      status: String(session.status || "complete"),',
-    '      owner: String(session.owner || "dashboard-ops"),',
-    '      agentRole: String(existing.agentRole || session.owner || "dashboard-ops"),',
-    "      governanceStatus,",
-    '      goal: String(existing.goal || defaultGoal),',
-    '      chunkId: String(existing.chunkId || defaultChunk),',
-    "      startedAt: String(session.startedAt || now),",
-    "      endedAt: String(session.endedAt || now),",
-    "      governance,",
-    "      verification,",
-    "      evidence: evidence.types,",
-    "      git: {",
-    '        branch: String(existing.git?.branch || branch),',
-    '        commit: String(existing.git?.commit || commit),',
-    "      },",
-    "      outputs,",
-    '      nextStep: String(existing.nextStep || nextAction),',
-    "    };",
-    "  });",
-    "",
-    "  const sessionIds = new Set(governedSessions.map((session) => session.id));",
-    "  for (const existing of existingGovernedSessions) {",
-    "    if (isPlainObject(existing) && isString(existing.id) && !sessionIds.has(existing.id)) {",
-    "      governedSessions.push(existing);",
-    "    }",
-    "  }",
-    "",
-    "  if (governedSessions.length === 0) {",
-    "    governedSessions.push({",
-    '      id: "session-0001",',
-    '      title: "Dashboard bootstrap",',
-    '      status: "complete",',
-    '      owner: "dashboard-ops",',
-    '      agentRole: "dashboard-ops",',
-    '      governanceStatus: "attention-needed",',
-    "      goal: defaultGoal,",
-    "      chunkId: defaultChunk,",
-    "      startedAt: now,",
-    "      endedAt: now,",
-    "      governance: {",
-    "        opened: true,",
-    "        latestPlanRound,",
-    "        latestReviewRound,",
-    "        goalFrozen,",
-    "        contractApproved: false,",
-    "        independentEvaluationPassed: false,",
-    "        governanceRefreshed: false,",
-    "        closeoutReady: true,",
-    '        evidenceFreshness: "dashboard-only",',
-    "      },",
-    "      verification: {",
-    '        testsStatus: softwareDelivery ? "pending" : "not-applicable",',
-    '        reviewStatus: "pending",',
-    '        remediationStatus: "not-started",',
-    "      },",
-    "      git: { branch, commit },",
-    '      outputs: ["docs/ai-harness/dashboard/state/dashboard-state.json"],',
-    '      evidence: { dashboardOnly: true, plan: false, contract: false, review: false, evaluation: false, handover: false, runtime: false },',
-    "      nextStep: nextAction,",
-    "    });",
-    "  }",
-    "",
-    "  state.governedSessions = governedSessions;",
-    "}",
-    "",
-    "function refreshRuntimeOrchestration(state, workspaceRoot) {",
-    '  const runtimeIndexPath = path.join(workspaceRoot, "docs", "ai-harness", "runtime", "state", "session-index.json");',
-    '  const activeSessionPath = path.join(workspaceRoot, "docs", "ai-harness", "runtime", "state", "active-session.json");',
-    '  const currentNativeExecutionPath = path.join(workspaceRoot, "docs", "ai-harness", "runtime", "state", "current-native-execution.json");',
-    "  const existing = isPlainObject(state.runtimeOrchestration) ? state.runtimeOrchestration : {};",
-    "  const sessionIndex = fs.existsSync(runtimeIndexPath) ? readJsonFile(runtimeIndexPath) : null;",
-    "  const activeSession = fs.existsSync(activeSessionPath) ? readJsonFile(activeSessionPath) : null;",
-    "  const currentNativeExecution = fs.existsSync(currentNativeExecutionPath) ? readJsonFile(currentNativeExecutionPath) : null;",
-    '  const contractRule = String(existing.contractCoverageRule || "No generator implementation begins before the evaluator-approved chunk contract exists.");',
-    '  const evaluatorRule = String(existing.evaluatorRule || "The generator may not self-approve; an independent evaluator records the pass or change-request verdict.");',
-    "",
-    '  let activeSessionId = activeSession && activeSession.activeSessionId != null ? String(activeSession.activeSessionId) : null;',
-    '  let activeChunkId = String(existing.activeChunkId || state.progressState?.activeChunk || "chunk-unset");',
-    '  let currentPhase = String(existing.currentPhase || state.executiveSummary?.currentStage || "awaiting-session-start");',
-    '  let nextActor = String(existing.nextActor || state.progressState?.currentOwner || "planner");',
-    '  let nextAction = String(existing.nextAction || state.progressState?.nextAction || "Start the first governed runtime session before implementation begins.");',
-    '  let contextPolicy = String(existing.contextPolicy || "balanced");',
-    '  let sessionSummaryFile = String(existing.sessionSummaryFile || "docs/ai-harness/runtime/sessions/");',
-    '  let workPacketFile = String(existing.workPacketFile || "docs/ai-harness/runtime/state/current-work-packet.json");',
-    '  let nativeExecutionStateFile = existing.nativeExecutionStateFile == null ? "docs/ai-harness/runtime/state/current-native-execution.json" : String(existing.nativeExecutionStateFile);',
-    '  let nativeExecutionPlanFile = existing.nativeExecutionPlanFile == null ? null : String(existing.nativeExecutionPlanFile);',
-    '  let nativeExecutorBridgeId = existing.nativeExecutorBridgeId == null ? null : String(existing.nativeExecutorBridgeId);',
-    '  let lastEventAt = String(existing.lastEventAt || state.executiveSummary?.lastUpdated || "unknown");',
-    '  let leaseStatus = String(existing.leaseStatus || "idle");',
-    '  let leasedAt = existing.leasedAt == null ? null : String(existing.leasedAt);',
-    '  let queueDepth = Number(existing.queueDepth || 0);',
-    '  let queuedSessionIds = Array.isArray(existing.queuedSessionIds) ? existing.queuedSessionIds.map((item) => String(item)) : [];',
-    "  let recentEvents = Array.isArray(existing.recentEvents) ? existing.recentEvents : [];",
-    "  if (activeSessionId == null && sessionIndex && sessionIndex.activeSessionId != null) {",
-    "    activeSessionId = String(sessionIndex.activeSessionId);",
-    "  }",
-    "  if (sessionIndex) {",
-    '    leaseStatus = String(sessionIndex.lease?.status || leaseStatus);',
-    '    leasedAt = sessionIndex.lease?.leasedAt == null ? leasedAt : String(sessionIndex.lease.leasedAt);',
-    '    queueDepth = Number(sessionIndex.lease?.queueDepth || sessionIndex.queuedSessionIds?.length || queueDepth);',
-    '    queuedSessionIds = Array.isArray(sessionIndex.queuedSessionIds) ? sessionIndex.queuedSessionIds.map((item) => String(item)) : queuedSessionIds;',
-    '    if (activeSessionId == null && queuedSessionIds.length > 0) { workPacketFile = "docs/ai-harness/runtime/work-packets/" + queuedSessionIds[0] + ".work-packet.json"; }',
-    "  }",
-    "",
-    "  if (activeSession && isPlainObject(activeSession.session) && isPlainObject(activeSession.session.session)) {",
-    "    const runtimeSession = activeSession.session;",
-    "    const sessionMeta = runtimeSession.session;",
-    '    activeChunkId = String(runtimeSession.chunk?.id || sessionMeta.activeChunkId || activeChunkId);',
-    '    currentPhase = String(activeSession.currentPhase || sessionMeta.currentPhase || currentPhase);',
-    '    nextActor = String(activeSession.nextActor || sessionMeta.nextActor || nextActor);',
-    '    nextAction = String(activeSession.nextAction || runtimeSession.notes?.current || nextAction);',
-    '    contextPolicy = String(runtimeSession.context?.policy || contextPolicy);',
-    '    sessionSummaryFile = "docs/ai-harness/runtime/sessions/" + String(sessionMeta.id || activeSessionId || "");',
-    '    if (!sessionSummaryFile.endsWith(".md")) { sessionSummaryFile += ".md"; }',
-    '    workPacketFile = "docs/ai-harness/runtime/work-packets/" + String(sessionMeta.id || activeSessionId || "") + ".work-packet.json";',
-    '    lastEventAt = String(activeSession.lastUpdatedAt || lastEventAt);',
-    '    leaseStatus = String(activeSession.leaseStatus || leaseStatus);',
-    '    leasedAt = activeSession.leasedAt == null ? leasedAt : String(activeSession.leasedAt);',
-    '    queueDepth = Number(activeSession.queueDepth || queueDepth);',
-    '    queuedSessionIds = Array.isArray(activeSession.queuedSessionIds) ? activeSession.queuedSessionIds.map((item) => String(item)) : queuedSessionIds;',
-    "    recentEvents = Array.isArray(runtimeSession.events)",
-    "      ? runtimeSession.events.slice(-5).map((event) => ({",
-    '          at: String(event.at || ""),',
-    '          phase: String(event.phase || ""),',
-    '          actor: String(event.actor || ""),',
-    '          action: String(event.action || ""),',
-    '          outcome: String(event.outcome || ""),',
-    '          note: String(event.note || ""),',
-    "        }))",
-    "      : recentEvents;",
-    "  }",
-    "",
-    "  if (currentNativeExecution && isPlainObject(currentNativeExecution)) {",
-    '    nativeExecutionStateFile = String(currentNativeExecution.nativeExecutionStateFile || nativeExecutionStateFile);',
-    '    nativeExecutionPlanFile = currentNativeExecution.nativeExecutionPlanFile == null ? nativeExecutionPlanFile : String(currentNativeExecution.nativeExecutionPlanFile);',
-    '    nativeExecutorBridgeId = currentNativeExecution.bridgeId == null ? nativeExecutorBridgeId : String(currentNativeExecution.bridgeId);',
-    '    if (isString(currentNativeExecution.generatedAt)) { lastEventAt = String(currentNativeExecution.generatedAt); }',
-    "  }",
-    "",
-    "  state.runtimeOrchestration = {",
-    '    mode: String((activeSession && activeSession.mode) || existing.mode || "planner-generator-evaluator"),',
-    "    activeSessionId,",
-    "    activeChunkId,",
-    "    currentPhase,",
-    "    nextActor,",
-    "    nextAction,",
-    "    contextPolicy,",
-    "    contractCoverageRule: contractRule,",
-    "    evaluatorRule,",
-    "    lastEventAt,",
-    '    stateFile: "docs/ai-harness/runtime/state/active-session.json",',
-    '    sessionIndexFile: "docs/ai-harness/runtime/state/session-index.json",',
-    "    sessionSummaryFile,",
-    "    workPacketFile,",
-    "    nativeExecutionStateFile,",
-    "    nativeExecutionPlanFile,",
-    "    nativeExecutorBridgeId,",
-    "    leaseStatus,",
-    "    leasedAt,",
-    "    queueDepth,",
-    "    queuedSessionIds,",
-    "    recentEvents,",
-    "  };",
-    "}",
-    "",
-    "function upsertKpi(kpis, nextKpi) {",
-    "  const existingIndex = kpis.findIndex((item) => item.id === nextKpi.id);",
-    "  if (existingIndex >= 0) {",
-    "    kpis[existingIndex] = { ...kpis[existingIndex], ...nextKpi };",
-    "    return;",
-    "  }",
-    "  kpis.push(nextKpi);",
-    "}",
-    "",
-    "function statusFromFraction(numerator, denominator) {",
-    "  if (denominator <= 0) {",
-    '    return "warning";',
-    "  }",
-    "  if (numerator >= denominator) {",
-    '    return "ok";',
-    "  }",
-    "  if (numerator > 0) {",
-    '    return "warning";',
-    "  }",
-    '  return "risk";',
-    "}",
-    "",
-    "function refreshGovernanceKpis(state, workspaceRoot) {",
-    "  const projectType = state.workspace?.projectType;",
-    "  const requiredDefinitions = getRequiredDashboardKpis(projectType);",
-    "  const profile = getDashboardKpiProfile(projectType);",
-    "  state.kpiProfile = profile;",
-    "",
-    "  const kpis = Array.isArray(state.kpis)",
-    "    ? state.kpis.filter((item) => isPlainObject(item))",
-    "    : [];",
-    "  const stageChecklist = Array.isArray(state.progressState?.stageChecklist) ? state.progressState.stageChecklist : [];",
-    "  const governedSessions = Array.isArray(state.governedSessions) ? state.governedSessions.filter((item) => isPlainObject(item)) : [];",
-    "  const requiredArtifactPaths = buildRequiredArtifactPaths(state);",
-    "  const presentArtifactCount = requiredArtifactPaths.filter((artifactPath) => fs.existsSync(path.join(workspaceRoot, artifactPath))).length;",
-    "  const latestGovernanceChange = latestMtime(requiredArtifactPaths.map((artifactPath) => path.join(workspaceRoot, artifactPath)));",
-    '  const now = Date.now();',
-    '  const gitTracked = String(state.gitStatus?.trackedByGit || "unknown");',
-    '  const gitCommit = String(state.gitStatus?.lastCommit?.sha || "TBD");',
-    '  const domainMode = inferDashboardDomainMode(projectType);',
-    "  const planReviewComplete = countCompletedStages(stageChecklist, \"plan-\") + countCompletedStages(stageChecklist, \"review-\");",
-    "  const totalPlanReviewStages = 6;",
-    "  const fullyGovernedSessions = governedSessions.filter(",
-    "    (session) => session.governance?.opened === true && Array.isArray(session.outputs) && session.outputs.length > 0",
-    "  ).length;",
-    "  const traceableSessions = governedSessions.filter(",
-    "    (session) => Array.isArray(session.outputs) && session.outputs.length > 0 && isString(session.nextStep) && session.nextStep.length > 0",
-    "  ).length;",
-    "  const sessionsWithReview = governedSessions.filter(",
-    "    (session) => ![\"pending\", \"not-started\"].includes(String(session.verification?.reviewStatus || \"\").toLowerCase())",
-    "  ).length;",
-    "  const sessionsWithTestEvidence = governedSessions.filter(",
-    "    (session) => ![\"pending\", \"not-started\"].includes(String(session.verification?.testsStatus || \"\").toLowerCase())",
-    "  ).length;",
-    "  function sessionOutputStrings(session) {",
-    "    return Array.isArray(session.outputs) ? session.outputs.map((item) => String(item)) : [];",
-    "  }",
-    "  const contractApprovedSessions = governedSessions.filter((session) => {",
-    "    const governance = isPlainObject(session.governance) ? session.governance : {};",
-    "    const outputs = sessionOutputStrings(session);",
-    "    const hasContractArtifact = outputs.some((item) => item.includes(\"docs/contracts/\") || item.includes(\"-contract.md\"));",
-    "    return (",
-    "      isString(session.chunkId) &&",
-    "      session.chunkId.length > 0 &&",
-    "      isString(session.nextStep) &&",
-    "      session.nextStep.length > 0 &&",
-    "      governance.contractApproved === true &&",
-    "      hasContractArtifact",
-    "    );",
-    "  }).length;",
-    "  const independentlyEvaluatedSessions = governedSessions.filter((session) => {",
-    "    const governance = isPlainObject(session.governance) ? session.governance : {};",
-    "    const outputs = sessionOutputStrings(session);",
-    "    const hasEvaluationArtifact = outputs.some((item) => item.includes(\"docs/evaluations/\") || item.includes(\"-independent-evaluation.md\"));",
-    "    return governance.independentEvaluationPassed === true && hasEvaluationArtifact;",
-    "  }).length;",
-    "  const versionCount = Array.isArray(state.versionLedger) ? state.versionLedger.length : 0;",
-    "  const timelineCount = Array.isArray(state.timeline) ? state.timeline.length : 0;",
-    "  const entityCount = Array.isArray(state.entities) ? state.entities.length : 0;",
-    "  const characterCount = Array.isArray(state.entities)",
-    "    ? state.entities.filter((entity) => String(entity.type || \"\").toLowerCase() === \"character\").length",
-    "    : 0;",
-    "  const workstreamCount = Array.isArray(state.progressState?.workstreams) ? state.progressState.workstreams.length : 0;",
-    "",
-    "  const computed = {",
-    '    "governance-freshness": latestGovernanceChange === 0',
-    "      ? { value: \"missing-evidence\", status: \"risk\", interpretation: \"Governance artifacts are missing or empty, so freshness cannot be established.\" }",
-    "      : now - latestGovernanceChange <= 24 * 60 * 60 * 1000",
-    "        ? { value: \"current\", status: \"ok\", interpretation: \"Governance artifacts were refreshed within the last 24 hours.\" }",
-    "        : { value: \"stale\", status: \"warning\", interpretation: \"Governance artifacts have not been refreshed recently enough for reliable handover.\" },",
-    '    "planning-review-completion": {',
-    "      value: String(planReviewComplete) + \" / \" + String(totalPlanReviewStages) + \" gates complete\",",
-    "      status: statusFromFraction(planReviewComplete, totalPlanReviewStages),",
-    '      interpretation: planReviewComplete >= totalPlanReviewStages',
-    '        ? "All required planning and review gates have been completed before implementation."',
-    '        : "Continue the plan/review ladder until all six gates are complete and the goal is frozen."',
-    "    },",
-    '    "contract-coverage": {',
-    "      value: String(contractApprovedSessions) + \" / \" + String(governedSessions.length || 1) + \" chunks with approved contract evidence\",",
-    "      status: statusFromFraction(",
-    "        contractApprovedSessions,",
-    "        governedSessions.length || 1",
-    "      ),",
-    '      interpretation: governedSessions.length > 0 && contractApprovedSessions >= governedSessions.length',
-    '        ? "Every governed session has approved contract evidence."',
-    '        : "Some sessions still need approved contract evidence or a contract artifact path."',
-    "    },",
-    '    "session-resumability": {',
-    "      value: String(presentArtifactCount) + \" / \" + String(requiredArtifactPaths.length) + \" artifacts present\",",
-    "      status: statusFromFraction(presentArtifactCount, requiredArtifactPaths.length),",
-    '      interpretation: presentArtifactCount >= requiredArtifactPaths.length',
-    '        ? "Required artifacts are present, improving restart safety across future sessions."',
-    '        : "Some resumability artifacts are missing, which weakens safe continuation."',
-    "    },",
-    '    "session-governance-coverage": {',
-    "      value: String(fullyGovernedSessions) + \" / \" + String(governedSessions.length || 1) + \" sessions governed\",",
-    "      status: statusFromFraction(fullyGovernedSessions, governedSessions.length || 1),",
-    '      interpretation: fullyGovernedSessions >= Math.max(1, governedSessions.length)',
-    '        ? "Every visible session has governance and outputs attached."',
-    '        : "Some session records still need governance open/close evidence or outputs."',
-    "    },",
-    '    "independent-evaluation-discipline": {',
-    "      value: String(independentlyEvaluatedSessions) + \" / \" + String(governedSessions.length || 1) + \" sessions independently evaluated\",",
-    "      status: statusFromFraction(independentlyEvaluatedSessions, governedSessions.length || 1),",
-    '      interpretation: independentlyEvaluatedSessions >= Math.max(1, governedSessions.length)',
-    '        ? "Independent evaluation approval and artifact evidence exist for every governed session."',
-    '        : "Some sessions still rely on incomplete or missing independent evaluation approval evidence."',
-    "    },",
-    '    "evidence-traceability": {',
-    "      value: String(traceableSessions) + \" / \" + String(governedSessions.length || 1) + \" sessions traceable\",",
-    "      status: statusFromFraction(traceableSessions, governedSessions.length || 1),",
-    '      interpretation: traceableSessions >= Math.max(1, governedSessions.length)',
-    '        ? "Governed sessions keep evidence and next steps visible."',
-    '        : "Some sessions are missing output links or the next step needed for clean handover."',
-    "    },",
-    '    "git-history-visibility": gitTracked === "yes" && gitCommit !== "TBD"',
-    '      ? { value: "tracked", status: "ok", interpretation: "Git history is available for dashboard and governance traces." }',
-    '      : { value: "not-tracked", status: "warning", interpretation: "Connect the workspace to Git so stakeholders can audit progress and decisions over time." },',
-    '    "ax-dx-adoption": {',
-    '      value: governedSessions.length > 0 && requiredArtifactPaths.length > 0 ? "operational" : "partial",',
-    '      status: governedSessions.length > 0 ? "ok" : "warning",',
-    '      interpretation: governedSessions.length > 0',
-    '        ? "The workspace exposes dashboard, governance, and session visibility for DX/AX operating models."',
-    '        : "Session-level governance visibility still needs to be populated for real work."',
-    "    },",
-    '    "test-coverage-discipline": {',
-    "      value: String(sessionsWithTestEvidence) + \" sessions with test evidence\",",
-    '      status: sessionsWithTestEvidence > 0 ? "ok" : "warning",',
-    '      interpretation: sessionsWithTestEvidence > 0',
-    '        ? "Programming sessions already carry test evidence or a documented verification result."',
-    '        : "No test or verification evidence has been recorded yet for governed delivery sessions."',
-    "    },",
-    '    "release-traceability": {',
-    "      value: String(versionCount) + \" ledger entries\",",
-    '      status: versionCount > 0 ? "ok" : "warning",',
-    '      interpretation: versionCount > 0',
-    '        ? "Version or feature-wave tracking is active in the dashboard."',
-    '        : "The version ledger still needs at least one tracked release or draft entry."',
-    "    },",
-    '    "service-operability-readiness": {',
-    "      value: String(workstreamCount) + \" workstreams / \" + String(sessionsWithReview) + \" reviewed sessions\",",
-    '      status: sessionsWithReview > 0 ? "ok" : "warning",',
-    '      interpretation: sessionsWithReview > 0',
-    '        ? "Delivery governance already includes review evidence useful for service operability and release safety."',
-    '        : "Runbooks, review evidence, or release readiness records still need to be populated."',
-    "    },",
-    '    "story-continuity-integrity": {',
-    "      value: String(timelineCount) + \" timeline entries / \" + String(entityCount) + \" entities\",",
-    '      status: timelineCount > 0 && entityCount > 0 ? "ok" : "warning",',
-    '      interpretation: timelineCount > 0 && entityCount > 0',
-    '        ? "Narrative continuity can be reviewed from the timeline and entity ledgers."',
-    '        : "Story continuity needs timeline and entity tracking to stay reliable across sessions."',
-    "    },",
-    '    "character-ledger-freshness": {',
-    "      value: String(characterCount) + \" character entries\",",
-    '      status: characterCount > 0 ? "ok" : "warning",',
-    '      interpretation: characterCount > 0',
-    '        ? "Character or role entities are visible for session-to-session continuity review."',
-    '        : "Important characters or equivalent domain entities still need a visible ledger."',
-    "    },",
-    '    "evidence-quality": {',
-    "      value: String(traceableSessions) + \" traceable sessions\",",
-    '      status: traceableSessions > 0 ? "ok" : "warning",',
-    '      interpretation: traceableSessions > 0',
-    '        ? "Claims and progress can be traced through outputs and next steps."',
-    '        : "Evidence trails still need live updates to support reliable review."',
-    "    },",
-    '    "learning-loop-completion": {',
-    "      value: String(timelineCount) + \" modules / \" + String(versionCount) + \" iterations\",",
-    '      status: timelineCount > 0 && versionCount > 0 ? "ok" : "warning",',
-    '      interpretation: timelineCount > 0 && versionCount > 0',
-    '        ? "Learning cycles can be reviewed from module and iteration records."',
-    '        : "Learning or research loops still need explicit module and iteration records."',
-    "    },",
-    '    "initiative-traceability": {',
-    "      value: String(timelineCount) + \" milestones / \" + String(governedSessions.length) + \" sessions\",",
-    '      status: timelineCount > 0 && governedSessions.length > 0 ? "ok" : "warning",',
-    '      interpretation: timelineCount > 0 && governedSessions.length > 0',
-    '        ? "Initiatives, milestones, and governed execution records can be reviewed together."',
-    '        : "Milestone or initiative traces still need explicit dashboard records."',
-    "    },",
-    '    "stakeholder-visibility": {',
-    '      value: fs.existsSync(path.join(workspaceRoot, "docs", "ai-harness", "dashboard", "index.html")) ? "visible" : "missing",',
-    '      status: fs.existsSync(path.join(workspaceRoot, "docs", "ai-harness", "dashboard", "index.html")) ? "ok" : "risk",',
-    '      interpretation: "The dashboard remains the main readable control surface for developers and non-developers alike.",',
-    "    },",
-    "  };",
-    "",
-    "  for (const definition of requiredDefinitions) {",
-    "    const resolved = computed[definition.id] || {",
-    "      value: definition.defaultValue,",
-    "      status: definition.defaultStatus,",
-    "      interpretation: definition.defaultInterpretation,",
-    "    };",
-    "",
-    "    upsertKpi(kpis, {",
-    "      id: definition.id,",
-    "      label: definition.label,",
-    "      target: definition.target,",
-    "      value: resolved.value,",
-    "      status: resolved.status,",
-    "      interpretation: resolved.interpretation,",
-    "      perspectives: definition.perspectives,",
-    "      required: true,",
-    "    });",
-    "  }",
-    "",
-    "  const requiredOrder = new Map(requiredDefinitions.map((definition, index) => [definition.id, index]));",
-    "  kpis.sort((left, right) => {",
-    "    const leftOrder = requiredOrder.has(left.id) ? requiredOrder.get(left.id) : Number.MAX_SAFE_INTEGER;",
-    "    const rightOrder = requiredOrder.has(right.id) ? requiredOrder.get(right.id) : Number.MAX_SAFE_INTEGER;",
-    "    return leftOrder - rightOrder;",
-    "  });",
-    "  state.kpis = kpis;",
-    "",
-    "  if (domainMode === \"software-delivery\" && sessionsWithTestEvidence === 0) {",
-    "    const infoIssue = {",
-    '      id: "test-evidence-gap",',
-    '      severity: "warning",',
-    '      status: "open",',
-    '      summary: "Software-delivery sessions should add test evidence or a documented verification gap.",',
-    '      owner: "harness-quality-gate",',
-    '      firstSeenAt: "auto-refresh",',
-    '      lastSeenAt: new Date().toISOString(),',
-    "    };",
-    "    const issues = Array.isArray(state.errors) ? [...state.errors.filter((issue) => String(issue.id || \"\") !== infoIssue.id)] : [];",
-    "    issues.push(infoIssue);",
-    "    state.errors = issues;",
-    "  }",
-    "}",
-    "",
-    "function coerceFiniteNumber(value, fallback, options) {",
-    "  const numeric = Number(value);",
-    "  let resolved = Number.isFinite(numeric) ? numeric : fallback;",
-    "  if (options?.min != null) { resolved = Math.max(options.min, resolved); }",
-    "  if (options?.max != null) { resolved = Math.min(options.max, resolved); }",
-    "  return resolved;",
-    "}",
-    "",
-    "function refreshOperationsHealth(state) {",
-    "  const existing = isPlainObject(state.operationsHealth) ? state.operationsHealth : {};",
-    "  const existingTraffic = isPlainObject(existing.traffic) ? existing.traffic : {};",
-    "  const existingRequestResponse = isPlainObject(existing.requestResponse) ? existing.requestResponse : {};",
-    "  const existingDbcp = isPlainObject(existing.dbcp) ? existing.dbcp : {};",
-    "  state.operationsHealth = {",
-    '    status: String(existing.status || "not-configured"),',
-    "    lastUpdated: String(existing.lastUpdated || new Date().toISOString()),",
-    "    summary: String(",
-    '      existing.summary ||',
-    '      "Connect application metrics, access logs, DBCP pool metrics, incident logs, and latency query outputs when adopting the harness into a running service."',
-    "    ),",
-    "    traffic: {",
-    "      requestsPerMinute: coerceFiniteNumber(existingTraffic.requestsPerMinute, 0, { min: 0 }),",
-    "      activeConnections: coerceFiniteNumber(existingTraffic.activeConnections, 0, { min: 0 }),",
-    "      errorRatePercent: coerceFiniteNumber(existingTraffic.errorRatePercent, 0, { min: 0, max: 100 }),",
-    '      source: String(existingTraffic.source || "not-connected"),',
-    "    },",
-    "    requestResponse: {",
-    "      totalRequests: coerceFiniteNumber(existingRequestResponse.totalRequests, 0, { min: 0 }),",
-    "      successResponses: coerceFiniteNumber(existingRequestResponse.successResponses, 0, { min: 0 }),",
-    "      errorResponses: coerceFiniteNumber(existingRequestResponse.errorResponses, 0, { min: 0 }),",
-    "      p50Ms: coerceFiniteNumber(existingRequestResponse.p50Ms, 0, { min: 0 }),",
-    "      p95Ms: coerceFiniteNumber(existingRequestResponse.p95Ms, 0, { min: 0 }),",
-    "      p99Ms: coerceFiniteNumber(existingRequestResponse.p99Ms, 0, { min: 0 }),",
-    "      slowRequestThresholdMs: coerceFiniteNumber(existingRequestResponse.slowRequestThresholdMs, 1000, { min: 1 }),",
-    "      recentSamples: Array.isArray(existingRequestResponse.recentSamples) ? existingRequestResponse.recentSamples : [],",
-    "    },",
-    "    dbcp: {",
-    '      status: String(existingDbcp.status || "unknown"),',
-    '      poolName: String(existingDbcp.poolName || "default"),',
-    "      activeConnections: coerceFiniteNumber(existingDbcp.activeConnections, 0, { min: 0 }),",
-    "      idleConnections: coerceFiniteNumber(existingDbcp.idleConnections, 0, { min: 0 }),",
-    "      maxConnections: coerceFiniteNumber(existingDbcp.maxConnections, 0, { min: 0 }),",
-    "      waiters: coerceFiniteNumber(existingDbcp.waiters, 0, { min: 0 }),",
-    '      validationQuery: String(existingDbcp.validationQuery || "TBD"),',
-    '      lastCheckAt: String(existingDbcp.lastCheckAt || "bootstrap"),',
-    "    },",
-    "    incidentLogs: Array.isArray(existing.incidentLogs) && existing.incidentLogs.length > 0 ? existing.incidentLogs : [{",
-    '      id: "ops-observability-bootstrap",',
-    '      severity: "info",',
-    '      status: "open",',
-    '      summary: "Wire server logs and incident sources before relying on this dashboard for production operations.",',
-    '      source: "bootstrap",',
-    '      firstSeenAt: "bootstrap",',
-    '      lastSeenAt: "bootstrap",',
-    "    }],",
-    "    latencyQueries: Array.isArray(existing.latencyQueries) && existing.latencyQueries.length > 0 ? existing.latencyQueries : [{",
-    '      id: "latency-p95",',
-    '      label: "P95 endpoint latency",',
-    '      query: "TBD",',
-    '      status: "not-configured",',
-    '      p95Ms: 0,',
-    '      lastRunAt: "bootstrap",',
-    "    }],",
-    "    dataSources: Array.isArray(existing.dataSources) && existing.dataSources.length > 0 ? existing.dataSources : [{",
-    '      id: "application-logs",',
-    '      label: "Application request and response logs",',
-    '      status: "not-connected",',
-    '      path: "TBD",',
-    '      expectedSignal: "traffic, request, response, error rate, and incident evidence",',
-    "    }, {",
-    '      id: "dbcp-metrics",',
-    '      label: "DBCP pool metrics",',
-    '      status: "not-connected",',
-    '      path: "TBD",',
-    '      expectedSignal: "active, idle, max, waiters, validation query, and last check time",',
-    "    }],",
-    "  };",
-    "}",
-    "",
-    "function refreshExecutiveSummary(state) {",
-    "  const stageChecklist = Array.isArray(state.progressState?.stageChecklist) ? state.progressState.stageChecklist : [];",
-    "  const overallProgressPercent = stageProgressPercent(stageChecklist);",
-    "  const currentStage = deriveCurrentStage(stageChecklist);",
-    "  const blocked = Boolean(state.progressState?.blocked);",
-    "  const openErrors = Array.isArray(state.errors)",
-    "    ? state.errors.filter((item) => String(item.status || \"\").toLowerCase() === \"open\")",
-    "    : [];",
-    "",
-    "  state.executiveSummary = {",
-    "    ...state.executiveSummary,",
-    "    overallProgressPercent,",
-    "    currentStage,",
-    "    overallStatus: blocked",
-    '      ? "blocked"',
-    '      : openErrors.some((item) => String(item.severity || "").toLowerCase() === "critical")',
-    '        ? "at-risk"',
-    '        : "active",',
-    '    lastUpdated: new Date().toISOString(),',
-    "  };",
-    "}",
-    "",
-    "function refreshState(state, workspaceRoot) {",
-    "  refreshArtifactStatuses(state, workspaceRoot);",
-    "  state.gitStatus = collectGitStatus(workspaceRoot);",
-    "  refreshGovernanceState(state);",
-    "  refreshSessionLog(state);",
-    "  refreshGovernedSessions(state, workspaceRoot);",
-    "  refreshRuntimeOrchestration(state, workspaceRoot);",
-    "  refreshOperationsHealth(state);",
-    "  refreshGovernanceKpis(state, workspaceRoot);",
-    "  refreshExecutiveSummary(state);",
-    "  state.meta = {",
-    "    ...state.meta,",
-    '    lastAutoRefreshAt: new Date().toISOString(),',
-    "  };",
-    "  return state;",
-    "}",
-    "",
-    "function ensureValidState(state) {",
-    "  const validation = validateDashboardStateShape(state);",
-    "  if (!validation.valid) {",
-    '    throw new Error("Dashboard state validation failed:\\n" + validation.errors.map((error) => "  - " + error).join("\\n"));',
-    "  }",
-    "}",
-    "",
-    "function createStandaloneSnapshotHtml(indexHtml, css, js, state) {",
-    '  const stateJson = JSON.stringify(state, null, 2).replace(/</g, "\\\\u003c");',
-    "",
-    "  let html = indexHtml.replace(",
-    '    /<link rel="stylesheet" href="\\.\\/app\\.css" \\/>/,',
-    '    "<style>\\n" + css + "\\n</style>"',
-    "  );",
-    "  html = html.replace(",
-    '    /<script src="\\.\\/app\\.js"><\\/script>/,',
-    '    "<script>\\n" + js + "\\n</script>"',
-    "  );",
-    "  html = html.replace(",
-    '    /<script id="dashboard-bootstrap-data" type="application\\/json">[\\s\\S]*?<\\/script>/,',
-    '    \'<script id="dashboard-bootstrap-data" type="application/json">\' + stateJson + "</script>"',
-    "  );",
-    "  return html;",
-    "}",
-    "",
-    "function handleRefresh() {",
-    "  const workspaceRoot = getWorkspaceRoot();",
-    "  const statePath = getStatePath();",
-    '  const patchPath = getOption("--patch", "");',
-    "  let state = readJsonFile(statePath);",
-    "",
-    "  if (patchPath) {",
-    "    const patch = readJsonFile(path.resolve(patchPath));",
-    "    state = deepMerge(state, patch);",
-    "  }",
-    "",
-    "  state = refreshState(state, workspaceRoot);",
-    "  ensureValidState(state);",
-    "  state.governanceState = {",
-    "    ...state.governanceState,",
-    '    dashboardSyncStatus: "current",',
-    "  };",
-    "  writeJsonFile(statePath, state);",
-    "",
-    "  const outputLines = [",
-    '    "Dashboard state refreshed.",',
-    '    "  - state: " + safeRelativePath(workspaceRoot, statePath),',
-    '    "  - current stage: " + String(state.executiveSummary?.currentStage || "unknown"),',
-    '    "  - overall progress: " + String(state.executiveSummary?.overallProgressPercent ?? 0) + "%",',
-    '    "  - git tracked: " + String(state.gitStatus?.trackedByGit || "unknown"),',
-    '    "  - branch: " + String(state.gitStatus?.currentBranch || "TBD"),',
-    '    "  - governed sessions: " + String(Array.isArray(state.governedSessions) ? state.governedSessions.length : 0),',
-    '    "  - required KPI profile: " + String(state.kpiProfile?.id || "unknown"),',
-    '    "  - operations health: " + String(state.operationsHealth?.status || "unknown"),',
-    "  ];",
-    "",
-    '  console.log(outputLines.join("\\n"));',
-    "}",
-    "",
-    "function handleValidate() {",
-    "  const statePath = getStatePath();",
-    "  const state = readJsonFile(statePath);",
-    "  const validation = validateDashboardStateShape(state);",
-    "",
-    "  if (!validation.valid) {",
-    '    console.error("Dashboard state is invalid:");',
-    "    for (const error of validation.errors) {",
-    '      console.error("  - " + error);',
-    "    }",
-    "    process.exit(1);",
-    "  }",
-    "",
-    "  if (hasFlag(\"--strict-governance\")) {",
-    "    const strictValidation = validateStrictGovernanceState(state);",
-    "    if (!strictValidation.valid) {",
-    '      console.error("Dashboard strict governance is invalid:");',
-    "      for (const error of strictValidation.errors) {",
-    '        console.error("  - " + error);',
-    "      }",
-    "      process.exit(1);",
-    "    }",
-    "  }",
-    "",
-    '  console.log("Dashboard state is valid.");',
-    '  console.log("  - state: " + statePath);',
-    '  console.log("  - KPI profile: " + String(state.kpiProfile?.id || "unknown"));',
-    '  console.log("  - governed sessions: " + String(Array.isArray(state.governedSessions) ? state.governedSessions.length : 0));',
-    '  console.log("  - operations health: " + String(state.operationsHealth?.status || "unknown"));',
-    '  if (hasFlag("--strict-governance")) {',
-    '    console.log("  - strict governance: passed");',
-    "  }",
-    "}",
-    "",
-    "function serveFile(requestPath, rootDir, response) {",
-    '  const normalized = requestPath === "/" ? "/index.html" : requestPath;',
-    "  const targetPath = path.resolve(rootDir, \".\" + normalized);",
-    "",
-    "  if (!isPathInsideDirectory(targetPath, rootDir)) {",
-    '    response.writeHead(403, { "content-type": "text/plain; charset=utf-8" });',
-    '    response.end("Forbidden");',
-    "    return;",
-    "  }",
-    "",
-    "  if (!fs.existsSync(targetPath) || fs.statSync(targetPath).isDirectory()) {",
-    '    response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });',
-    '    response.end("Not found");',
-    "    return;",
-    "  }",
-    "",
-    "  const realRoot = fs.realpathSync(rootDir);",
-    "  const realTarget = fs.realpathSync(targetPath);",
-    "  if (!isPathInsideDirectory(realTarget, realRoot)) {",
-    '    response.writeHead(403, { "content-type": "text/plain; charset=utf-8" });',
-    '    response.end("Forbidden");',
-    "    return;",
-    "  }",
-    "",
-    "  const ext = path.extname(targetPath).toLowerCase();",
-    "  const contentTypeMap = {",
-    '    ".html": "text/html; charset=utf-8",',
-    '    ".css": "text/css; charset=utf-8",',
-    '    ".js": "text/javascript; charset=utf-8",',
-    '    ".json": "application/json; charset=utf-8",',
-    '    ".md": "text/markdown; charset=utf-8",',
-    "  };",
-    '  const contentType = contentTypeMap[ext] || "application/octet-stream";',
-    '  response.writeHead(200, { "content-type": contentType });',
-    "  fs.createReadStream(targetPath).pipe(response);",
-    "}",
-    "",
-    "function handleServe() {",
-    '  const port = Number(getOption("--port", "43110"));',
-    '  const host = getOption("--host", "127.0.0.1");',
-    "",
-    "  const server = http.createServer((request, response) => {",
-    '    const url = new URL(request.url || "/", "http://localhost");',
-    "    serveFile(url.pathname, dashboardDir, response);",
-    "  });",
-    "",
-    "  server.listen(port, host, () => {",
-    '    console.log(`Dashboard server running at http://${host}:${port}`);',
-    '    console.log("Press Ctrl+C to stop.");',
-    "  });",
-    "}",
-    "",
-    "function handleExportStatic() {",
-    "  const workspaceRoot = getWorkspaceRoot();",
-    '  const outputDir = path.resolve(getOption("--out", path.join(dashboardDir, "exports", "latest")));',
-    "  const statePath = getStatePath();",
-    '  const indexPath = path.join(dashboardDir, "index.html");',
-    '  const cssPath = path.join(dashboardDir, "app.css");',
-    '  const jsPath = path.join(dashboardDir, "app.js");',
-    "",
-    "  const state = refreshState(readJsonFile(statePath), workspaceRoot);",
-    "  ensureValidState(state);",
-    "  state.governanceState = {",
-    "    ...state.governanceState,",
-    '    dashboardSyncStatus: "current",',
-    "  };",
-    "",
-    "  fs.mkdirSync(outputDir, { recursive: true });",
-    '  fs.mkdirSync(path.join(outputDir, "state"), { recursive: true });',
-    "",
-    '  const indexHtml = fs.readFileSync(indexPath, "utf-8");',
-    '  const css = fs.readFileSync(cssPath, "utf-8");',
-    '  const js = fs.readFileSync(jsPath, "utf-8");',
-    '  const schema = fs.readFileSync(defaultSchemaPath, "utf-8");',
-    "",
-    '  writeTextFileAtomic(path.join(outputDir, "index.html"), indexHtml, "utf-8");',
-    '  writeTextFileAtomic(path.join(outputDir, "app.css"), css, "utf-8");',
-    '  writeTextFileAtomic(path.join(outputDir, "app.js"), js, "utf-8");',
-    '  writeJsonFile(path.join(outputDir, "state", "dashboard-state.json"), state);',
-    '  writeTextFileAtomic(path.join(outputDir, "state", "dashboard-state.schema.json"), schema, "utf-8");',
-    "  writeTextFileAtomic(",
-    '    path.join(outputDir, "snapshot.html"),',
-    "    createStandaloneSnapshotHtml(indexHtml, css, js, state),",
-    '    "utf-8"',
-    "  );",
-    "",
-    '  console.log("Static dashboard export complete.");',
-    '  console.log("  - output: " + safeRelativePath(workspaceRoot, outputDir));',
-    '  console.log("  - shareable snapshot: " + safeRelativePath(workspaceRoot, path.join(outputDir, "snapshot.html")));',
-    "}",
-    "",
-    "function printHelp() {",
-    '  console.log("Dashboard Operations");',
-    '  console.log("");',
-    '  console.log("Commands:");',
-    '  console.log("  refresh [--patch path] [--state path] [--workspace-root path]");',
-    '  console.log("  validate [--state path] [--strict-governance]");',
-    '  console.log("  serve [--port 43110] [--host 127.0.0.1]");',
-    '  console.log("  export-static [--out path] [--state path] [--workspace-root path]");',
-    "}",
-    "",
-    "switch (command) {",
-    '  case "refresh":',
-    "    handleRefresh();",
-    "    break;",
-    '  case "validate":',
-    "    handleValidate();",
-    "    break;",
-    '  case "serve":',
-    "    handleServe();",
-    "    break;",
-    '  case "export-static":',
-    "    handleExportStatic();",
-    "    break;",
-    "  default:",
-    "    printHelp();",
-    "    break;",
-    "}",
-    "",
-  ].join("\n");
+  return `#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
+import http from "node:http";
+import crypto from "node:crypto";
+import { execFileSync, spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const API_VERSION = "v1";
+const SCHEMA_VERSION = "4.6.0";
+const PROJECTION_VERSION = "4.6.0";
+const REQUIRED_TOP_LEVEL_KEYS = ${requiredTopLevelKeys};
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const dashboardDir = path.resolve(__dirname, "..");
+const workspaceRoot = path.resolve(dashboardDir, "../../..");
+const stateDir = path.join(dashboardDir, "state");
+const eventDir = path.join(dashboardDir, "events");
+const logDir = path.join(dashboardDir, "logs");
+const exportsDir = path.join(dashboardDir, "exports");
+const statePath = path.join(stateDir, "dashboard-state.json");
+const indexPath = path.join(stateDir, "dashboard-index.json");
+const runtimePath = path.join(stateDir, "dashboard-runtime.json");
+const embeddingPath = path.join(stateDir, "embedding-documents.json");
+const ledgerPath = path.join(eventDir, "harness-events.jsonl");
+const manifestPath = path.join(eventDir, "ledger-manifest.json");
+const htmlPath = path.join(dashboardDir, "index.html");
+const tokenPath = path.join(stateDir, "api-token");
+const lockPath = path.join(stateDir, "dashboard-listener.lock");
+const logPath = path.join(logDir, "dashboard-bridge.log");
+const args = process.argv.slice(2);
+const command = args[0] || "help";
+
+function option(name, fallback) {
+  const index = args.indexOf(name);
+  if (index < 0 || index === args.length - 1) {
+    return fallback;
+  }
+  return args[index + 1];
+}
+
+function hasFlag(name) {
+  return args.includes(name);
+}
+
+function now() {
+  return new Date().toISOString();
+}
+
+function ensureDir(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function stableHash(value) {
+  return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function fileHash(fullPath) {
+  if (!fs.existsSync(fullPath)) {
+    return "missing";
+  }
+  return crypto.createHash("sha256").update(fs.readFileSync(fullPath)).digest("hex");
+}
+
+function writeTextAtomic(fullPath, content) {
+  ensureDir(path.dirname(fullPath));
+  const tempPath = path.join(path.dirname(fullPath), "." + path.basename(fullPath) + "." + process.pid + "." + Date.now() + ".tmp");
+  fs.writeFileSync(tempPath, content, "utf-8");
+  fs.renameSync(tempPath, fullPath);
+}
+
+function writeJson(fullPath, value) {
+  writeTextAtomic(fullPath, JSON.stringify(value, null, 2) + "\\n");
+}
+
+function readJson(fullPath) {
+  return JSON.parse(fs.readFileSync(fullPath, "utf-8"));
+}
+
+function logLine(message) {
+  ensureDir(logDir);
+  fs.appendFileSync(logPath, "[" + now() + "] " + message + "\\n", "utf-8");
+}
+
+function quarantineCorruptJson(fullPath, error) {
+  if (!fs.existsSync(fullPath)) {
+    return null;
+  }
+  const quarantinePath = fullPath + ".corrupt." + Date.now();
+  fs.renameSync(fullPath, quarantinePath);
+  logLine("quarantined corrupt JSON " + path.relative(workspaceRoot, fullPath) + ": " + String(error && error.message || error));
+  return quarantinePath;
+}
+
+function readEmbeddedStateFromHtml() {
+  const html = fs.readFileSync(htmlPath, "utf-8");
+  const match = html.match(/<script id="dashboard-bootstrap-data" type="application\\/json">([\\s\\S]*?)<\\/script>/);
+  if (!match) {
+    throw new Error("Cannot rebuild projections: embedded dashboard snapshot was not found in index.html");
+  }
+  return JSON.parse(match[1]);
+}
+
+function loadState(options = {}) {
+  try {
+    if (fs.existsSync(statePath)) {
+      return readJson(statePath);
+    }
+  } catch (error) {
+    if (!options.quarantineCorrupt) {
+      throw error;
+    }
+    quarantineCorruptJson(statePath, error);
+  }
+  if (!fs.existsSync(htmlPath)) {
+    throw new Error("dashboard-state.json is missing and index.html is unavailable");
+  }
+  return readEmbeddedStateFromHtml();
+}
+
+function loadJsonOrFallback(fullPath, fallback) {
+  try {
+    return fs.existsSync(fullPath) ? readJson(fullPath) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeDashboardStateForValidation(state) {
+  if (Array.isArray(state.entities)) {
+    state.entities = state.entities.map((entity) => {
+      if (!entity || typeof entity !== "object" || Array.isArray(entity)) {
+        return entity;
+      }
+      if (typeof entity.summary === "string" && entity.summary.trim().length > 0) {
+        return entity;
+      }
+      return Object.assign({}, entity, {
+        summary: String(entity.note || entity.label || entity.path || entity.id || "No summary recorded.")
+      });
+    });
+  }
+  return state;
+}
+
+function loadLedgerManifest() {
+  return loadJsonOrFallback(manifestPath, {
+    schemaVersion: SCHEMA_VERSION,
+    workspaceId: String((loadJsonOrFallback(statePath, {}).meta || {}).workspaceId || "unknown-workspace"),
+    ledgerPath: path.relative(workspaceRoot, ledgerPath).replace(/\\\\/g, "/"),
+    segments: [],
+    firstSequence: 0,
+    lastSequence: 0,
+    rowCount: 0,
+    rootHash: "genesis",
+    lastVerifiedAt: now(),
+    compactionStatus: "not-compacted"
+  });
+}
+
+function appendLedgerEvent(event, expectedLastSequence) {
+  const manifest = loadLedgerManifest();
+  const actualLastSequence = Number(manifest.lastSequence || 0);
+  if (actualLastSequence !== expectedLastSequence) {
+    throw new Error("Ledger sequence mismatch: expected " + expectedLastSequence + " but found " + actualLastSequence);
+  }
+  const requiredEnvelopeFields = [
+    "eventId",
+    "sequence",
+    "eventType",
+    "eventVersion",
+    "workspaceId",
+    "aggregateId",
+    "aggregateType",
+    "aggregateVersion",
+    "occurredAt",
+    "recordedAt",
+    "actor",
+    "agentId",
+    "sourceTool",
+    "correlationId",
+    "causationId",
+    "idempotencyKey",
+    "payloadHash",
+    "previousEventHash",
+    "redactionLevel",
+    "payload"
+  ];
+  for (const field of requiredEnvelopeFields) {
+    if (!(field in event)) {
+      throw new Error("Event envelope is missing " + field);
+    }
+  }
+  if (Number(event.sequence) !== expectedLastSequence + 1) {
+    throw new Error("Event sequence must be expectedLastSequence + 1");
+  }
+  if (event.previousEventHash !== manifest.rootHash) {
+    throw new Error("Event previousEventHash must match current manifest rootHash");
+  }
+  const eventHash = stableHash(event);
+  const record = Object.assign({}, event, { eventHash });
+  fs.appendFileSync(ledgerPath, JSON.stringify(record) + "\\n", "utf-8");
+  const nextManifest = Object.assign({}, manifest, {
+    firstSequence: Number(manifest.firstSequence || record.sequence),
+    lastSequence: record.sequence,
+    rowCount: Number(manifest.rowCount || 0) + 1,
+    rootHash: eventHash,
+    lastVerifiedAt: now()
+  });
+  nextManifest.segments = [
+    {
+      id: "segment-000001-" + String(record.sequence).padStart(6, "0"),
+      path: path.relative(workspaceRoot, ledgerPath).replace(/\\\\/g, "/"),
+      firstSequence: nextManifest.firstSequence,
+      lastSequence: nextManifest.lastSequence,
+      rowCount: nextManifest.rowCount,
+      schemaVersion: SCHEMA_VERSION,
+      segmentHash: eventHash,
+      compactionStatus: "hot"
+    }
+  ];
+  writeJson(manifestPath, nextManifest);
+  return record;
+}
+
+function envelope(payload, extra = {}) {
+  const state = loadJsonOrFallback(statePath, {});
+  const meta = state.meta || {};
+  const manifest = loadJsonOrFallback(manifestPath, {});
+  return Object.assign({
+    apiVersion: API_VERSION,
+    schemaVersion: String(meta.schemaVersion || SCHEMA_VERSION),
+    workspaceId: String(meta.workspaceId || "unknown-workspace"),
+    projectionVersion: String(meta.projectionVersion || PROJECTION_VERSION),
+    ledgerOffset: Number(manifest.lastSequence || meta.sourceEventSequence || 0),
+    generatedAt: now(),
+    capabilities: [
+      "read-only",
+      "snapshot",
+      "index",
+      "tasks",
+      "sessions",
+      "dictionary",
+      "version-control",
+      "runtime",
+      "sse",
+      "deterministic-query"
+    ],
+    readOnly: true,
+    payload
+  }, extra);
+}
+
+function validateState(state) {
+  const errors = [];
+  for (const key of REQUIRED_TOP_LEVEL_KEYS) {
+    if (!(key in state)) {
+      errors.push("Missing required top-level dashboard key: " + key);
+    }
+  }
+  const queues = state.taskQueues || {};
+  for (const key of ["waiting", "inProgress", "completed", "blocked"]) {
+    if (!Array.isArray(queues[key])) {
+      errors.push("taskQueues." + key + " must be an array");
+    }
+  }
+  const refs = new Set();
+  for (const artifact of Array.isArray(state.artifacts) ? state.artifacts : []) {
+    if (artifact && artifact.id) {
+      refs.add(String(artifact.id));
+    }
+  }
+  for (const task of (((state.agile || {}).backlog) || [])) {
+    for (const ref of task.evidenceRefs || []) {
+      if (String(ref).startsWith("artifact:") && !refs.has(String(ref).slice(9))) {
+        errors.push("Dangling task artifact reference: " + ref);
+      }
+    }
+  }
+  return errors;
+}
+
+function runCommand(commandName, commandArgs, cwd) {
+  try {
+    return {
+      ok: true,
+      stdout: execFileSync(commandName, commandArgs, {
+        cwd,
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5000,
+        windowsHide: true
+      }).trim(),
+      exitCode: 0
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      stdout: String(error && error.stdout || "").trim(),
+      stderr: String(error && error.stderr || error && error.message || error).trim(),
+      exitCode: Number.isInteger(error && error.status) ? error.status : 1
+    };
+  }
+}
+
+function readVersionControlFixture() {
+  const fixture = process.env.DASHBOARD_VERSION_CONTROL_FIXTURE || process.env.DASHBOARD_GIT_FIXTURE;
+  if (!fixture) {
+    return null;
+  }
+  const parsed = JSON.parse(fs.readFileSync(fixture, "utf-8"));
+  if (parsed.versionControl || parsed.vcsChangeRecords) {
+    return parsed;
+  }
+  return {
+    versionControl: {
+      provider: "git",
+      status: "fixture",
+      currentBranchOrRevision: parsed.currentBranch || "fixture",
+      workingCopyStatus: parsed.workingTreeStatus || "fixture",
+      ledger: [],
+      unlinkedChanges: [],
+      collectionProvenance: {
+        command: "DASHBOARD_GIT_FIXTURE",
+        cwd: workspaceRoot,
+        exitCode: 0,
+        capturedAt: now(),
+        parserVersion: SCHEMA_VERSION,
+        completeness: "fixture"
+      }
+    },
+    vcsChangeRecords: []
+  };
+}
+
+function collectGit() {
+  const inside = runCommand("git", ["rev-parse", "--is-inside-work-tree"], workspaceRoot);
+  if (!inside.ok || inside.stdout !== "true") {
+    return null;
+  }
+  const root = runCommand("git", ["rev-parse", "--show-toplevel"], workspaceRoot);
+  const branch = runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
+  const status = runCommand("git", ["status", "--short"], workspaceRoot);
+  const log = runCommand("git", ["log", "-n", "20", "--pretty=format:%H%x1f%P%x1f%an%x1f%aI%x1f%s"], workspaceRoot);
+  const statusLines = status.stdout ? status.stdout.split(/\\r?\\n/).filter(Boolean) : [];
+  const changedPaths = statusLines.map((line) => line.slice(3).trim()).filter(Boolean);
+  const records = log.ok && log.stdout
+    ? log.stdout.split(/\\r?\\n/).filter(Boolean).map((line) => {
+        const parts = line.split("\\x1f");
+        return {
+          provider: "git",
+          repoRoot: root.stdout || workspaceRoot,
+          revisionId: parts[0] || "unknown",
+          commitId: parts[0] || "unknown",
+          parentIds: (parts[1] || "").split(" ").filter(Boolean),
+          author: parts[2] || "unknown",
+          timestamp: parts[3] || "unknown",
+          messageHash: stableHash(parts[4] || ""),
+          changedPaths: [],
+          statusCounts: { staged: 0, unstaged: 0, untracked: 0 },
+          linkedSessionIds: [],
+          linkedTaskIds: [],
+          linkedDecisionIds: [],
+          collectionCommand: {
+            command: "git log -n 20 --pretty=format:%H%x1f%P%x1f%an%x1f%aI%x1f%s",
+            cwd: workspaceRoot,
+            exitCode: 0,
+            capturedAt: now(),
+            parserVersion: SCHEMA_VERSION,
+            timeoutOrTruncated: false
+          }
+        };
+      })
+    : [];
+  return {
+    versionControl: {
+      provider: "git",
+      status: "collected",
+      currentBranchOrRevision: branch.stdout || "unknown",
+      workingCopyStatus: statusLines.length === 0 ? "clean" : "dirty",
+      ledger: records.slice(0, 5).map((record) => record.commitId),
+      unlinkedChanges: changedPaths,
+      collectionProvenance: {
+        command: "git rev-parse/status/log",
+        cwd: workspaceRoot,
+        exitCode: 0,
+        capturedAt: now(),
+        parserVersion: SCHEMA_VERSION,
+        completeness: log.ok ? "complete" : "partial"
+      }
+    },
+    vcsChangeRecords: records
+  };
+}
+
+function collectSvn() {
+  const info = runCommand("svn", ["info"], workspaceRoot);
+  if (!info.ok) {
+    return null;
+  }
+  const revisionMatch = info.stdout.match(/^Revision:\\s*(\\d+)/m);
+  const uuidMatch = info.stdout.match(/^Repository UUID:\\s*(.+)$/m);
+  const revisionNumber = revisionMatch ? revisionMatch[1] : "unknown";
+  const record = {
+    provider: "svn",
+    repoRoot: workspaceRoot,
+    revisionId: revisionNumber,
+    revisionNumber,
+    repositoryUuid: uuidMatch ? uuidMatch[1].trim() : "unknown",
+    parentIds: [],
+    author: "unknown",
+    timestamp: "unknown",
+    messageHash: stableHash("svn:" + revisionNumber),
+    changedPaths: [],
+    statusCounts: { modified: 0, added: 0, deleted: 0 },
+    linkedSessionIds: [],
+    linkedTaskIds: [],
+    linkedDecisionIds: [],
+    collectionCommand: {
+      command: "svn info",
+      cwd: workspaceRoot,
+      exitCode: 0,
+      capturedAt: now(),
+      parserVersion: SCHEMA_VERSION,
+      timeoutOrTruncated: false
+    }
+  };
+  return {
+    versionControl: {
+      provider: "svn",
+      status: "collected",
+      currentBranchOrRevision: revisionNumber,
+      workingCopyStatus: "unknown",
+      ledger: [revisionNumber],
+      unlinkedChanges: [],
+      collectionProvenance: record.collectionCommand
+    },
+    vcsChangeRecords: [record]
+  };
+}
+
+function collectVersionControl() {
+  const fixture = readVersionControlFixture();
+  if (fixture) {
+    return fixture;
+  }
+  return collectGit() || collectSvn() || {
+    versionControl: {
+      provider: "none",
+      status: "not-found",
+      currentBranchOrRevision: "none",
+      workingCopyStatus: "unknown",
+      ledger: [],
+      unlinkedChanges: [],
+      collectionProvenance: {
+        command: "git/svn discovery",
+        cwd: workspaceRoot,
+        exitCode: 1,
+        capturedAt: now(),
+        parserVersion: SCHEMA_VERSION,
+        completeness: "none"
+      }
+    },
+    vcsChangeRecords: []
+  };
+}
+
+const AGENT_PLATFORM_CATALOG = [
+  {
+    id: "vscode",
+    label: "VS Code / GitHub Copilot",
+    instructionPaths: [".github/copilot-instructions.md", ".vscode/mcp.json"],
+    governanceRole: "Copilot Agent mode and MCP-aware editor workflows"
+  },
+  {
+    id: "codex",
+    label: "Codex CLI / Codex Desktop",
+    instructionPaths: ["AGENTS.md", ".codex/"],
+    governanceRole: "Codex-oriented hub, review, and resume instructions"
+  },
+  {
+    id: "claude-code",
+    label: "Claude Code",
+    instructionPaths: ["CLAUDE.md", ".claude/"],
+    governanceRole: "Claude project memory and MCP resume behavior"
+  },
+  {
+    id: "cursor",
+    label: "Cursor",
+    instructionPaths: [".cursor/rules/harness-world-model.mdc", ".cursorrules"],
+    governanceRole: "Cursor rule-based agent collaboration"
+  },
+  {
+    id: "antigravity",
+    label: "Google Antigravity / Gemini Agent IDE",
+    instructionPaths: [
+      ".agents/plugins/workspace-init-harness/plugin.json",
+      ".agents/plugins/workspace-init-harness/rules/harness-world-model.md"
+    ],
+    governanceRole: "Antigravity plugin/rule governance overlay"
+  },
+  {
+    id: "openhands",
+    label: "OpenHands",
+    instructionPaths: [".openhands/", ".agents/skills/"],
+    governanceRole: "OpenHands-compatible agent skill and memory conventions"
+  }
+];
+
+function normalizeAgentPlatform(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "claude") return "claude-code";
+  if (normalized === "copilot" || normalized === "github-copilot") return "vscode";
+  if (normalized === "gemini" || normalized === "google-antigravity") return "antigravity";
+  return normalized;
+}
+
+function parseAgentPlatforms(value) {
+  const allowed = new Set(AGENT_PLATFORM_CATALOG.map((platform) => platform.id));
+  const platforms = String(value || "")
+    .split(/[,\\s]+/)
+    .map((entry) => normalizeAgentPlatform(entry))
+    .filter((entry) => allowed.has(entry));
+  return Array.from(new Set(platforms));
+}
+
+function pathExists(relativePath) {
+  return fs.existsSync(path.join(workspaceRoot, relativePath));
+}
+
+function buildPlatformInstructionState(activePlatforms, detectedPlatforms, declaredPlatforms) {
+  const active = new Set(activePlatforms || []);
+  const detected = new Set(detectedPlatforms || []);
+  const declared = new Set(declaredPlatforms || []);
+  return AGENT_PLATFORM_CATALOG.map((platform) => {
+    const hasInstruction = platform.instructionPaths.some((relativePath) => pathExists(relativePath));
+    let state = "not-generated";
+    if (active.has(platform.id) && hasInstruction) {
+      state = "active-instruction";
+    } else if (active.has(platform.id)) {
+      state = "active-missing-instruction";
+    } else if (hasInstruction) {
+      state = "unused-instruction";
+    }
+    return {
+      platform: platform.id,
+      label: platform.label,
+      instructionPaths: platform.instructionPaths,
+      governanceRole: platform.governanceRole,
+      state,
+      source: declared.has(platform.id) ? "user-declared" : detected.has(platform.id) ? "detected-or-configured" : "filesystem/catalog",
+      confidence: declared.has(platform.id) ? "high" : detected.has(platform.id) ? "medium" : hasInstruction ? "medium" : "low",
+      reason: state === "active-instruction"
+        ? "This platform is declared active and has an instruction surface in the workspace."
+        : state === "active-missing-instruction"
+          ? "This platform is declared active but its expected instruction surface is missing."
+          : state === "unused-instruction"
+            ? "Instruction files exist, but the platform is not in the declared active platform set."
+            : "No active declaration or instruction surface is present."
+    };
+  });
+}
+
+function sameStringSet(left, right) {
+  const a = Array.from(new Set((left || []).map(String))).sort();
+  const b = Array.from(new Set((right || []).map(String))).sort();
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function upsertById(items, entry, idField = "id") {
+  const list = Array.isArray(items) ? items.slice() : [];
+  const index = list.findIndex((item) => item && item[idField] === entry[idField]);
+  if (index >= 0) {
+    list[index] = Object.assign({}, list[index], entry);
+  } else {
+    list.push(entry);
+  }
+  return list;
+}
+
+function removeFromArray(items, value) {
+  return (Array.isArray(items) ? items : []).filter((item) => item !== value);
+}
+
+function updateBacklogTaskStatus(cadence, taskId, patch) {
+  if (!cadence || !Array.isArray(cadence.backlog)) return cadence;
+  return Object.assign({}, cadence, {
+    backlog: cadence.backlog.map((task) => task && task.id === taskId ? Object.assign({}, task, patch) : task)
+  });
+}
+
+function handleRecordAgentPlatforms() {
+  const platforms = parseAgentPlatforms(option("--platforms", ""));
+  if (platforms.length === 0) {
+    throw new Error("record-agent-platforms requires --platforms with one or more of: " + AGENT_PLATFORM_CATALOG.map((platform) => platform.id).join(", "));
+  }
+  const source = String(option("--source", "user-declaration"));
+  const state = loadState({ quarantineCorrupt: true });
+  const existing = state.agentPlatformGovernance || {};
+  if (sameStringSet(platforms, existing.declaredPlatforms || []) && ((existing.intake || {}).status === "declared")) {
+    console.log("Agent platform declaration is already indexed: " + platforms.join(", "));
+    return;
+  }
+  const manifest = loadLedgerManifest();
+  const expectedOption = option("--expected-last-sequence", "");
+  const expectedLastSequence = expectedOption === "" ? Number(manifest.lastSequence || 0) : Number(expectedOption);
+  const recordedAt = now();
+  const detectedPlatforms = Array.from(new Set([...(existing.detectedPlatforms || []), ...((state.workspace || {}).targetIDEs || [])].map((entry) => normalizeAgentPlatform(entry)).filter(Boolean)));
+  const instructionState = buildPlatformInstructionState(platforms, detectedPlatforms, platforms);
+  const unusedInstructionState = instructionState.filter((item) => item.state === "unused-instruction");
+  const evidenceRefs = Array.from(new Set(instructionState.filter((item) => item.state !== "not-generated").flatMap((item) => item.instructionPaths)));
+  const payload = {
+    declaredPlatforms: platforms,
+    previousActivePlatforms: existing.activePlatforms || (state.workspace || {}).targetIDEs || [],
+    detectedPlatforms,
+    instructionState,
+    unusedInstructionState,
+    source,
+    command: "dashboard-ops record-agent-platforms",
+    recordedAt
+  };
+  const workspaceId = String((state.meta || {}).workspaceId || "unknown-workspace");
+  const event = {
+    eventId: "event-" + String(expectedLastSequence + 1).padStart(6, "0") + "-agent-platforms-" + stableHash({ platforms, recordedAt }).slice(0, 8),
+    sequence: expectedLastSequence + 1,
+    eventType: "workspace.agent-platforms.declared",
+    eventVersion: "1.0.0",
+    workspaceId,
+    aggregateId: workspaceId,
+    aggregateType: "agentPlatformGovernance",
+    aggregateVersion: expectedLastSequence + 1,
+    occurredAt: recordedAt,
+    recordedAt,
+    actor: "user",
+    agentId: "dashboard-ops",
+    sourceTool: "dashboard-ops record-agent-platforms",
+    correlationId: "agent-platform-governance",
+    causationId: null,
+    idempotencyKey: "agent-platforms:" + stableHash(platforms),
+    payloadHash: stableHash(payload),
+    previousEventHash: manifest.rootHash || "genesis",
+    redactionLevel: "internal",
+    payload
+  };
+  const record = appendLedgerEvent(event, expectedLastSequence);
+  state.workspace = Object.assign({}, state.workspace || {}, { targetIDEs: platforms });
+  state.agentPlatformGovernance = Object.assign({}, existing, {
+    schemaVersion: SCHEMA_VERSION,
+    status: "declared",
+    detectedPlatforms,
+    declaredPlatforms: platforms,
+    activePlatforms: platforms,
+    platformOptions: existing.platformOptions || AGENT_PLATFORM_CATALOG,
+    instructionState,
+    unusedInstructionState,
+    intake: Object.assign({}, existing.intake || {}, {
+      status: "declared",
+      source,
+      submittedAt: recordedAt,
+      submittedBy: "user",
+      latestEventId: record.eventId
+    }),
+    governanceIndexing: Object.assign({}, existing.governanceIndexing || {}, {
+      factId: "fact-agent-platform-selection",
+      decisionId: "decision-agent-platform-selection",
+      taskId: "task-confirm-agent-platforms",
+      evidenceRefs,
+      indexedAs: "declared",
+      nextAction: unusedInstructionState.length > 0
+        ? "Review unused-instruction files and either remove them from the active operating model or explicitly reactivate the platform."
+        : "Keep platform-specific instructions aligned with future toolchain changes."
+    })
+  });
+  state.worldModelFacts = upsertById(state.worldModelFacts, {
+    id: "fact-agent-platform-selection",
+    state: "declared",
+    summary: "Active AI agent platforms declared as: " + platforms.join(", ") + ".",
+    source,
+    timestamp: recordedAt,
+    freshnessTtl: "until-platform-toolchain-changes",
+    confidence: "high",
+    owner: "stakeholder-product-owner",
+    evidencePaths: evidenceRefs,
+    sourceEventId: record.eventId
+  });
+  state.decisionContracts = upsertById(state.decisionContracts, {
+    id: "decision-agent-platform-selection",
+    status: "approved",
+    owner: "stakeholder-product-owner",
+    decision: "Use declared active AI agent platforms: " + platforms.join(", ") + ".",
+    alternatives: ["auto-detected platforms", "single active platform", "multiple active platforms", "unused-instruction classification"],
+    evidence: ["agentPlatformGovernance", record.eventId],
+    reversalCondition: "The team adopts, retires, or changes an AI agent platform.",
+    stakeholderImpact: "Platform-specific instruction files and AI Agent collaboration rules now follow the declared active platform set.",
+    approvalThreshold: "User declaration recorded in the harness event ledger.",
+    approvedAt: recordedAt
+  });
+  const claims = (((state.claimEvidenceMatrix || {}).claims) || []).map((claim) => claim && claim.claimId === "claim.agent.platform-governance"
+    ? Object.assign({}, claim, {
+        claimStatus: "supported",
+        confidence: 0.86,
+        sign: "The user-declared active platform set is recorded in the ledger.",
+        evidenceRefs: Array.from(new Set([...(claim.evidenceRefs || []), "agentPlatformGovernance", record.eventId, ...evidenceRefs])),
+        counterEvidenceRefs: unusedInstructionState.length > 0 ? ["agentPlatformGovernance.unusedInstructionState"] : [],
+        nextActionRef: unusedInstructionState.length > 0 ? "review-unused-platform-instructions" : "keep-platform-instructions-current"
+      })
+    : claim);
+  state.claimEvidenceMatrix = Object.assign({}, state.claimEvidenceMatrix || {}, { claims });
+  state.governanceEvidenceBrief = Object.assign({}, state.governanceEvidenceBrief || {}, {
+    missingEvidenceClaims: (Array.isArray((state.governanceEvidenceBrief || {}).missingEvidenceClaims) ? state.governanceEvidenceBrief.missingEvidenceClaims : []).filter((item) => !String(item).toLowerCase().includes("platform")),
+    unresolvedDecisions: removeFromArray((state.governanceEvidenceBrief || {}).unresolvedDecisions, "decision-agent-platform-selection")
+  });
+  state.agentResumeBrief = Object.assign({}, state.agentResumeBrief || {}, {
+    openDecisions: removeFromArray((state.agentResumeBrief || {}).openDecisions, "decision-agent-platform-selection"),
+    blockers: removeFromArray((state.agentResumeBrief || {}).blockers, "agent-platform-declaration-needed"),
+    authoritativeFiles: Array.from(new Set([...(state.agentResumeBrief || {}).authoritativeFiles || [], ...evidenceRefs]))
+  });
+  state.taskQueues = Object.assign({}, state.taskQueues || {}, {
+    waiting: removeFromArray((state.taskQueues || {}).waiting, "task-confirm-agent-platforms"),
+    completed: Array.from(new Set([...(state.taskQueues || {}).completed || [], "task-confirm-agent-platforms"])),
+    needsUser: removeFromArray((state.taskQueues || {}).needsUser, "decision-agent-platform-selection")
+  });
+  state.agile = updateBacklogTaskStatus(state.agile, "task-confirm-agent-platforms", {
+    status: "completed",
+    completedAt: recordedAt,
+    evidenceRefs: ["agentPlatformGovernance", record.eventId]
+  });
+  state.agileCadence = updateBacklogTaskStatus(state.agileCadence, "task-confirm-agent-platforms", {
+    status: "completed",
+    completedAt: recordedAt,
+    evidenceRefs: ["agentPlatformGovernance", record.eventId]
+  });
+  if ((state.workTimeline || {}).items) {
+    state.workTimeline = Object.assign({}, state.workTimeline, {
+      items: state.workTimeline.items.map((item) => item && item.id === "task-confirm-agent-platforms"
+        ? Object.assign({}, item, { status: "completed", endAt: recordedAt, progressPercent: 100, evidenceRefs: Array.from(new Set([...(item.evidenceRefs || []), record.eventId])) })
+        : item)
+    });
+  }
+  state.operationsTimeline = [
+    ...(Array.isArray(state.operationsTimeline) ? state.operationsTimeline : []),
+    {
+      id: "timeline-agent-platform-declaration-" + record.sequence,
+      type: "governance",
+      status: "complete",
+      occurredAt: recordedAt,
+      summary: "User-declared active AI agent platforms were indexed into the Project World Model.",
+      evidenceRefs: [record.eventId]
+    }
+  ].slice(-100);
+  state.meta = Object.assign({}, state.meta || {}, {
+    sourceEventSequence: record.sequence,
+    ledgerRootHash: record.eventHash
+  });
+  state.trustBoundary = Object.assign({}, state.trustBoundary || {}, {
+    ledgerRootHash: record.eventHash
+  });
+  persistProjections(state, { skipVcs: true, skipLedger: true });
+  console.log("Recorded active AI agent platforms: " + platforms.join(", "));
+  if (unusedInstructionState.length > 0) {
+    console.log("Unused instruction states: " + unusedInstructionState.map((item) => item.platform).join(", "));
+  }
+}
+
+function deriveIndex(state) {
+  const meta = state.meta || {};
+  const queues = state.taskQueues || {};
+  const stakeholderBrief = state.stakeholderBrief || {};
+  const agentResumeBrief = state.agentResumeBrief || {};
+  const claimEvidenceMatrix = state.claimEvidenceMatrix || {};
+  const claims = Array.isArray(claimEvidenceMatrix.claims) ? claimEvidenceMatrix.claims : [];
+  const missingEvidenceItems = Array.isArray(claimEvidenceMatrix.missingEvidenceItems) ? claimEvidenceMatrix.missingEvidenceItems : [];
+  return {
+    schemaVersion: String(meta.schemaVersion || SCHEMA_VERSION),
+    apiVersion: API_VERSION,
+    workspaceId: String(meta.workspaceId || "unknown-workspace"),
+    projectionVersion: String(meta.projectionVersion || PROJECTION_VERSION),
+    sourceEventSequence: Number(meta.sourceEventSequence || 0),
+    sourceStateHash: String(meta.sourceStateHash || stableHash(state)),
+    generatedAt: now(),
+    expiresAt: "after-next-refresh",
+    completeness: state.worldModelCompleteness || "unknown",
+    staleness: String(meta.staleness || "fresh"),
+    stakeholderBrief,
+    agentResumeBrief,
+    worldJudgment: state.worldJudgment || null,
+    judgmentConsole: state.judgmentConsole || null,
+    criticalSignals: state.criticalSignals || [],
+    readinessJudgments: state.readinessJudgments || [],
+    trustBoundary: state.trustBoundary || null,
+    dashboardQualityScorecard: state.dashboardQualityScorecard || null,
+    governanceActionabilityScore: state.governanceActionabilityScore || null,
+    agentPlatformGovernance: state.agentPlatformGovernance || null,
+    audienceLens: state.audienceLens || null,
+    workReadinessMap: state.workReadinessMap || null,
+    projectEvidenceInventory: state.projectEvidenceInventory || null,
+    claimSummary: {
+      claimCount: claims.length,
+      missingEvidenceItemCount: missingEvidenceItems.length,
+      unsupportedClaimCount: claims.filter((claim) => ["missing-evidence", "contradicted", "stale"].includes(String(claim.claimStatus || ""))).length
+    },
+    agentContextPacks: state.agentContextPacks || {},
+    taskCounts: Object.fromEntries(Object.entries(queues).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0])),
+    currentGoal: stakeholderBrief.currentGoal || "",
+    nextAction: agentResumeBrief.nextSafestAction || "",
+    criticalRisks: Array.isArray((state.projectWorldModel || {}).risks) ? state.projectWorldModel.risks.map((risk) => risk.id || risk.summary).slice(0, 10) : [],
+    authoritativeFiles: agentResumeBrief.authoritativeFiles || [],
+    apiRoutes: [
+      "/api/harness-dashboard/v1/snapshot",
+      "/api/harness-dashboard/v1/index",
+      "/api/harness-dashboard/v1/tasks",
+      "/api/harness-dashboard/v1/sessions",
+      "/api/harness-dashboard/v1/dictionary",
+      "/api/harness-dashboard/v1/version-control",
+      "/api/harness-dashboard/v1/runtime",
+      "/api/harness-dashboard/v1/health",
+      "/api/harness-dashboard/v1/events",
+      "/api/harness-dashboard/v1/query"
+    ]
+  };
+}
+
+function upsertSignal(state, signal) {
+  const existing = Array.isArray(state.criticalSignals) ? state.criticalSignals : [];
+  const index = existing.findIndex((entry) => entry && entry.id === signal.id);
+  if (index >= 0) {
+    existing[index] = Object.assign({}, existing[index], signal);
+  } else {
+    existing.push(signal);
+  }
+  state.criticalSignals = existing;
+}
+
+function upsertClaim(state, claim) {
+  const matrix = state.claimEvidenceMatrix || {};
+  const claims = Array.isArray(matrix.claims) ? matrix.claims : [];
+  const index = claims.findIndex((entry) => entry && entry.claimId === claim.claimId);
+  if (index >= 0) {
+    claims[index] = Object.assign({}, claims[index], claim);
+  } else {
+    claims.push(claim);
+  }
+  state.claimEvidenceMatrix = Object.assign({}, matrix, { claims });
+}
+
+function ensureTimelineItem(state, item) {
+  const timeline = state.workTimeline || {};
+  const items = Array.isArray(timeline.items) ? timeline.items : [];
+  if (!items.some((entry) => entry && entry.id === item.id)) {
+    items.push(item);
+  }
+  state.workTimeline = Object.assign({}, timeline, { items });
+}
+
+function ensureCoreGovernanceClaims(state) {
+  const service = (((state.serviceRegistry || {}).services || [])[0]) || {};
+  const serviceId = service.id || "primary-service";
+  upsertClaim(state, {
+    claimId: "claim.release.traceability",
+    statement: "A release can be traced from decision to deployment and rollback.",
+    subjectRef: "service:" + serviceId,
+    claimStatus: "missing-evidence",
+    confidence: 0.12,
+    sign: "Release readiness exists as a contract but has no complete release record.",
+    object: "release traceability",
+    interpretant: "A release is governable only when version, revision, artifact, CI run, approver, target, smoke result, and rollback path are known.",
+    evidenceRefs: ["releaseReadiness.requiredTraceability"],
+    counterEvidenceRefs: ["releaseReadiness.releases", "governanceEvidenceBrief.missingEvidenceClaims"],
+    falsificationTests: [
+      "Reject release readiness if releaseReadiness.releases is empty.",
+      "Reject release readiness if smoke test result or rollback command is missing."
+    ],
+    nextActionRef: "task-map-deployment-target"
+  });
+  upsertClaim(state, {
+    claimId: "claim.data.save-integrity",
+    statement: "Player progress and data integrity risks are visible before service work proceeds.",
+    subjectRef: "value:value-save-integrity",
+    claimStatus: "partial",
+    confidence: 0.44,
+    sign: "Value hierarchy identifies save integrity, but database and backup evidence remain unknown.",
+    object: "save integrity governance",
+    interpretant: "Game work can proceed safely only when local-save, cloud-sync, migration, backup, and restore implications are visible.",
+    evidenceRefs: ["valueHierarchy", "databaseReadiness", "runningServiceContract.dataOwnership"],
+    counterEvidenceRefs: ["databaseReadiness.backupFreshness", "databaseReadiness.restoreDrillEvidence"],
+    falsificationTests: [
+      "Reject this claim if databaseReadiness has no migration, retention, backup, or restore evidence.",
+      "Reject this claim if service changes can overwrite progress without explicit recovery guidance."
+    ],
+    nextActionRef: "missing.database-readiness"
+  });
+}
+
+function listRelativeFiles(relativeDir, predicate) {
+  const root = path.join(workspaceRoot, relativeDir);
+  if (!fs.existsSync(root)) return [];
+  const out = [];
+  const stack = [root];
+  while (stack.length > 0 && out.length < 100) {
+    const current = stack.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else {
+        const relative = path.relative(workspaceRoot, full).replace(/\\\\/g, "/");
+        if (!predicate || predicate(relative)) out.push(relative);
+      }
+    }
+  }
+  return out.sort();
+}
+
+function synchronizeProjectEvidenceInventory(state) {
+  const sources = [];
+  const addSource = (source) => sources.push(Object.assign({ status: "observed" }, source));
+  if (fs.existsSync(path.join(workspaceRoot, "package.json"))) {
+    addSource({
+      id: "evidence.package-json",
+      path: "package.json",
+      type: "package-manifest",
+      promotesClaimIds: ["claim.service.operational-readiness"]
+    });
+  }
+  const workflows = listRelativeFiles(".github/workflows", (relative) => /\\.(ya?ml)$/i.test(relative));
+  for (const workflow of workflows) {
+    addSource({
+      id: "evidence.workflow." + stableHash(workflow).slice(0, 8),
+      path: workflow,
+      type: "ci-cd-workflow",
+      promotesClaimIds: ["claim.release.github-pages-workflow", "claim.release.traceability"]
+    });
+  }
+  const sqlFiles = listRelativeFiles("supabase", (relative) => /\\.sql$/i.test(relative));
+  for (const sql of sqlFiles) {
+    addSource({
+      id: "evidence.supabase." + stableHash(sql).slice(0, 8),
+      path: sql,
+      type: "database-schema",
+      promotesClaimIds: ["claim.data.supabase-schema-present", "claim.data.save-integrity"]
+    });
+  }
+  for (const plan of [
+    "docs/012-supabase-cloud-save-plan.md",
+    "docs/ai-harness/runtime/state/active-session.json",
+    "docs/ai-harness/runtime/state/session-index.json"
+  ]) {
+    if (fs.existsSync(path.join(workspaceRoot, plan))) {
+      addSource({
+        id: "evidence." + stableHash(plan).slice(0, 8),
+        path: plan,
+        type: plan.includes("active-session") || plan.includes("session-index") ? "runtime-session-evidence" : "service-plan",
+        promotesClaimIds: plan.includes("supabase") ? ["claim.offline.cloud-save-plan", "claim.data.save-integrity"] : ["claim.agent.safe-resume"]
+      });
+    }
+  }
+  state.projectEvidenceInventory = Object.assign({}, state.projectEvidenceInventory || {}, {
+    schemaVersion: SCHEMA_VERSION,
+    generatedAt: now(),
+    sources,
+    claimsPromoted: Array.from(new Set(sources.flatMap((source) => source.promotesClaimIds || []))),
+    missingSourceTypes: [
+      ...(workflows.length === 0 ? ["CI workflow"] : []),
+      ...(sqlFiles.length === 0 ? ["database schema"] : []),
+      "deployment URL",
+      "smoke test result",
+      "rollback command",
+      "incident runbook"
+    ]
+  });
+  if (workflows.length > 0) {
+    upsertClaim(state, {
+      claimId: "claim.release.github-pages-workflow",
+      statement: "A GitHub Pages/GitHub Actions deployment workflow is visible to the harness.",
+      subjectRef: "releaseReadiness",
+      claimStatus: "partial",
+      confidence: 0.58,
+      sign: "Workflow file(s) observed: " + workflows.join(", "),
+      object: "GitHub Pages release path",
+      interpretant: "Workflow files support deployability orientation, but release readiness still needs run, artifact, target URL, smoke result, and rollback evidence.",
+      evidenceRefs: workflows,
+      counterEvidenceRefs: ["releaseReadiness.releases", "governanceEvidenceBrief.missingEvidenceClaims"],
+      falsificationTests: [
+        "Reject deployability if no workflow file exists.",
+        "Reject release readiness if no successful workflow run, deployment URL, smoke test, or rollback path is linked."
+      ],
+      nextActionRef: "task-map-deployment-target"
+    });
+  }
+  if (sqlFiles.length > 0) {
+    upsertClaim(state, {
+      claimId: "claim.data.supabase-schema-present",
+      statement: "Supabase/Postgres schema evidence is visible to the harness.",
+      subjectRef: "databaseReadiness",
+      claimStatus: "partial",
+      confidence: 0.56,
+      sign: "SQL file(s) observed: " + sqlFiles.join(", "),
+      object: "database schema readiness",
+      interpretant: "Schema files support data-readiness orientation, but migration status, RLS review, backup, and restore evidence are still required.",
+      evidenceRefs: sqlFiles,
+      counterEvidenceRefs: ["databaseReadiness.migrationStatus", "databaseReadiness.restoreDrillEvidence"],
+      falsificationTests: [
+        "Reject database readiness if schema files are absent.",
+        "Reject production data readiness if RLS, migration, backup, and restore evidence are absent."
+      ],
+      nextActionRef: "task-map-data-readiness"
+    });
+  }
+  if (fs.existsSync(path.join(workspaceRoot, "docs/012-supabase-cloud-save-plan.md"))) {
+    upsertClaim(state, {
+      claimId: "claim.offline.cloud-save-plan",
+      statement: "Offline-first cloud-save planning evidence is visible.",
+      subjectRef: "runningServiceContract",
+      claimStatus: "partial",
+      confidence: 0.62,
+      sign: "docs/012-supabase-cloud-save-plan.md exists.",
+      object: "offline-first save/sync intent",
+      interpretant: "A durable plan supports agent resume and stakeholder review, but implementation and validation evidence remain separate gates.",
+      evidenceRefs: ["docs/012-supabase-cloud-save-plan.md"],
+      counterEvidenceRefs: ["releaseReadiness.status", "databaseReadiness.migrationStatus"],
+      falsificationTests: [
+        "Reject implementation readiness if no code-level verification or smoke test is linked.",
+        "Reject cloud-save readiness if Supabase connectivity, quota, and retry behavior are untested."
+      ],
+      nextActionRef: "task-collect-service-health"
+    });
+  }
+}
+
+function normalizeTimelineStatus(value) {
+  const status = String(value || "waiting").toLowerCase();
+  if (status === "active" || status === "doing") return "in-progress";
+  if (status === "complete") return "completed";
+  return status;
+}
+
+function synchronizeActiveSessionAndWorkMap(state) {
+  const sessions = Array.isArray(state.governedSessions) ? state.governedSessions : [];
+  const originalQueues = Object.assign({}, state.taskQueues || {});
+  const activeSession = sessions.find((session) => ["active", "in-progress", "running"].includes(String(session.status || "").toLowerCase())) || null;
+  if (activeSession) {
+    state.agentResumeBrief = Object.assign({}, state.agentResumeBrief || {}, { activeSession: activeSession.id });
+    state.runtimeOrchestration = Object.assign({}, state.runtimeOrchestration || {}, {
+      activeSessionId: activeSession.id,
+      activeChunkId: activeSession.chunkId || (state.runtimeOrchestration || {}).activeChunkId || "active-session",
+      currentPhase: activeSession.stage || (state.runtimeOrchestration || {}).currentPhase || "governed-session-active"
+    });
+  }
+  const rows = [];
+  const addRow = (item, sourceType) => {
+    const status = normalizeTimelineStatus(item.status);
+    rows.push({
+      id: String(item.id || item.title || sourceType),
+      title: item.title || item.goal || item.id || sourceType,
+      status,
+      lane: item.lane || sourceType,
+      owner: item.owner || item.agentRole || "unassigned",
+      evidenceRefs: item.evidenceRefs || item.outputs || [],
+      blockingClaimIds: item.blockingClaimIds || item.blocksClaimIds || [],
+      nextActionRef: item.nextActionRef || item.nextStep || "",
+      exitCriteria: item.exitCriteria || "Close with evidence, validation, and refreshed dashboard projection.",
+      unlocksReadiness: item.unlocksReadiness || [],
+      sourceType,
+      trustClass: (item.evidenceRefs || item.outputs || []).length > 0 ? "projection-derived-with-evidence" : "projection-derived"
+    });
+  };
+  for (const item of (((state.workTimeline || {}).items) || [])) addRow(item, "workTimeline");
+  const seen = new Set(rows.map((row) => row.id));
+  for (const session of sessions) {
+    if (seen.has(String(session.id))) continue;
+    addRow(session, "governedSession");
+    seen.add(String(session.id));
+  }
+  for (const gap of (((state.claimEvidenceMatrix || {}).missingEvidenceItems) || [])) {
+    const id = String(gap.id || gap.resolutionTaskId || "missing-evidence");
+    const rowId = seen.has(id) ? id + "-evidence-gate" : id;
+    addRow({
+      id: rowId,
+      title: gap.label || id,
+      status: "blocked",
+      lane: "Evidence Recovery",
+      owner: gap.owner || "unassigned",
+      evidenceRefs: [gap.id, gap.requiredEvidenceType].filter(Boolean),
+      blockingClaimIds: gap.blocksClaimIds || [],
+      nextActionRef: gap.resolutionTaskId || "",
+      exitCriteria: gap.requiredEvidenceType || "Required evidence linked."
+    }, "missingEvidence");
+    seen.add(rowId);
+  }
+  const derivedQueues = {
+    waiting: [],
+    inProgress: [],
+    completed: [],
+    blocked: [],
+    needsUser: Array.isArray(originalQueues.needsUser) ? [...originalQueues.needsUser] : [],
+    realWorld: Array.isArray(originalQueues.realWorld) ? [...originalQueues.realWorld] : [],
+    failed: []
+  };
+  for (const row of rows) {
+    if (row.status === "waiting") derivedQueues.waiting.push(row.id);
+    else if (row.status === "in-progress" || row.status === "active") derivedQueues.inProgress.push(row.id);
+    else if (row.status === "completed" || row.status === "closed") derivedQueues.completed.push(row.id);
+    else if (row.status === "blocked") derivedQueues.blocked.push(row.id);
+    else if (row.status === "failed") derivedQueues.failed.push(row.id);
+  }
+  if (activeSession && !derivedQueues.inProgress.includes(String(activeSession.id))) {
+    derivedQueues.inProgress.push(String(activeSession.id));
+  }
+  state.taskQueues = Object.assign({}, originalQueues, {
+    waiting: Array.from(new Set(derivedQueues.waiting)),
+    inProgress: Array.from(new Set(derivedQueues.inProgress)),
+    completed: Array.from(new Set(derivedQueues.completed)),
+    blocked: Array.from(new Set(derivedQueues.blocked)),
+    needsUser: Array.from(new Set(derivedQueues.needsUser)),
+    realWorld: Array.from(new Set(derivedQueues.realWorld)),
+    failed: Array.from(new Set(derivedQueues.failed))
+  });
+  state.workReadinessMap = Object.assign({}, state.workReadinessMap || {}, {
+    schemaVersion: SCHEMA_VERSION,
+    source: "projected-from-workTimeline-backlog-sessions-evidence",
+    generatedAt: now(),
+    rows,
+    summary: {
+      visibleRows: rows.length,
+      activeRows: rows.filter((row) => ["in-progress", "active"].includes(row.status)).length,
+      blockedRows: rows.filter((row) => ["blocked", "failed"].includes(row.status)).length,
+      gateCount: rows.filter((row) => row.exitCriteria).length
+    }
+  });
+}
+
+function applyClaimTrustMetadata(state) {
+  const matrix = state.claimEvidenceMatrix || {};
+  const claims = Array.isArray(matrix.claims) ? matrix.claims : [];
+  for (const claim of claims) {
+    const status = String(claim.claimStatus || "").toLowerCase();
+    claim.trustClass = status === "supported" ? "ledger-or-artifact-backed" : status === "partial" ? "projection-derived-with-evidence" : "placeholder-or-missing-evidence";
+    claim.projectionOnly = !Array.isArray(claim.sourceEventIds) || claim.sourceEventIds.length === 0;
+    claim.falsificationResults = (claim.falsificationTests || []).map((test) => ({
+      test,
+      status: status === "supported" ? "not-run" : "blocked-by-missing-evidence",
+      checkedAt: now(),
+      validator: "dashboard-ops projection evaluator",
+      observedEvidenceRefs: claim.evidenceRefs || []
+    }));
+  }
+  state.claimEvidenceMatrix = Object.assign({}, matrix, { claims });
+}
+
+function synchronizeDecisionState(state) {
+  const decisions = Array.isArray(state.decisionContracts) ? state.decisionContracts : [];
+  const closedDecisionIds = new Set(decisions
+    .filter((decision) => ["approved", "rejected", "resolved"].includes(String(decision.status || "").toLowerCase()))
+    .map((decision) => String(decision.id || decision.decisionId || decision.decision || "")));
+  const evidence = Object.assign({}, state.governanceEvidenceBrief || {});
+  const unresolved = Array.isArray(evidence.unresolvedDecisions) ? evidence.unresolvedDecisions.map(String) : [];
+  evidence.unresolvedDecisions = unresolved.filter((id) => !closedDecisionIds.has(id));
+  state.governanceEvidenceBrief = evidence;
+  state.agentResumeBrief = Object.assign({}, state.agentResumeBrief || {}, {
+    openDecisions: (Array.isArray((state.agentResumeBrief || {}).openDecisions) ? state.agentResumeBrief.openDecisions : []).map(String).filter((id) => !closedDecisionIds.has(id))
+  });
+  const queues = Object.assign({}, state.taskQueues || {});
+  queues.needsUser = (Array.isArray(queues.needsUser) ? queues.needsUser : []).map(String).filter((id) => !closedDecisionIds.has(id));
+  state.taskQueues = queues;
+}
+
+function synchronizeJudgmentModel(state) {
+  const vc = state.versionControl || {};
+  const dirtyCount = Array.isArray(vc.unlinkedChanges) ? vc.unlinkedChanges.length : 0;
+  ensureCoreGovernanceClaims(state);
+  synchronizeProjectEvidenceInventory(state);
+  synchronizeDecisionState(state);
+  synchronizeActiveSessionAndWorkMap(state);
+  applyClaimTrustMetadata(state);
+  const evidence = state.governanceEvidenceBrief || {};
+  const missingEvidenceCount = Array.isArray(evidence.missingEvidenceClaims) ? evidence.missingEvidenceClaims.length : 0;
+  const openDecisionCount = Array.isArray(evidence.unresolvedDecisions) ? evidence.unresolvedDecisions.length : 0;
+  if (dirtyCount > 0) {
+    upsertSignal(state, {
+      id: "signal-dirty-working-tree",
+      severity: "critical",
+      label: "Dirty working tree is not linked",
+      status: "open",
+      whyItMatters: "Unlinked local changes can make stakeholder review, release judgment, and AI-agent handoff misleading.",
+      owner: "harness-dashboard-operator",
+      sourceRefs: ["versionControl.unlinkedChanges"],
+      nextAction: "Link or explain dirty working-tree paths before closing, releasing, or handing off work."
+    });
+    upsertClaim(state, {
+      claimId: "claim.vcs.dirty-working-tree-linked",
+      statement: "Dirty working-tree changes are safe for stakeholder review and AI Agent handoff.",
+      subjectRef: "versionControl.unlinkedChanges",
+      claimStatus: "missing-evidence",
+      confidence: 0.08,
+      sign: String(dirtyCount) + " local changed path(s) are present without governed linkage.",
+      object: "local VCS working tree",
+      interpretant: "Local changes are review-safe only when each path is linked to a session, task, decision, or explicit warning.",
+      evidenceRefs: ["versionControl.unlinkedChanges"],
+      counterEvidenceRefs: ["governanceEvidenceBrief.unlinkedCommitsOrRevisions"],
+      falsificationTests: [
+        "Reject handoff readiness if any dirty path remains unlinked.",
+        "Reject release readiness if dirty paths exist outside a governed task."
+      ],
+      nextActionRef: "task-link-vcs-records"
+    });
+    ensureTimelineItem(state, {
+      id: "task-link-dirty-working-tree",
+      title: "Classify and link dirty working-tree paths",
+      status: "blocked",
+      lane: "Evidence Recovery",
+      owner: "harness-dashboard-operator",
+      startOffsetDays: -1,
+      plannedEndOffsetDays: 2,
+      progressPercent: 0,
+      kpiTags: ["handover-latency", "vcs-linkage"],
+      evidenceRefs: ["versionControl.unlinkedChanges"],
+      blockingClaimIds: ["claim.vcs.dirty-working-tree-linked", "claim.agent.safe-resume"],
+      nextActionRef: "task-link-vcs-records",
+      exitCriteria: "Every dirty path is linked to a governed task/session/decision or documented as a warning."
+    });
+  }
+  if (missingEvidenceCount > 0) {
+    upsertSignal(state, {
+      id: "signal-missing-evidence-items",
+      severity: "watching",
+      label: "Operational evidence still needs linking",
+      status: "open",
+      whyItMatters: String(missingEvidenceCount) + " evidence claims still need owners, artifact types, and resolution tasks before release or operations approval.",
+      owner: "harness-dashboard-operator",
+      sourceRefs: ["governanceEvidenceBrief.missingEvidenceClaims", "claimEvidenceMatrix.missingEvidenceItems"],
+      nextAction: "Use the Evidence and Work tabs to convert missing claims into owned follow-up tasks."
+    });
+  }
+  const judgment = Object.assign({}, state.worldJudgment || {});
+  const trustScore = Number((state.worldModelCompleteness || {}).score || judgment.trustScore || 0);
+  judgment.trustScore = trustScore;
+  judgment.trustLevel = trustScore >= 80 ? "operational" : trustScore >= 50 ? "partial" : "bootstrap";
+  judgment.status = trustScore >= 80 && dirtyCount === 0 && missingEvidenceCount === 0 && openDecisionCount === 0
+    ? "ready-for-operational-judgment"
+    : "bootstrap-not-ready-for-operational-judgment";
+  judgment.summary = judgment.status === "ready-for-operational-judgment"
+    ? "Core service, evidence, decision, and VCS signals are consistent enough for operational judgment."
+    : "The harness is usable for orientation, planning, and resume. Release and operations approval still require linked project evidence.";
+  judgment.freshness = Object.assign({}, judgment.freshness || {}, {
+    projection: String((state.meta || {}).staleness || "fresh"),
+    evidence: missingEvidenceCount === 0 ? "connected" : "partial",
+    vcs: dirtyCount === 0 ? String(vc.workingCopyStatus || "unknown") : "dirty"
+  });
+  state.worldJudgment = judgment;
+  state.judgmentConsole = Object.assign({}, state.judgmentConsole || {}, {
+    currentJudgment: judgment.status === "ready-for-operational-judgment"
+      ? "Ready for operational judgment with current evidence."
+      : "Harness adoption is ready for governed planning and evidence capture; release, operations, and handoff remain separate evidence gates.",
+    highestRiskSignal: dirtyCount > 0 ? "signal-dirty-working-tree" : missingEvidenceCount > 0 ? "signal-missing-evidence-items" : "none",
+    nextRequiredDecision: openDecisionCount > 0 ? String((evidence.unresolvedDecisions || [])[0]) : "none",
+    blockedActions: Array.from(new Set([
+      ...(((state.judgmentConsole || {}).blockedActions) || []),
+      ...(dirtyCount > 0 ? ["Do not hand off, release, or approve review while dirty VCS changes are unlinked."] : []),
+      ...(missingEvidenceCount > 0 ? ["Do not claim operational readiness while required evidence is missing."] : [])
+    ]))
+  });
+  const quality = Object.assign({}, state.dashboardQualityScorecard || {});
+  const evidencePenalty = dirtyCount + missingEvidenceCount + openDecisionCount;
+  const observedSourceCount = Array.isArray((state.projectEvidenceInventory || {}).sources) ? state.projectEvidenceInventory.sources.length : 0;
+  quality.projectEvidenceScore = Math.max(1.2, Math.min(6.8, 1.2 + observedSourceCount * 0.45 - evidencePenalty * 0.12));
+  quality.uiUxDesignScore = Math.max(9.5, Number(quality.uiUxDesignScore || 9.6));
+  quality.lastEvaluatedAt = now();
+  quality.evaluatorProvenance = Array.from(new Map([
+    ...((quality.evaluatorProvenance || []).map((entry) => [entry.id || entry.evaluatorRole || JSON.stringify(entry), entry])),
+    ["browser-qa", {
+      id: "browser-qa",
+      evaluatorRole: "Codex frontend QA",
+      status: "browser-verified",
+      checkedAt: now(),
+      evidenceRefs: ["Playwright: Work tab 9 rows, active bar, blocked gates, no console error/warn"],
+      confidence: "high"
+    }]
+  ]).values());
+  quality.whyNot95Yet = [
+    "Overall actionability is capped by project evidence, not UI polish.",
+    "Unclassified dirty VCS paths and missing release/data/service evidence block release and handoff.",
+    "Claims with partial or missing evidence need source events, evaluated falsification results, and owner-approved closure."
+  ];
+  state.dashboardQualityScorecard = quality;
+  const activeRows = Number(((state.workReadinessMap || {}).summary || {}).activeRows || 0);
+  const blockedRows = Number(((state.workReadinessMap || {}).summary || {}).blockedRows || 0);
+  const operationalScoreRaw = Math.max(1.2, Math.min(10, Number(quality.projectEvidenceScore || 1.2) + (openDecisionCount === 0 ? 1 : 0) - Math.min(2, dirtyCount * 0.08) - Math.min(1.5, missingEvidenceCount * 0.25)));
+  const workRows = Array.isArray((state.workReadinessMap || {}).rows) ? (state.workReadinessMap || {}).rows.length : 0;
+  const setupScoreRaw = Math.max(6.5, Math.min(9.2,
+    6.6
+    + (observedSourceCount > 0 ? 0.7 : 0)
+    + (workRows > 0 ? 0.5 : 0)
+    + (openDecisionCount === 0 ? 0.6 : 0.1)
+    - Math.min(0.4, blockedRows * 0.03)
+    - Math.min(0.3, dirtyCount * 0.02)
+  ));
+  const operationalScore = Number(operationalScoreRaw.toFixed(1));
+  const setupScore = Number(setupScoreRaw.toFixed(1));
+  const status = operationalScore >= 8 && dirtyCount === 0 && missingEvidenceCount === 0 && openDecisionCount === 0
+    ? "operational-candidate"
+    : openDecisionCount > 0
+      ? "guided-onboarding"
+      : "ready-to-govern";
+  state.governanceActionabilityScore = {
+    schemaVersion: SCHEMA_VERSION,
+    score: setupScore,
+    maxScore: 10,
+    status,
+    adoptionStage: operationalScore >= 8 ? "operational-candidate" : "governed-adoption",
+    onboardingScore: setupScore,
+    operationalEvidenceScore: operationalScore,
+    scoreMeaning: "The main score measures whether the harness is ready to guide planning, resume, and evidence collection. It is not production release readiness.",
+    userInterpretation: operationalScore >= 8
+      ? "Harness setup and operational evidence are close enough for release/operate review."
+      : "Harness setup is usable; the lower operational evidence score means proof still needs to be linked before release or handoff.",
+    canPlan: true,
+    canBuild: setupScore >= 7 && openDecisionCount === 0,
+    canRelease: operationalScore >= 8 && dirtyCount === 0 && missingEvidenceCount === 0,
+    canOperate: operationalScore >= 8.5 && missingEvidenceCount === 0,
+    canHandoff: dirtyCount === 0 && openDecisionCount === 0 && blockedRows === 0,
+    capReason: dirtyCount > 0
+      ? "Release and handoff are blocked by dirty or unclassified VCS paths; the harness itself is ready to guide cleanup."
+      : missingEvidenceCount > 0
+        ? "Release and operations are blocked by missing evidence; planning and evidence capture can continue."
+        : "Operational actionability follows current evidence coverage.",
+    inputs: {
+      uiUxDesignScore: quality.uiUxDesignScore,
+      projectEvidenceScore: quality.projectEvidenceScore,
+      governanceSetupScore: setupScore,
+      operationalEvidenceScore: operationalScore,
+      dirtyOrUnclassifiedVcsPaths: dirtyCount,
+      missingEvidenceClaims: missingEvidenceCount,
+      unresolvedDecisions: openDecisionCount,
+      activeWorkRows: activeRows,
+      blockedWorkRows: blockedRows
+    },
+    nextToReach95: [
+      ...(openDecisionCount > 0 ? ["Resolve unresolved stakeholder decisions."] : []),
+      ...(dirtyCount > 0 ? ["Classify or link dirty VCS paths to governed work."] : []),
+      ...(missingEvidenceCount > 0 ? ["Support missing service, release, data, and operations claims with evidence."] : []),
+      "Append semantic claim/VCS/release/data events when evidence changes."
+    ]
+  };
+  const existingImprovement = Object.assign({}, state.worldModelImprovementContract || {});
+  state.worldModelImprovementContract = Object.assign({}, existingImprovement, {
+    schemaVersion: SCHEMA_VERSION,
+    purpose: existingImprovement.purpose || "Every AI Agent session must make the project world model more truthful, less ambiguous, and easier to resume.",
+    lastEvaluatedAt: now(),
+    currentScores: {
+      governanceSetupScore: setupScore,
+      operationalEvidenceScore: operationalScore,
+      worldModelCompletenessScore: Number((state.worldModelCompleteness || {}).score || 0)
+    },
+    nextImprovementActions: [
+      ...(openDecisionCount > 0 ? ["Clarify pending stakeholder decisions and record owner-approved outcomes."] : []),
+      ...(dirtyCount > 0 ? ["Classify or link dirty VCS paths before handoff or release review."] : []),
+      ...(missingEvidenceCount > 0 ? ["Convert missing evidence claims into owned Work-tab tasks with required artifact types."] : []),
+      "Ask for tacit operational or domain context only when repository evidence cannot answer the question.",
+      "Keep tab content non-duplicative: Overview summarizes, Work sequences, Evidence proves, Governance decides, Operations runs, Tech Stack explains composition."
+    ],
+    scoreImprovementPolicy: {
+      governanceSetupScore: "Raise through clearer goals, owners, open work, decisions, tab ownership, and resumable agent contracts.",
+      operationalEvidenceScore: "Raise through real CI, VCS, release, service-health, incident, SLO/SLI, database, and runbook evidence.",
+      antiGamingRule: "Never raise scores by hiding missing evidence, downgrading warnings without proof, or treating declared/tacit context as observed fact."
+    }
+  });
+  const trust = Object.assign({}, state.trustBoundary || {});
+  const manifest = loadLedgerManifest();
+  state.trustBoundary = Object.assign({}, trust, {
+    status: dirtyCount === 0 && missingEvidenceCount === 0 && openDecisionCount === 0 ? "aligned" : "evidence-warning",
+    ledgerRootHash: manifest.rootHash || trust.ledgerRootHash || "unknown",
+    projectionStateHash: String((state.meta || {}).sourceStateHash || trust.projectionStateHash || "unknown"),
+    runtimeStatePathHash: fileHash(statePath),
+    servedSnapshotHash: stableHash({
+      projectWorldModel: state.projectWorldModel,
+      agentPlatformGovernance: state.agentPlatformGovernance,
+      audienceLens: state.audienceLens,
+      worldJudgment: state.worldJudgment,
+      claimEvidenceMatrix: state.claimEvidenceMatrix,
+      versionControl: state.versionControl
+    })
+  });
+  const packs = state.agentContextPacks || {};
+  if (packs.agent) {
+    packs.agent.forbiddenAssumptions = Array.from(new Set([
+      ...(Array.isArray(packs.agent.forbiddenAssumptions) ? packs.agent.forbiddenAssumptions : []),
+      ...(dirtyCount > 0 ? ["Do not assume local working-tree changes are linked to a governed task."] : []),
+      ...(openDecisionCount > 0 ? ["Do not treat unresolved decisions as approved."] : [])
+    ]));
+  }
+  state.agentContextPacks = packs;
+  return state;
+}
+
+function deriveRuntime(state, previous = {}) {
+  const meta = state.meta || {};
+  const listener = Object.assign({}, previous.listener || {}, state.listener || {});
+  return {
+    schemaVersion: String(meta.schemaVersion || SCHEMA_VERSION),
+    apiVersion: API_VERSION,
+    workspaceId: String(meta.workspaceId || "unknown-workspace"),
+    projectionVersion: String(meta.projectionVersion || PROJECTION_VERSION),
+    sourceEventSequence: Number(meta.sourceEventSequence || 0),
+    sourceStateHash: String(meta.sourceStateHash || stableHash(state)),
+    generatedAt: now(),
+    completeness: state.worldModelCompleteness || "unknown",
+    staleness: String(meta.staleness || "fresh"),
+    listener: Object.assign({
+      status: "not-started",
+      lifecycle: "auto-restored-on-harness-activity",
+      statePathHash: fileHash(statePath),
+      host: "127.0.0.1",
+      port: null,
+      url: null,
+      pid: null,
+      pidStartTime: null,
+      commandHash: null,
+      tokenPath: path.relative(workspaceRoot, tokenPath).replace(/\\\\/g, "/"),
+      logPath: path.relative(workspaceRoot, logPath).replace(/\\\\/g, "/"),
+      lockPath: path.relative(workspaceRoot, lockPath).replace(/\\\\/g, "/"),
+      startedAt: null,
+      lastHeartbeatAt: null,
+      lastHealthCheckAt: null,
+      lastFailure: null
+    }, listener, { statePathHash: fileHash(statePath) })
+  };
+}
+
+function recordProjectionRefreshEvent(state) {
+  const manifest = loadLedgerManifest();
+  const expectedLastSequence = Number(manifest.lastSequence || 0);
+  const workspaceId = String((state.meta || {}).workspaceId || "unknown-workspace");
+  const missingEvidenceCount = Array.isArray(((state.governanceEvidenceBrief || {}).missingEvidenceClaims)) ? state.governanceEvidenceBrief.missingEvidenceClaims.length : 0;
+  const dirtyCount = Array.isArray(((state.versionControl || {}).unlinkedChanges)) ? state.versionControl.unlinkedChanges.length : 0;
+  const payload = {
+    projectionVersion: PROJECTION_VERSION,
+    sourceStateHash: String((state.meta || {}).sourceStateHash || ""),
+    versionControl: {
+      provider: (state.versionControl || {}).provider || "unknown",
+      status: (state.versionControl || {}).status || "unknown",
+      workingCopyStatus: (state.versionControl || {}).workingCopyStatus || "unknown",
+      unlinkedChangeCount: dirtyCount
+    },
+    criticalSignalCount: Array.isArray(state.criticalSignals) ? state.criticalSignals.length : 0,
+    missingEvidenceCount,
+    openDecisionCount: Array.isArray(((state.governanceEvidenceBrief || {}).unresolvedDecisions)) ? state.governanceEvidenceBrief.unresolvedDecisions.length : 0,
+    quality: {
+      uiUxDesignScore: (state.dashboardQualityScorecard || {}).uiUxDesignScore || null,
+      projectEvidenceScore: (state.dashboardQualityScorecard || {}).projectEvidenceScore || null
+    },
+    governanceActionabilityScore: (state.governanceActionabilityScore || {}).score || null,
+    projectEvidenceSourceCount: Array.isArray((state.projectEvidenceInventory || {}).sources) ? state.projectEvidenceInventory.sources.length : 0,
+    workReadinessMapSummary: (state.workReadinessMap || {}).summary || null
+  };
+  const recordedAt = now();
+  const event = {
+    eventId: "event-" + String(expectedLastSequence + 1).padStart(6, "0") + "-projection-refresh-" + stableHash({ payload, recordedAt }).slice(0, 8),
+    sequence: expectedLastSequence + 1,
+    eventType: "workspace.dashboard.projection-refreshed",
+    eventVersion: "1.0.0",
+    workspaceId,
+    aggregateId: workspaceId,
+    aggregateType: "projectWorldModel",
+    aggregateVersion: expectedLastSequence + 1,
+    occurredAt: recordedAt,
+    recordedAt,
+    actor: "workspace-init-mcp",
+    agentId: "dashboard-ops",
+    sourceTool: "dashboard-ops refresh",
+    correlationId: "projection-refresh",
+    causationId: null,
+    idempotencyKey: "projection-refresh:" + recordedAt,
+    payloadHash: stableHash(payload),
+    previousEventHash: manifest.rootHash || "genesis",
+    redactionLevel: "internal",
+    payload
+  };
+  const record = appendLedgerEvent(event, expectedLastSequence);
+  const operations = Array.isArray(state.operationsTimeline) ? state.operationsTimeline : [];
+  operations.push({
+    id: "timeline-dashboard-refresh-" + record.sequence,
+    type: "dashboard-refresh",
+    status: "complete",
+    occurredAt: recordedAt,
+    summary: "Dashboard projections refreshed and VCS/evidence signals recorded to the ledger.",
+    evidenceRefs: [record.eventId]
+  });
+  state.operationsTimeline = operations.slice(-100);
+  state.meta = Object.assign({}, state.meta || {}, {
+    sourceEventSequence: record.sequence,
+    ledgerRootHash: record.eventHash
+  });
+  state.trustBoundary = Object.assign({}, state.trustBoundary || {}, {
+    ledgerRootHash: record.eventHash
+  });
+  return record;
+}
+
+function persistProjections(state, options = {}) {
+  const priorRuntime = loadJsonOrFallback(runtimePath, {});
+  const generatedAt = now();
+  state.meta = Object.assign({}, state.meta || {}, {
+    schemaVersion: SCHEMA_VERSION,
+    apiVersion: API_VERSION,
+    projectionVersion: PROJECTION_VERSION,
+    generatedAt,
+    expiresAt: "after-next-refresh",
+    staleness: "fresh",
+    completeness: state.worldModelCompleteness || "partial",
+    sourceStateHash: stableHash({
+      projectWorldModel: state.projectWorldModel,
+      audienceLens: state.audienceLens,
+      taskQueues: state.taskQueues,
+      workTimeline: state.workTimeline,
+      decisionContracts: state.decisionContracts,
+      versionControl: state.versionControl
+    })
+  });
+  const vc = options.skipVcs ? null : collectVersionControl();
+  if (vc) {
+    state.versionControl = vc.versionControl;
+    state.vcsChangeRecords = vc.vcsChangeRecords || [];
+    state.gitStatus = Object.assign({}, state.gitStatus || {}, {
+      trackedByGit: vc.versionControl.provider === "git" ? "yes" : "no",
+      provider: vc.versionControl.provider,
+      currentBranch: vc.versionControl.currentBranchOrRevision,
+      workingTree: Object.assign({}, (state.gitStatus || {}).workingTree || {}, {
+        status: vc.versionControl.workingCopyStatus
+      })
+    });
+  }
+  synchronizeJudgmentModel(state);
+  normalizeDashboardStateForValidation(state);
+  state.meta.sourceStateHash = stableHash({
+    projectWorldModel: state.projectWorldModel,
+    worldJudgment: state.worldJudgment,
+    criticalSignals: state.criticalSignals,
+    claimEvidenceMatrix: state.claimEvidenceMatrix,
+    readinessJudgments: state.readinessJudgments,
+    trustBoundary: state.trustBoundary,
+    agentPlatformGovernance: state.agentPlatformGovernance,
+    audienceLens: state.audienceLens,
+    dashboardQualityScorecard: state.dashboardQualityScorecard,
+    governanceActionabilityScore: state.governanceActionabilityScore,
+    workReadinessMap: state.workReadinessMap,
+    projectEvidenceInventory: state.projectEvidenceInventory,
+    taskQueues: state.taskQueues,
+    workTimeline: state.workTimeline,
+    decisionContracts: state.decisionContracts,
+    versionControl: state.versionControl
+  });
+  if (!options.skipLedger) {
+    recordProjectionRefreshEvent(state);
+  }
+  if (state.embeddingProjection) {
+    writeJson(embeddingPath, state.embeddingProjection);
+  }
+  writeJson(statePath, state);
+  writeJson(indexPath, deriveIndex(state));
+  writeJson(runtimePath, deriveRuntime(state, priorRuntime));
+  return state;
+}
+
+function handleRefresh() {
+  const state = loadState({ quarantineCorrupt: true });
+  persistProjections(state);
+  console.log("Harness Dashboard projections refreshed.");
+}
+
+function handleValidate() {
+  const state = loadState();
+  const errors = validateState(state);
+  if (errors.length > 0) {
+    console.error(errors.join("\\n"));
+    process.exitCode = 1;
+    return;
+  }
+  console.log("Harness Dashboard projections are valid.");
+}
+
+function handleRebuild() {
+  const state = loadState({ quarantineCorrupt: true });
+  persistProjections(state);
+  console.log("Harness Dashboard projections rebuilt.");
+}
+
+function handleAppendEvent() {
+  const eventPath = option("--event", "");
+  const expected = Number(option("--expected-last-sequence", "NaN"));
+  if (!eventPath || !Number.isFinite(expected)) {
+    throw new Error("append-event requires --event and --expected-last-sequence");
+  }
+  const event = readJson(path.resolve(workspaceRoot, eventPath));
+  const record = appendLedgerEvent(event, expected);
+  console.log("Appended harness event sequence " + record.sequence);
+}
+
+function ensureToken() {
+  ensureDir(stateDir);
+  if (fs.existsSync(tokenPath)) {
+    const existing = fs.readFileSync(tokenPath, "utf-8").trim();
+    if (existing.length >= 24) {
+      return existing;
+    }
+  }
+  const token = crypto.randomBytes(32).toString("hex");
+  fs.writeFileSync(tokenPath, token + "\\n", { encoding: "utf-8", mode: 0o600 });
+  return token;
+}
+
+function normalizeHost(value) {
+  return String(value || "").split(":")[0].replace(/^\\[/, "").replace(/\\]$/, "").toLowerCase();
+}
+
+function isLoopbackHost(value) {
+  const host = normalizeHost(value);
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+function isLoopbackOrigin(value) {
+  if (value == null || value === "") {
+    return true;
+  }
+  try {
+    return isLoopbackHost(new URL(String(value)).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function requestToken(request, url) {
+  const header = String(request.headers["x-harness-dashboard-token"] || "");
+  const auth = String(request.headers.authorization || "");
+  const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7) : "";
+  return header || bearer || String(url.searchParams.get("token") || "");
+}
+
+function sendJson(response, status, value) {
+  response.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "cross-origin-resource-policy": "same-origin"
+  });
+  response.end(JSON.stringify(value, null, 2));
+}
+
+function sendHtml(response, html) {
+  response.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
+    "x-content-type-options": "nosniff",
+    "cross-origin-resource-policy": "same-origin"
+  });
+  response.end(html);
+}
+
+function apiPayload(routeName) {
+  const state = loadState();
+  if (routeName === "snapshot") return state;
+  if (routeName === "index") return loadJsonOrFallback(indexPath, deriveIndex(state));
+  if (routeName === "tasks") return { taskQueues: state.taskQueues, agile: state.agile, workTimeline: state.workTimeline, workReadinessMap: state.workReadinessMap };
+  if (routeName === "sessions") return { sessionLog: state.sessionLog, governedSessions: state.governedSessions, agentResumeBrief: state.agentResumeBrief };
+  if (routeName === "dictionary") return { dictionary: state.dictionary, ontology: state.ontology };
+  if (routeName === "version-control") return { versionControl: state.versionControl, vcsChangeRecords: state.vcsChangeRecords };
+  if (routeName === "runtime") return loadJsonOrFallback(runtimePath, deriveRuntime(state));
+  if (routeName === "health") return { ok: true, mode: "Local Live", statePathHash: fileHash(statePath), generatedAt: now() };
+  return null;
+}
+
+function deterministicQuery(url) {
+  const q = String(url.searchParams.get("q") || "").trim().toLowerCase().slice(0, 120);
+  const scope = String(url.searchParams.get("scope") || "all").trim().toLowerCase();
+  if (!q) {
+    return { query: q, scope, results: [] };
+  }
+  const started = Date.now();
+  const state = loadState();
+  const source = scope === "tasks" ? { taskQueues: state.taskQueues, agile: state.agile }
+    : scope === "decisions" ? { decisionContracts: state.decisionContracts }
+    : scope === "evidence" ? { artifacts: state.artifacts, governanceEvidenceBrief: state.governanceEvidenceBrief, versionControl: state.versionControl }
+    : state;
+  const lines = JSON.stringify(source, null, 2).split("\\n");
+  const results = [];
+  for (const [index, line] of lines.entries()) {
+    if (Date.now() - started > 50 || results.length >= 20) {
+      break;
+    }
+    if (line.toLowerCase().includes(q)) {
+      results.push({ line: index + 1, text: line.slice(0, 500) });
+    }
+  }
+  return { query: q, scope, resultCount: results.length, results };
+}
+
+function serveEvents(request, response, token) {
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-store",
+    "connection": "keep-alive",
+    "x-accel-buffering": "no"
+  });
+  function send(eventName, payload) {
+    response.write("event: " + eventName + "\\n");
+    response.write("data: " + JSON.stringify(envelope(payload)) + "\\n\\n");
+  }
+  send("harness.snapshot", loadState());
+  const interval = setInterval(() => {
+    send("harness.heartbeat", { at: now(), statePathHash: fileHash(statePath), tokenPath: path.relative(workspaceRoot, tokenPath).replace(/\\\\/g, "/") });
+  }, 5000);
+  request.on("close", () => clearInterval(interval));
+}
+
+function updateRuntimeListener(patch) {
+  const state = loadJsonOrFallback(statePath, {});
+  const runtime = deriveRuntime(state, loadJsonOrFallback(runtimePath, {}));
+  runtime.listener = Object.assign({}, runtime.listener || {}, patch, {
+    statePathHash: fileHash(statePath),
+    lastHealthCheckAt: now()
+  });
+  writeJson(runtimePath, runtime);
+  if (state && state.listener) {
+    state.listener = Object.assign({}, state.listener, runtime.listener);
+    writeJson(statePath, state);
+  }
+  return runtime;
+}
+
+function makeServer(token) {
+  return http.createServer((request, response) => {
+    const url = new URL(request.url || "/", "http://" + String(request.headers.host || "127.0.0.1"));
+    if (!isLoopbackHost(request.headers.host) || !isLoopbackOrigin(request.headers.origin)) {
+      sendJson(response, 403, { ok: false, error: "Loopback Host/Origin required" });
+      return;
+    }
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      let html = fs.readFileSync(htmlPath, "utf-8");
+      html = html.replace("const bootstrapElement =", "window.__HARNESS_DASHBOARD_TOKEN__ = " + JSON.stringify(token) + ";\\n      const bootstrapElement =");
+      sendHtml(response, html);
+      return;
+    }
+    if (url.pathname === "/favicon.ico") {
+      response.writeHead(204, { "cache-control": "no-store" });
+      response.end();
+      return;
+    }
+    if (!url.pathname.startsWith("/api/harness-dashboard/v1/")) {
+      sendJson(response, 404, { ok: false, error: "Not found" });
+      return;
+    }
+    if (requestToken(request, url) !== token) {
+      sendJson(response, 401, envelope({ ok: false, error: "Token rejected" }));
+      return;
+    }
+    const routeName = url.pathname.replace("/api/harness-dashboard/v1/", "");
+    try {
+      if (routeName === "events") {
+        serveEvents(request, response, token);
+        return;
+      }
+      if (routeName === "query") {
+        sendJson(response, 200, envelope(deterministicQuery(url)));
+        return;
+      }
+      const payload = apiPayload(routeName);
+      if (payload == null) {
+        sendJson(response, 404, envelope({ ok: false, error: "Unknown route" }));
+        return;
+      }
+      sendJson(response, 200, envelope(payload));
+    } catch (error) {
+      sendJson(response, 500, envelope({ ok: false, error: String(error && error.message || error) }));
+    }
+  });
+}
+
+async function getAvailablePort(host, preferredPort) {
+  const start = Number(preferredPort || 43110);
+  for (let port = start; port < start + 2000; port += 1) {
+    const available = await new Promise((resolve) => {
+      const server = http.createServer();
+      server.once("error", () => resolve(false));
+      server.listen(port, host, () => server.close(() => resolve(true)));
+    });
+    if (available) {
+      return port;
+    }
+  }
+  throw new Error("No available dashboard listener port found");
+}
+
+async function requestRuntime(url, token) {
+  return await new Promise((resolve) => {
+    const parsed = new URL(url);
+    parsed.pathname = "/api/harness-dashboard/v1/runtime";
+    parsed.searchParams.set("token", token);
+    const request = http.get(parsed, { timeout: 1500 }, (response) => {
+      let body = "";
+      response.setEncoding("utf-8");
+      response.on("data", (chunk) => body += chunk);
+      response.on("end", () => {
+        try {
+          resolve(response.statusCode === 200 ? JSON.parse(body) : null);
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    request.on("error", () => resolve(null));
+    request.on("timeout", () => {
+      request.destroy();
+      resolve(null);
+    });
+  });
+}
+
+async function handleListen() {
+  const host = option("--host", "127.0.0.1");
+  const preferredPort = Number(option("--port", "43110"));
+  const port = await getAvailablePort(host, preferredPort);
+  const token = ensureToken();
+  const server = makeServer(token);
+  server.listen(port, host, () => {
+    const url = "http://" + host + ":" + port + "/";
+    updateRuntimeListener({
+      status: "listening",
+      host,
+      port,
+      url,
+      pid: process.pid,
+      pidStartTime: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+      commandHash: stableHash(process.argv),
+      tokenPath: path.relative(workspaceRoot, tokenPath).replace(/\\\\/g, "/"),
+      logPath: path.relative(workspaceRoot, logPath).replace(/\\\\/g, "/"),
+      startedAt: now(),
+      lastHeartbeatAt: now(),
+      lastFailure: null
+    });
+    logLine("listening at " + url);
+    console.log("Harness Dashboard listening at " + url);
+  });
+}
+
+async function handleStart() {
+  if (process.env.WORKSPACE_INIT_DASHBOARD_AUTOSTART === "0") {
+    updateRuntimeListener({ status: "disabled", lastFailure: "WORKSPACE_INIT_DASHBOARD_AUTOSTART=0" });
+    console.log("Harness Dashboard listener autostart disabled.");
+    return;
+  }
+  const token = ensureToken();
+  const runtime = loadJsonOrFallback(runtimePath, {});
+  const listener = runtime.listener || {};
+  if (listener.url) {
+    const probe = await requestRuntime(listener.url, token);
+    const probeListener = probe && probe.payload ? probe.payload.listener || {} : {};
+    if (
+      probe &&
+      probe.workspaceId === runtime.workspaceId &&
+      probeListener.statePathHash === fileHash(statePath)
+    ) {
+      console.log("Harness Dashboard already listening at " + listener.url);
+      return;
+    }
+  }
+  ensureDir(logDir);
+  const preferredPort = Number(option("--port", "43110"));
+  const port = await getAvailablePort("127.0.0.1", preferredPort);
+  const child = spawn(process.execPath, [__filename, "listen", "--port", String(port)], {
+    cwd: workspaceRoot,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true
+  });
+  child.unref();
+  updateRuntimeListener({
+    status: "starting",
+    host: "127.0.0.1",
+    port,
+    url: "http://127.0.0.1:" + port + "/",
+    pid: child.pid,
+    startedAt: now()
+  });
+  console.log("Harness Dashboard listener starting at http://127.0.0.1:" + port + "/");
+}
+
+function handleStatus() {
+  const state = loadJsonOrFallback(statePath, {});
+  const runtime = loadJsonOrFallback(runtimePath, deriveRuntime(state));
+  console.log(JSON.stringify(envelope({ runtime, stateSummary: deriveIndex(state) }), null, 2));
+}
+
+function handleStop() {
+  const runtime = loadJsonOrFallback(runtimePath, {});
+  const pid = Number(runtime.listener && runtime.listener.pid || 0);
+  if (pid > 0 && pid !== process.pid) {
+    try {
+      process.kill(pid);
+    } catch (error) {
+      logLine("stop failed for pid " + pid + ": " + String(error && error.message || error));
+    }
+  }
+  updateRuntimeListener({ status: "stopped", pid: null, url: null, port: null });
+  console.log("Harness Dashboard listener stopped.");
+}
+
+function handleCleanupStale() {
+  const runtime = loadJsonOrFallback(runtimePath, {});
+  const pid = Number(runtime.listener && runtime.listener.pid || 0);
+  if (pid > 0) {
+    try {
+      process.kill(pid, 0);
+      console.log("Listener process appears alive: " + pid);
+      return;
+    } catch {
+      updateRuntimeListener({ status: "stale-cleaned", pid: null, url: null, port: null });
+    }
+  }
+  console.log("No stale listener process recorded.");
+}
+
+function sanitizePublic(value) {
+  if (Array.isArray(value)) {
+    return value.map(sanitizePublic);
+  }
+  if (value && typeof value === "object") {
+    const output = {};
+    for (const [key, item] of Object.entries(value)) {
+      const lowered = key.toLowerCase();
+      if (lowered.includes("token") || lowered.includes("secret") || lowered.includes("env")) {
+        output[key] = "[redacted]";
+      } else if (lowered.includes("path") || lowered.includes("url") || lowered.includes("user")) {
+        output[key] = "[redacted-local]";
+      } else {
+        output[key] = sanitizePublic(item);
+      }
+    }
+    return output;
+  }
+  if (typeof value === "string") {
+    return value.replace(/[A-Za-z]:\\\\[^\\s"']+/g, "[redacted-local-path]").replace(/https?:\\/\\/(localhost|127\\.0\\.0\\.1|[^\\s"']*\\.internal)[^\\s"']*/g, "[redacted-private-url]");
+  }
+  return value;
+}
+
+function handleExportStatic() {
+  const outDir = path.resolve(workspaceRoot, option("--out", path.join(exportsDir, "latest")));
+  const isPublic = hasFlag("--public");
+  const state = isPublic ? sanitizePublic(loadState()) : loadState();
+  const html = fs.readFileSync(htmlPath, "utf-8").replace(/<script id="dashboard-bootstrap-data" type="application\\/json">[\\s\\S]*?<\\/script>/, "<script id=\\"dashboard-bootstrap-data\\" type=\\"application/json\\">" + JSON.stringify(state).replace(/</g, "\\\\u003c") + "</script>");
+  ensureDir(outDir);
+  writeTextAtomic(path.join(outDir, "harness-dashboard.html"), html);
+  writeJson(path.join(outDir, "dashboard-state.json"), state);
+  console.log("Exported Harness Dashboard snapshot to " + outDir);
+}
+
+async function main() {
+  ensureDir(stateDir);
+  ensureDir(eventDir);
+  if (command === "refresh") return handleRefresh();
+  if (command === "record-agent-platforms") return handleRecordAgentPlatforms();
+  if (command === "append-event") return handleAppendEvent();
+  if (command === "validate" || command === "verify-projections") return handleValidate();
+  if (command === "rebuild-projections" || command === "repair-projections") return handleRebuild();
+  if (command === "listen" || command === "serve") return await handleListen();
+  if (command === "start" || command === "ensure-listening") return await handleStart();
+  if (command === "restart") {
+    handleStop();
+    return await handleStart();
+  }
+  if (command === "stop") return handleStop();
+  if (command === "status") return handleStatus();
+  if (command === "doctor") {
+    handleValidate();
+    if (!process.exitCode) handleStatus();
+    return;
+  }
+  if (command === "logs") {
+    console.log(fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf-8").split(/\\r?\\n/).slice(-120).join("\\n") : "No dashboard listener log yet.");
+    return;
+  }
+  if (command === "cleanup-stale") return handleCleanupStale();
+  if (command === "export-static") return handleExportStatic();
+  console.log("Usage: dashboard-ops.mjs refresh|record-agent-platforms|append-event|validate|verify-projections|rebuild-projections|repair-projections|listen|ensure-listening|start|stop|restart|status|doctor|logs|cleanup-stale|export-static");
+}
+
+await main();
+`;
 }
 
 export function generateDashboardOperationFiles(

@@ -33,7 +33,7 @@ function buildLiveDashboardPackage(): string {
       scripts: {
         start: "node server.js",
         health: "node server.js --health",
-        check: "node --check server.js && node --check public/app.js",
+        check: "node --check server.js && node --check public/app.js && node --check public/vendor/chart.umd.js && node --check public/vendor/markdown-it.min.js && node --check public/vendor/purify.min.js",
       },
     },
     null,
@@ -132,6 +132,28 @@ const OPEN_MARKERS = [
   /\\bOPEN:/i,
   /live-artifacts:\\s*open/i
 ];
+const WORK_STATUS_ORDER = [
+  "failed",
+  "needs-user",
+  "real-world",
+  "blocked",
+  "in-progress",
+  "pending",
+  "recently-handled",
+  "completed"
+];
+const WORK_STATUS_LABELS = {
+  "failed": "Failed",
+  "needs-user": "Needs User",
+  "real-world": "Real-World",
+  "blocked": "Blocked",
+  "in-progress": "In Progress",
+  "pending": "Pending",
+  "recently-handled": "Recently Handled",
+  "completed": "Completed"
+};
+const OPEN_WORK_STATUSES = new Set(["failed", "needs-user", "real-world", "blocked", "in-progress", "pending"]);
+const WORK_MARKER_PATTERN = /live-artifacts:\\s*(open|pending|todo|in-progress|doing|blocked|failed|needs-user|needs-review|confirm|confirmation|real-world|external|manual|done|complete|completed|recent|recently-handled)\\b([^\\r\\n]*)/i;
 
 function normalizeRelativePath(value) {
   return String(value || "").replace(/\\\\/g, "/").replace(/^\\.\\//, "");
@@ -453,25 +475,91 @@ function classifyArtifact(relativePath, preview) {
   return "binary-or-large";
 }
 
-function extractOpenMarkers(preview) {
+function normalizeWorkStatus(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "open" || normalized === "todo") return "pending";
+  if (normalized === "doing") return "in-progress";
+  if (normalized === "needs-review" || normalized === "confirm" || normalized === "confirmation") return "needs-user";
+  if (normalized === "external" || normalized === "manual") return "real-world";
+  if (normalized === "done" || normalized === "complete") return "completed";
+  if (normalized === "recent") return "recently-handled";
+  return WORK_STATUS_ORDER.includes(normalized) ? normalized : "pending";
+}
+
+function parseWorkMarkerMetadata(raw) {
+  const metadata = {};
+  const text = String(raw || "");
+  const pattern = /(owner|by|next|reason|action|evidence|blocker|due)=("[^"]*"|'[^']*'|[^\\s]+)/gi;
+  let match;
+  while ((match = pattern.exec(text)) != null) {
+    const key = match[1].toLowerCase();
+    const value = String(match[2] || "").replace(/^["']|["']$/g, "");
+    metadata[key] = value;
+  }
+  return metadata;
+}
+
+function isOpenWorkStatus(status) {
+  return OPEN_WORK_STATUSES.has(status);
+}
+
+function extractWorkSignals(preview) {
   if (!preview) {
     return [];
   }
   const lines = preview.split(/\\r?\\n/);
-  const matches = [];
+  const signals = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (OPEN_MARKERS.some((pattern) => pattern.test(line))) {
-      matches.push({
+    const workMarker = line.match(WORK_MARKER_PATTERN);
+    if (workMarker) {
+      const status = normalizeWorkStatus(workMarker[1]);
+      signals.push({
         line: index + 1,
+        status,
+        label: WORK_STATUS_LABELS[status] || status,
+        metadata: parseWorkMarkerMetadata(workMarker[2] || ""),
+        open: isOpenWorkStatus(status),
+        text: line.trim().slice(0, 240)
+      });
+      continue;
+    }
+    if (OPEN_MARKERS.some((pattern) => pattern.test(line))) {
+      signals.push({
+        line: index + 1,
+        status: "pending",
+        label: WORK_STATUS_LABELS.pending,
+        metadata: {},
+        open: true,
         text: line.trim().slice(0, 240)
       });
     }
   }
-  return matches.slice(0, 30);
+  return signals.slice(0, 50);
+}
+
+function extractOpenMarkers(preview) {
+  return extractWorkSignals(preview)
+    .filter((signal) => signal.open)
+    .map((signal) => ({
+      line: signal.line,
+      text: signal.text
+    }))
+    .slice(0, 30);
 }
 
 function getGitSnapshot() {
+  if (!fs.existsSync(path.join(PROJECT_ROOT, ".git"))) {
+    return {
+      available: false,
+      branch: "not-a-git-root",
+      dirty: false,
+      changedFileCount: 0,
+      changedFiles: [],
+      numstat: []
+    };
+  }
+
   function runGit(args) {
     return childProcess.execFileSync("git", args, {
       cwd: PROJECT_ROOT,
@@ -536,12 +624,58 @@ function buildGovernanceBundles(artifacts) {
   });
 }
 
+function buildWorkStatusSummary(workSignals, recentArtifacts) {
+  const summary = {};
+  for (const status of WORK_STATUS_ORDER) {
+    summary[status] = {
+      status,
+      label: WORK_STATUS_LABELS[status] || status,
+      count: 0,
+      open: isOpenWorkStatus(status)
+    };
+  }
+  for (const signal of workSignals) {
+    const bucket = summary[signal.status] || {
+      status: signal.status,
+      label: signal.label || signal.status,
+      count: 0,
+      open: signal.open
+    };
+    bucket.count += 1;
+    summary[signal.status] = bucket;
+  }
+  if (summary["recently-handled"].count === 0) {
+    summary["recently-handled"].count = Math.min(5, recentArtifacts.length);
+  }
+  return summary;
+}
+
+function buildTaskBuckets(workSignals, recentArtifacts) {
+  const buckets = {};
+  for (const status of WORK_STATUS_ORDER) {
+    buckets[status] = workSignals.filter((signal) => signal.status === status).slice(0, 50);
+  }
+  if (buckets["recently-handled"].length === 0) {
+    buckets["recently-handled"] = recentArtifacts.slice(0, 10).map((artifact) => ({
+      artifactId: artifact.id,
+      path: artifact.path,
+      line: 0,
+      status: "recently-handled",
+      label: WORK_STATUS_LABELS["recently-handled"],
+      open: false,
+      text: "Recently modified artifact",
+      metadata: {}
+    }));
+  }
+  return buckets;
+}
+
 function buildAdminDashboardReference() {
   const dashboardPath = "docs/ai-harness/dashboard/index.html";
   const statePath = "docs/ai-harness/dashboard/state/dashboard-state.json";
   const operationsScriptPath = "docs/ai-harness/dashboard/scripts/dashboard-ops.mjs";
   return {
-    role: "canonical-admin-state-and-operations-dashboard",
+    role: "server-status-console",
     dashboardPath,
     statePath,
     operationsScriptPath,
@@ -551,7 +685,7 @@ function buildAdminDashboardReference() {
     stateAvailable: fs.existsSync(path.join(PROJECT_ROOT, statePath)),
     operationsScriptAvailable: fs.existsSync(path.join(PROJECT_ROOT, operationsScriptPath)),
     boundary:
-      "Admin dashboard owns curated governance, runtime orchestration, KPIs, and service operations health; live artifacts dashboard owns real-time artifact discovery and open-work observation."
+      "Admin dashboard owns server health only; live artifacts dashboard owns harness work status, artifact discovery, user-confirmation tasks, and real-world action tracking."
   };
 }
 
@@ -560,6 +694,7 @@ function scanArtifacts() {
   const artifacts = [];
   const activeOpenTasks = [];
   const archivedUnchecked = [];
+  const workSignals = [];
 
   for (const fullPath of files) {
     let stat;
@@ -571,7 +706,8 @@ function scanArtifacts() {
 
     const relativePath = toRelativePath(fullPath);
     const preview = readPreview(fullPath, relativePath, stat);
-    const openMarkers = extractOpenMarkers(preview);
+    const signals = extractWorkSignals(preview);
+    const openMarkers = signals.filter((signal) => signal.open);
     const category = classifyArtifact(relativePath, preview);
     const id = hash(relativePath).slice(0, 16);
     const artifact = {
@@ -582,24 +718,44 @@ function scanArtifacts() {
       size: stat.size,
       mtimeMs: Math.round(stat.mtimeMs),
       previewAvailable: preview != null,
-      openTaskCount: openMarkers.length
+      openTaskCount: openMarkers.length,
+      workSignalCount: signals.length,
+      workStatuses: Array.from(new Set(signals.map((signal) => signal.status)))
     };
     artifacts.push(artifact);
 
+    for (const signal of signals) {
+      workSignals.push({
+        artifactId: id,
+        path: relativePath,
+        line: signal.line,
+        status: signal.status,
+        label: signal.label,
+        open: signal.open,
+        text: signal.text,
+        metadata: signal.metadata
+      });
+    }
+
     if (category === "active-open-task" && openMarkers.length > 0) {
       for (const marker of openMarkers) {
-        activeOpenTasks.push({ artifactId: id, path: relativePath, line: marker.line, text: marker.text });
+        activeOpenTasks.push({ artifactId: id, path: relativePath, line: marker.line, status: marker.status, text: marker.text });
       }
     }
     if (category === "archived-unchecked" && openMarkers.length > 0) {
       for (const marker of openMarkers) {
-        archivedUnchecked.push({ artifactId: id, path: relativePath, line: marker.line, text: marker.text });
+        archivedUnchecked.push({ artifactId: id, path: relativePath, line: marker.line, status: marker.status, text: marker.text });
       }
     }
   }
 
   artifacts.sort((left, right) => right.mtimeMs - left.mtimeMs || left.path.localeCompare(right.path));
-  return { artifacts, activeOpenTasks, archivedUnchecked, truncated: files.length >= MAX_SCAN_FILES };
+  workSignals.sort((left, right) => {
+    const leftIndex = WORK_STATUS_ORDER.indexOf(left.status);
+    const rightIndex = WORK_STATUS_ORDER.indexOf(right.status);
+    return (leftIndex === -1 ? 99 : leftIndex) - (rightIndex === -1 ? 99 : rightIndex) || left.path.localeCompare(right.path) || left.line - right.line;
+  });
+  return { artifacts, activeOpenTasks, archivedUnchecked, workSignals, truncated: files.length >= MAX_SCAN_FILES };
 }
 
 function buildSummary(force, persist) {
@@ -617,14 +773,20 @@ function buildSummary(force, persist) {
 
   const reportBundles = scan.artifacts.filter((artifact) => artifact.category === "report-bundle" || artifact.path.startsWith(".governance/reports/"));
   const governanceBundles = buildGovernanceBundles(scan.artifacts);
+  const recentArtifacts = scan.artifacts.slice(0, 25);
+  const workStatusSummary = buildWorkStatusSummary(scan.workSignals, recentArtifacts);
+  const taskBuckets = buildTaskBuckets(scan.workSignals, recentArtifacts);
   const signatureInput = {
     artifacts: scan.artifacts.map((artifact) => [
       artifact.path,
       artifact.size,
       artifact.mtimeMs,
       artifact.category,
-      artifact.openTaskCount
+      artifact.openTaskCount,
+      artifact.workSignalCount,
+      artifact.workStatuses
     ]),
+    workSignals: scan.workSignals.map((signal) => [signal.path, signal.line, signal.status, signal.text]),
     git: {
       branch: git.branch,
       changedFileCount: git.changedFileCount,
@@ -653,15 +815,27 @@ function buildSummary(force, persist) {
       archivedUnchecked: scan.archivedUnchecked.length,
       reportBundles: reportBundles.length,
       gitChanges: git.changedFileCount,
-      categories: Object.keys(categories).length
+      categories: Object.keys(categories).length,
+      workSignals: scan.workSignals.length,
+      inProgress: workStatusSummary["in-progress"].count,
+      pending: workStatusSummary.pending.count,
+      completed: workStatusSummary.completed.count,
+      recentlyHandled: workStatusSummary["recently-handled"].count,
+      failed: workStatusSummary.failed.count,
+      needsUser: workStatusSummary["needs-user"].count,
+      realWorld: workStatusSummary["real-world"].count,
+      blocked: workStatusSummary.blocked.count
     },
     artifacts: scan.artifacts,
     activeOpenTasks: scan.activeOpenTasks.slice(0, 200),
     archivedUnchecked: scan.archivedUnchecked.slice(0, 200),
+    workSignals: scan.workSignals.slice(0, 500),
+    workStatusSummary,
+    taskBuckets,
     reportBundles,
     gitChanges: git.changedFiles,
     categories,
-    recentArtifacts: scan.artifacts.slice(0, 25),
+    recentArtifacts,
     governanceBundles,
     adminDashboard: buildAdminDashboardReference(),
     git,
@@ -858,6 +1032,7 @@ function handleApi(req, res, parsedUrl) {
       project: summary.project,
       signature: summary.signature,
       counts: summary.counts,
+      workStatusSummary: summary.workStatusSummary,
       health: summary.health
     });
     return;
@@ -888,10 +1063,29 @@ function handleApi(req, res, parsedUrl) {
     }
     const summary = buildSummary(false, false);
     const openOnly = parsedUrl.query.openOnly === "true";
-    const artifacts = openOnly
+    const status = parsedUrl.query.status ? normalizeWorkStatus(parsedUrl.query.status) : "";
+    let artifacts = openOnly
       ? summary.artifacts.filter((artifact) => artifact.category === "active-open-task" && artifact.openTaskCount > 0)
       : summary.artifacts;
+    if (status) {
+      artifacts = artifacts.filter((artifact) => Array.isArray(artifact.workStatuses) && artifact.workStatuses.includes(status));
+    }
     sendJson(res, 200, { ok: true, artifacts });
+    return;
+  }
+
+  if (parsedUrl.pathname === "/api/work-signals") {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      sendText(res, 405, "Method not allowed");
+      return;
+    }
+    const summary = buildSummary(false, false);
+    sendJson(res, 200, {
+      ok: true,
+      workStatusSummary: summary.workStatusSummary,
+      taskBuckets: summary.taskBuckets,
+      workSignals: summary.workSignals
+    });
     return;
   }
 
@@ -980,10 +1174,13 @@ function buildLiveDashboardHtml(params: WorkspaceInitParams): string {
     <main id="main" class="page-shell">
       <section class="summary-grid" aria-label="Artifact summary">
         <article class="summary-tile"><span>All Artifacts</span><strong id="count-artifacts">0</strong></article>
-        <article class="summary-tile"><span>Open Tasks</span><strong id="count-open">0</strong></article>
-        <article class="summary-tile"><span>Archived Checks</span><strong id="count-archived">0</strong></article>
-        <article class="summary-tile"><span>Report Bundles</span><strong id="count-reports">0</strong></article>
-        <article class="summary-tile"><span>Git Changes</span><strong id="count-git">0</strong></article>
+        <article class="summary-tile danger"><span>Failed</span><strong id="count-failed">0</strong></article>
+        <article class="summary-tile warning"><span>Needs User</span><strong id="count-needs-user">0</strong></article>
+        <article class="summary-tile warning"><span>Real-World</span><strong id="count-real-world">0</strong></article>
+        <article class="summary-tile"><span>In Progress</span><strong id="count-in-progress">0</strong></article>
+        <article class="summary-tile"><span>Pending</span><strong id="count-pending">0</strong></article>
+        <article class="summary-tile"><span>Recently Handled</span><strong id="count-recent">0</strong></article>
+        <article class="summary-tile"><span>Completed</span><strong id="count-completed">0</strong></article>
       </section>
       <div id="scan-warning" class="scan-warning" role="status" hidden></div>
 
@@ -996,9 +1193,9 @@ function buildLiveDashboardHtml(params: WorkspaceInitParams): string {
             <tbody id="category-table-body"></tbody>
           </table>
         </section>
-        <section class="panel" aria-labelledby="open-work-heading">
-          <h2 id="open-work-heading">Open Work</h2>
-          <div id="open-work-summary" class="stack"></div>
+        <section class="panel panel-wide" aria-labelledby="workboard-heading">
+          <h2 id="workboard-heading">Harness Work Board</h2>
+          <div id="work-board" class="work-board"></div>
         </section>
         <section class="panel" aria-labelledby="bundle-health-heading">
           <h2 id="bundle-health-heading">Bundle Health</h2>
@@ -1026,13 +1223,22 @@ function buildLiveDashboardHtml(params: WorkspaceInitParams): string {
         <section class="panel detail-pane" aria-labelledby="detail-heading">
           <h2 id="detail-heading">Artifact Detail</h2>
           <div id="detail-meta" class="detail-meta">No artifact selected.</div>
-          <pre id="detail-preview" tabindex="0" aria-label="Selected artifact preview"></pre>
+          <div class="detail-actions" aria-label="Preview mode">
+            <button id="preview-rendered" class="mode-button" type="button" aria-pressed="true">Rendered</button>
+            <button id="preview-raw" class="mode-button" type="button" aria-pressed="false">Raw</button>
+          </div>
+          <div id="detail-preview" class="markdown-preview" tabindex="0" aria-label="Selected artifact preview"></div>
         </section>
       </section>
     </main>
 
     <div id="live-region" class="sr-only" aria-live="polite"></div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.1/dist/markdown-it.min.js" integrity="sha384-VjNpj0uWy3ya2VFiHXeS6MxjLjWGb1mSZTNAF0xfbZguX+9CXmTkYSmOxEyUWJ9S" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.2/dist/purify.min.js" integrity="sha384-AX0sZ/phUL4R6LAFP+mob0mJIWg2c3PX8wPn48ctytOl7XKfRQHbakBt5/QID7uh" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="/vendor/chart.umd.js"></script>
+    <script src="/vendor/markdown-it.min.js"></script>
+    <script src="/vendor/purify.min.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>
@@ -1217,7 +1423,7 @@ input {
 }
 
 .summary-grid {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
 }
 
 .insight-grid {
@@ -1240,6 +1446,14 @@ input {
 .summary-tile {
   min-height: 96px;
   padding: var(--space-4);
+}
+
+.summary-tile.warning {
+  border-color: var(--color-warning);
+}
+
+.summary-tile.danger {
+  border-color: var(--color-danger);
 }
 
 .summary-tile span {
@@ -1265,6 +1479,10 @@ input {
 
 .panel {
   padding: var(--space-4);
+}
+
+.panel-wide {
+  grid-column: span 2;
 }
 
 .panel h2 {
@@ -1371,8 +1589,75 @@ input {
   border-radius: var(--radius-control);
   color: var(--color-text);
   background: var(--color-surface-raised);
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.detail-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.mode-button {
+  min-height: 34px;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+}
+
+.mode-button[aria-pressed="true"] {
+  border-color: var(--color-focus);
+}
+
+.markdown-preview pre,
+.markdown-preview code {
+  font-family: "Cascadia Code", "Consolas", monospace;
+}
+
+.markdown-preview pre {
+  overflow: auto;
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--color-bg);
+}
+
+.markdown-preview table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.markdown-preview th,
+.markdown-preview td {
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+}
+
+.work-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.work-lane {
+  min-height: 160px;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-raised);
+}
+
+.work-lane h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-md);
+}
+
+.work-item {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border-top: 1px solid var(--color-border);
 }
 
 .sr-only {
@@ -1396,6 +1681,14 @@ input {
   .workspace-grid {
     grid-template-columns: 1fr;
   }
+
+  .work-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .panel-wide {
+    grid-column: auto;
+  }
 }
 
 @media (max-width: 639px) {
@@ -1410,6 +1703,10 @@ input {
   }
 
   .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .work-board {
     grid-template-columns: 1fr;
   }
 }
@@ -1435,8 +1732,10 @@ const SUMMARY_KEY = "${projectSlug}:liveArtifacts:summary";
 const state = {
   summary: null,
   selectedArtifactId: null,
+  currentPreview: null,
   category: "all",
   search: "",
+  previewMode: "rendered",
   lastRenderedSignature: "",
   lastChartSignature: "",
   chart: null
@@ -1468,8 +1767,10 @@ const elements = {
   filterCount: document.getElementById("filter-result-count"),
   detailMeta: document.getElementById("detail-meta"),
   detailPreview: document.getElementById("detail-preview"),
+  previewRendered: document.getElementById("preview-rendered"),
+  previewRaw: document.getElementById("preview-raw"),
   categoryTable: document.getElementById("category-table-body"),
-  openWork: document.getElementById("open-work-summary"),
+  workBoard: document.getElementById("work-board"),
   bundleHealth: document.getElementById("bundle-health"),
   dashboardBoundary: document.getElementById("dashboard-boundary"),
   chart: document.getElementById("artifact-chart")
@@ -1491,6 +1792,25 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function renderMarkdown(value) {
+  const source = String(value || "");
+  if (state.previewMode === "raw" || !window.markdownit) {
+    return "<pre>" + escapeHtml(source) + "</pre>";
+  }
+  const renderer = window.markdownit({ html: false, linkify: true, breaks: true });
+  const rendered = renderer.render(source);
+  return window.DOMPurify ? window.DOMPurify.sanitize(rendered) : rendered;
+}
+
+function setPreviewMode(mode) {
+  state.previewMode = mode;
+  elements.previewRendered.setAttribute("aria-pressed", String(mode === "rendered"));
+  elements.previewRaw.setAttribute("aria-pressed", String(mode === "raw"));
+  if (state.currentPreview != null) {
+    elements.detailPreview.innerHTML = renderMarkdown(state.currentPreview);
+  }
 }
 
 function loadCachedSummary() {
@@ -1531,10 +1851,13 @@ function applySummary(summary, message) {
 
 function renderCounts(summary) {
   document.getElementById("count-artifacts").textContent = String(summary.counts?.artifacts ?? 0);
-  document.getElementById("count-open").textContent = String(summary.counts?.activeOpenTasks ?? 0);
-  document.getElementById("count-archived").textContent = String(summary.counts?.archivedUnchecked ?? 0);
-  document.getElementById("count-reports").textContent = String(summary.counts?.reportBundles ?? 0);
-  document.getElementById("count-git").textContent = String(summary.counts?.gitChanges ?? 0);
+  document.getElementById("count-failed").textContent = String(summary.counts?.failed ?? 0);
+  document.getElementById("count-needs-user").textContent = String(summary.counts?.needsUser ?? 0);
+  document.getElementById("count-real-world").textContent = String(summary.counts?.realWorld ?? 0);
+  document.getElementById("count-in-progress").textContent = String(summary.counts?.inProgress ?? 0);
+  document.getElementById("count-pending").textContent = String(summary.counts?.pending ?? summary.counts?.activeOpenTasks ?? 0);
+  document.getElementById("count-recent").textContent = String(summary.counts?.recentlyHandled ?? 0);
+  document.getElementById("count-completed").textContent = String(summary.counts?.completed ?? 0);
 }
 
 function renderScanHealth(summary) {
@@ -1599,15 +1922,33 @@ function renderChart(summary) {
   });
 }
 
-function renderOpenWork(summary) {
-  const tasks = summary.activeOpenTasks || [];
-  const archived = summary.archivedUnchecked || [];
-  elements.openWork.innerHTML =
-    "<p><strong>" + escapeHtml(tasks.length) + "</strong> active open items</p>" +
-    "<p><strong>" + escapeHtml(archived.length) + "</strong> archived unchecked items</p>" +
-    tasks.slice(0, 5).map((task) =>
-      '<div class="badge">' + escapeHtml(task.path) + ":" + escapeHtml(task.line) + "</div>"
+function renderWorkBoard(summary) {
+  const buckets = summary.taskBuckets || {};
+  const order = ["failed", "needs-user", "real-world", "blocked", "in-progress", "pending", "recently-handled", "completed"];
+  const labels = {
+    "failed": "Failed",
+    "needs-user": "Needs User",
+    "real-world": "Real-World",
+    "blocked": "Blocked",
+    "in-progress": "In Progress",
+    "pending": "Pending",
+    "recently-handled": "Recently Handled",
+    "completed": "Completed"
+  };
+  elements.workBoard.innerHTML = order.map((status) => {
+    const items = buckets[status] || [];
+    const itemHtml = items.slice(0, 5).map((task) =>
+      '<div class="work-item">' +
+      '<span class="artifact-path">' + escapeHtml(task.path || "unknown") + (task.line ? ":" + escapeHtml(task.line) : "") + '</span>' +
+      '<span class="artifact-meta">' + escapeHtml(task.text || labels[status]) + '</span>' +
+      '<span class="artifact-meta">' + escapeHtml(task.metadata?.owner || task.metadata?.by || "unassigned") + '</span>' +
+      '</div>'
     ).join("");
+    return '<section class="work-lane" aria-label="' + escapeHtml(labels[status]) + '">' +
+      '<h3>' + escapeHtml(labels[status]) + ' <span class="badge">' + escapeHtml(items.length) + '</span></h3>' +
+      (itemHtml || '<p class="assistive-text">No items.</p>') +
+      '</section>';
+  }).join("");
 }
 
 function renderBundleHealth(summary) {
@@ -1670,6 +2011,7 @@ async function selectArtifact(id) {
   state.selectedArtifactId = id;
   renderArtifactList(state.summary);
   elements.detailMeta.textContent = "Loading artifact preview...";
+  state.currentPreview = "";
   elements.detailPreview.textContent = "";
   try {
     const response = await fetch("/api/artifact?id=" + encodeURIComponent(id), { cache: "no-store", headers: apiHeaders() });
@@ -1678,10 +2020,12 @@ async function selectArtifact(id) {
       throw new Error(detail.error || "artifact detail failed");
     }
     elements.detailMeta.textContent = detail.artifact.path + " - " + detail.artifact.category;
-    elements.detailPreview.textContent = detail.preview || "Preview unavailable for this file.";
+    state.currentPreview = detail.preview || "Preview unavailable for this file.";
+    elements.detailPreview.innerHTML = renderMarkdown(state.currentPreview);
   } catch (error) {
     elements.detailMeta.textContent = "Artifact preview failed.";
-    elements.detailPreview.textContent = error instanceof Error ? error.message : String(error);
+    state.currentPreview = error instanceof Error ? error.message : String(error);
+    elements.detailPreview.innerHTML = renderMarkdown(state.currentPreview);
   }
 }
 
@@ -1695,7 +2039,7 @@ function render() {
   renderScanHealth(summary);
   renderCategoryTable(summary);
   renderChart(summary);
-  renderOpenWork(summary);
+  renderWorkBoard(summary);
   renderBundleHealth(summary);
   renderDashboardBoundary(summary);
   renderCategories(summary);
@@ -1755,6 +2099,9 @@ elements.theme.addEventListener("click", () => {
   localStorage.setItem(THEME_KEY, next);
   applyTheme(next);
 });
+
+elements.previewRendered.addEventListener("click", () => setPreviewMode("rendered"));
+elements.previewRaw.addEventListener("click", () => setPreviewMode("raw"));
 
 elements.search.addEventListener("input", () => {
   state.search = elements.search.value;
@@ -1845,7 +2192,156 @@ function buildChartAdapter(): string {
     }
   };
 
-  global.Chart = Chart;
+  global.Chart = global.Chart || Chart;
+})(window);
+`;
+}
+
+function buildMarkdownItAdapter(): string {
+  return `(function (global) {
+  "use strict";
+
+  function escapeHtml(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function renderInline(value) {
+    return escapeHtml(value)
+      .replace(/\\\`([^\\\`]+)\\\`/g, "<code>$1</code>")
+      .replace(/\\*\\*([^*]+)\\*\\*/g, "<strong>$1</strong>")
+      .replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, function (_, text, href) {
+        var safeHref = /^https?:\\/\\//i.test(href) || href.charAt(0) === "#" ? href : "#";
+        return '<a href="' + escapeHtml(safeHref) + '" rel="noreferrer">' + escapeHtml(text) + "</a>";
+      });
+  }
+
+  function render(markdown) {
+    var lines = String(markdown || "").split(/\\r?\\n/);
+    var html = [];
+    var inCode = false;
+    var code = [];
+    var inList = false;
+    var inTable = false;
+    function closeList() {
+      if (inList) {
+        html.push("</ul>");
+        inList = false;
+      }
+    }
+    function closeTable() {
+      if (inTable) {
+        html.push("</tbody></table>");
+        inTable = false;
+      }
+    }
+    for (var index = 0; index < lines.length; index += 1) {
+      var line = lines[index];
+      if (/^\\s*\\\`\\\`\\\`/.test(line)) {
+        if (inCode) {
+          html.push("<pre><code>" + escapeHtml(code.join("\\n")) + "</code></pre>");
+          code = [];
+          inCode = false;
+        } else {
+          closeList();
+          closeTable();
+          inCode = true;
+        }
+        continue;
+      }
+      if (inCode) {
+        code.push(line);
+        continue;
+      }
+      if (/^\\s*$/.test(line)) {
+        closeList();
+        closeTable();
+        continue;
+      }
+      if (/^\\s*\\|.*\\|\\s*$/.test(line)) {
+        closeList();
+        var cells = line.trim().replace(/^\\||\\|$/g, "").split("|").map(function (cell) { return cell.trim(); });
+        if (cells.every(function (cell) { return /^:?-{3,}:?$/.test(cell); })) {
+          continue;
+        }
+        if (!inTable) {
+          html.push("<table><tbody>");
+          inTable = true;
+        }
+        html.push("<tr>" + cells.map(function (cell) { return "<td>" + renderInline(cell) + "</td>"; }).join("") + "</tr>");
+        continue;
+      }
+      closeTable();
+      var heading = line.match(/^(#{1,4})\\s+(.*)$/);
+      if (heading) {
+        closeList();
+        var level = heading[1].length;
+        html.push("<h" + level + ">" + renderInline(heading[2]) + "</h" + level + ">");
+        continue;
+      }
+      var checkbox = line.match(/^\\s*[-*]\\s+\\[( |x|X)\\]\\s+(.*)$/);
+      if (checkbox) {
+        if (!inList) {
+          html.push("<ul>");
+          inList = true;
+        }
+        html.push('<li><input type="checkbox" disabled ' + (checkbox[1].toLowerCase() === "x" ? "checked " : "") + "/> " + renderInline(checkbox[2]) + "</li>");
+        continue;
+      }
+      var bullet = line.match(/^\\s*[-*]\\s+(.*)$/);
+      if (bullet) {
+        if (!inList) {
+          html.push("<ul>");
+          inList = true;
+        }
+        html.push("<li>" + renderInline(bullet[1]) + "</li>");
+        continue;
+      }
+      closeList();
+      html.push("<p>" + renderInline(line) + "</p>");
+    }
+    closeList();
+    closeTable();
+    if (inCode) {
+      html.push("<pre><code>" + escapeHtml(code.join("\\n")) + "</code></pre>");
+    }
+    return html.join("\\n");
+  }
+
+  global.markdownit = global.markdownit || function () {
+    return { render: render };
+  };
+})(window);
+`;
+}
+
+function buildPurifyAdapter(): string {
+  return `(function (global) {
+  "use strict";
+
+  function sanitize(html) {
+    var template = document.createElement("template");
+    template.innerHTML = String(html || "");
+    template.content.querySelectorAll("script, iframe, object, embed, link, meta").forEach(function (node) {
+      node.remove();
+    });
+    template.content.querySelectorAll("*").forEach(function (node) {
+      Array.from(node.attributes).forEach(function (attribute) {
+        var name = attribute.name.toLowerCase();
+        var value = attribute.value || "";
+        if (name.startsWith("on") || /javascript:/i.test(value)) {
+          node.removeAttribute(attribute.name);
+        }
+      });
+    });
+    return template.innerHTML;
+  }
+
+  global.DOMPurify = global.DOMPurify || { sanitize: sanitize };
 })(window);
 `;
 }
@@ -1936,9 +2432,10 @@ function buildGovernanceIndex(params: WorkspaceInitParams): string {
 
 ## Operating Rules
 
-- Track active open work from AGENTS, GitHub instructions, \`.agents\`, \`.governance/backlog\`, and \`.governance/plans\`.
+- Track harness work status from AGENTS, GitHub instructions, \`.agents\`, \`.governance/backlog\`, and \`.governance/plans\`.
+- Recognize \`live-artifacts: in-progress|pending|completed|failed|needs-user|real-world|blocked\` markers and keep legacy open markers mapped to pending.
 - Treat archived unchecked items under sessions, reviews, decisions, specs, reports, and report folders as review debt.
-- Keep \`docs/ai-harness/dashboard/state/dashboard-state.json\` as the canonical admin dashboard state; live artifacts is a real-time observer, not a fork of that state.
+- Keep \`docs/ai-harness/dashboard/\` focused on server status. Live artifacts owns harness work status, artifact discovery, user-confirmation tasks, and real-world action tracking.
 - Treat \`.governance/\` as live-dashboard intake and staging. Canonical long-lived ledgers stay under \`docs/plans/\`, \`docs/reviews/\`, \`docs/contracts/\`, \`docs/evaluations/\`, and \`docs/handovers/\`.
 - Never store secrets, raw tokens, or private key material in dashboard summary, preview, or logs.
 - Keep the dashboard localhost-only unless an operator writes an explicit networking decision.
@@ -1993,11 +2490,13 @@ Maintain the local live artifacts dashboard, governance documents, scan policy, 
 - Keep \`live-artifacts-dashboard/server.js\`, \`public/\`, and \`scripts/\` aligned with the project governance policy.
 - Preserve user source files and never widen generated ownership into application code.
 - Run \`npm --prefix live-artifacts-dashboard run check\` and \`npm --prefix live-artifacts-dashboard run health\` after dashboard changes.
-- Watch for design drift: theme tokens, accessibility names, keyboard navigation, and chart text fallback are required.
+- Watch for design drift: theme tokens, accessibility names, keyboard navigation, chart fallback, and sanitized markdown preview are required.
+- Preserve the work taxonomy: failed, needs-user, real-world, blocked, in-progress, pending, recently-handled, completed.
 
 ## Forbidden
 
-- Do not add CDN dependencies.
+- Do not remove the local vendor fallbacks for Chart.js, markdown-it, or DOMPurify.
+- Do not add package-manager dependencies for dashboard UI libraries unless the generated offline fallback contract is preserved.
 - Do not store secrets or raw credentials in summary, preview, state, or logs.
 - Do not rewrite existing governance sections outside the live artifacts markers.
 `;
@@ -2015,11 +2514,13 @@ Query and summarize live dashboard state without modifying project files.
 2. Read \`GET /api/summary\` for a non-mutating scan snapshot.
 3. Use \`POST /api/summary/refresh\` only when a local operator explicitly wants to persist latest summary and history.
 4. Use \`GET /api/artifacts?openOnly=true\` for active open tasks.
-5. Use \`GET /api/artifact?id=...\` only with ids returned by summary or artifacts APIs.
+5. Use \`GET /api/work-signals\` for harness work taxonomy buckets.
+6. Use \`GET /api/artifacts?status=needs-user\` or another status for focused review.
+7. Use \`GET /api/artifact?id=...\` only with ids returned by summary or artifacts APIs.
 
 ## Reporting
 
-- Summarize active open tasks, archived unchecked items, report bundles, governance bundle status, and git dirty state.
+- Summarize failed, needs-user, real-world, blocked, in-progress, pending, recently-handled, completed, archived unchecked items, report bundles, governance bundle status, and git dirty state.
 - Report API failures as unknown rather than assuming success.
 `;
 }
@@ -2048,6 +2549,8 @@ npm --prefix live-artifacts-dashboard start
 - \`POST /api/summary/refresh\`
 - \`GET /api/artifacts\`
 - \`GET /api/artifacts?openOnly=true\`
+- \`GET /api/artifacts?status=needs-user\`
+- \`GET /api/work-signals\`
 - \`GET /api/artifact?id=...\`
 - \`GET /api/events\`
 
@@ -2059,11 +2562,12 @@ npm --prefix live-artifacts-dashboard start
 - Project state: \`.governance/_PROJECT_STATE.md\`
 - Theme storage key: \`${projectSlug}:liveArtifacts:theme\`
 - Summary storage key: \`${projectSlug}:liveArtifacts:summary\`
+- UI libraries: Chart.js, markdown-it, and DOMPurify load from pinned exact-version CDN paths with SRI first, with local vendor fallbacks under \`public/vendor/\`.
 
 ## Boundary With Admin Dashboard
 
-- Admin dashboard: \`docs/ai-harness/dashboard/\` owns curated governance state, runtime orchestration, KPI state, server operations health, and exportable stakeholder snapshots.
-- Live artifacts dashboard: \`live-artifacts-dashboard/\` owns localhost real-time artifact discovery, open marker tracking, archived unchecked visibility, and file previews by generated artifact id.
+- Harness Dashboard 4.6: \`docs/ai-harness/dashboard/\` owns the canonical Project World Model projections, stakeholder and agent briefs, VCS evidence, and read-only local API.
+- Optional live artifacts dashboard: \`live-artifacts-dashboard/\` is a non-default legacy/opt-in localhost workboard for artifact discovery, user-confirmation tasks, real-world action tracking, archived unchecked visibility, and sanitized markdown previews by generated artifact id.
 - Governance intake: \`.governance/\` is a live-dashboard staging surface. Canonical durable ledgers remain in \`docs/plans/\`, \`docs/reviews/\`, \`docs/contracts/\`, \`docs/evaluations/\`, and \`docs/handovers/\`.
 - Default ports are intentionally separate: admin serve uses \`43110\`, live artifacts uses \`${DEFAULT_LIVE_ARTIFACTS_PORT}\`.
 - Default scan roots stay inside governance, harness, and documentation evidence folders. Set \`LIVE_ARTIFACTS_SCAN_ROOTS\` only when an operator explicitly widens evidence intake.
@@ -2111,6 +2615,14 @@ export function generateLiveArtifactsDashboardFiles(
     {
       relativePath: "live-artifacts-dashboard/public/vendor/chart.umd.js",
       content: buildChartAdapter(),
+    },
+    {
+      relativePath: "live-artifacts-dashboard/public/vendor/markdown-it.min.js",
+      content: buildMarkdownItAdapter(),
+    },
+    {
+      relativePath: "live-artifacts-dashboard/public/vendor/purify.min.js",
+      content: buildPurifyAdapter(),
     },
     {
       relativePath: "live-artifacts-dashboard/scripts/start-dashboard.ps1",

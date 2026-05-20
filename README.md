@@ -3,81 +3,141 @@
 [![npm version](https://img.shields.io/npm/v/workspace-init-mcp)](https://www.npmjs.com/package/workspace-init-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-`workspace-init-mcp` is an MCP server for adding an AI governance and delivery harness to a workspace.
+`workspace-init-mcp` is an MCP server that installs an AI-native governance harness into a project without taking ownership of application source code.
 
-It generates Copilot instructions, agent skills, governance documents, runtime handoff files, dashboard state, readiness checks, and reconcile tools so AI-assisted work can stay reviewable, resumable, and safe across long-running sessions.
+Version `4.6.0` introduces the Hypertext Harness Dashboard: a single-file HTML Project World Model backed by JSONL events, JSON projections, a read-only local API, and stakeholder-friendly interactive views. The main shift is from Markdown/JSON-only reporting to a durable hypertext dashboard that can be shared, served locally, inspected by AI agents, and used as a project continuity layer.
 
-It is designed for VS Code, Cursor, Claude Code, OpenHands, Codex CLI/Desktop, GitHub Copilot, and portable file or CLI based agent runtimes.
+---
 
-## Core Guarantees
+## What This Project Does
 
-- **Non-destructive legacy adoption**: initialization and reconcile are harness overlays. They must not delete, truncate, move, or replace existing application source.
-- **Governance-first delivery**: meaningful work is planned, reviewed, contracted, implemented, evaluated, and closed through durable files.
-- **Parallel-agent support**: an orchestrator can split dependency-free chunks, assign worker agents, and inject only task-relevant context.
-- **Independent evaluation**: generator output is checked through self-correction, evaluator review, verification, and quality gates.
-- **Memory-to-skill promotion**: repeated session patterns can be scored and promoted into reusable skills or agents.
-- **Traceability**: runtime sessions, handoffs, receipts, dashboard state, migrations, and atomic commits keep work history inspectable.
+`workspace-init-mcp` helps AI agents and human teams keep project work coherent across long sessions, multiple models, parallel workers, and interrupted handoffs.
 
-Protected source roots such as `src/`, `app/`, `packages/`, `services/`, `server/`, and `client/` remain owned by the project unless a later explicit implementation contract names them as an approved modernization scope.
+It generates:
 
-## Current Safety Baseline
+| Surface | Purpose |
+| --- | --- |
+| Agent instructions | Platform-specific guidance for Codex, Copilot, Cursor, Claude Code, Antigravity, OpenHands, and portable MCP clients. |
+| Harness governance | Planning, review, work-packet, evidence, handoff, decision, and reconciliation contracts. |
+| Hypertext dashboard | A single-file `index.html` Project World Model with tabs, charts, Gantt/Kanban work views, audience lenses, multilingual UI, and slide-show briefing mode. |
+| Ledger and projections | Canonical JSONL events plus rebuildable JSON state, index, runtime, entity, and embedding projections. |
+| Local listener | Token-protected, loopback-only, read-only dashboard API with SSE and deterministic query support. |
+| Reconcile tools | Non-destructive refresh of managed harness files while protecting application source roots. |
+| Parallel orchestration | Expected read/write path contracts, chunk conflict audits, worker assignment, and evaluator loops. |
 
-Version `4.3.0` includes the current safety baseline for legacy adoption and harness runtime work:
+The harness is designed for both new services and existing production-adjacent projects that already have source code, history, and team conventions.
 
-- `workspacePath` is enforced as an absolute path before MCP tools read or write workspace files.
-- Initialization, reconcile, and workspace prompt schemas also reject relative `workspacePath` values before tool execution.
-- Generated files are limited to harness, documentation, IDE, dashboard, runtime, skill, and agent ownership roots.
-- `expectedWritePaths` are normalized before use. Empty paths, traversal, drive-qualified paths, and bare protected source roots such as `.`, `src/.`, `src//`, or `SRC/` are blocked.
-- Reconcile policy files are validated before use. Malformed `nonDestructiveAdoption.protectedSourceRoots` falls back to the built-in non-destructive safety policy with warnings.
-- Reconcile holds malformed managed JSON state for manual review instead of replacing live dashboard, runtime, or readiness state with generated baselines.
-- Dashboard contract coverage is based on approved contract evidence, not only chunk metadata or next-step text.
-- Dashboard state required top-level keys are single-sourced through `src/data/dashboard-state-contract.ts` and injected into runtime validation, generated JSON schema, and generated dashboard operations.
-- Strict dashboard governance requires approved memory-to-skill promotions to generate only under skill or agent ownership roots.
-- Strict dashboard governance rejects operational health claims that lack fresh datasource, DBCP, or latency-query evidence.
-- Generated dashboard operations and live artifacts JSON state use temp-file plus rename writes to reduce partial-write risk.
-- Native executor background launches start in a non-definitive `launching` state and record spawn failures with `spawn-error` diagnostics.
-- Native executor launches support `timeoutMs` and `maxOutputBytes` guardrails so supervised runs cannot hang indefinitely or write unbounded stdout/stderr.
-- Background native executor timeout and output-limit enforcement attempts process-tree termination (`taskkill /T` on Windows, process group termination on POSIX).
-- Runtime JSON state writes use temp-file plus rename semantics to reduce partial-write risk during interrupted state updates.
-- Readiness scoring is semantic-capped: structural completeness cannot report `ready` while the semantic readiness audit still shows weak operational evidence.
-- `audit_harness_parallel_chunk_conflicts` checks open and queued runtime sessions for overlapping `expectedWritePaths` and rejects unsafe persisted write scopes before workers run in parallel.
-- Runtime compaction rebuilds session archive source paths from safe session IDs instead of trusting persisted index paths.
-- Runtime session, chunk, archive, and bundle identifiers reject path traversal, separators, trailing-dot aliases, and Windows reserved file names such as `CON`, `PRN`, and `COM1`.
-- `validate_workspace`, runtime audit, and native execution status report malformed runtime JSON separately from missing runtime artifacts so operators can distinguish corruption from absence.
-- `npm pack` runs a build through `prepack` so package contents do not depend on stale local `dist/` output.
+---
+
+## 4.6.0 Highlights
+
+### Hypertext Dashboard First
+
+The dashboard is now the primary stakeholder surface, not a generated Markdown report.
+
+- `docs/ai-harness/dashboard/index.html` is a portable single-file HTML dashboard.
+- It embeds CSS, JavaScript, design tokens, chart helpers, and a bounded project snapshot.
+- It can run as a static file or through the generated read-only local listener.
+- It presents the same ledger-backed truth differently for stakeholders, AI agents, and maintainers.
+
+### Ledger-First Project World Model
+
+The canonical truth is the append-only event ledger:
+
+```text
+docs/ai-harness/dashboard/events/harness-events.jsonl
+```
+
+Rebuildable projections live under:
+
+```text
+docs/ai-harness/dashboard/state/
+docs/ai-harness/dashboard/entities/
+docs/ai-harness/dashboard/schemas/
+```
+
+Every generated status claim is expected to carry provenance: sequence, source, timestamp, freshness, confidence, owner, and evidence.
+
+### Stakeholder-Friendly UI
+
+The generated HTML dashboard includes:
+
+- Executive Worldview landing view.
+- Work tab with open work, progress, blockers, Kanban, and Gantt timeline.
+- Evidence tab for claim-to-proof traceability.
+- Governance tab for decisions, gates, retros, and platform intake.
+- System and Tech Stack views for runtime, listener, architecture, infrastructure, and integration surfaces.
+- Audience Lens modes: Stakeholder, AI Agent, Maintainer.
+- Korean/English language switching.
+- Stakeholder slide-show mode for clean briefing and report conversations.
+- WCAG-oriented keyboard, focus, ARIA, reduced-motion, and non-color-only status patterns.
+
+### Read-Only Local Listener
+
+The generated listener is a helper, not a hidden backend product.
+
+- Restored on harness activity.
+- Loopback host only by default.
+- Local token required for API calls.
+- Host and Origin checks.
+- CORS disabled.
+- DNS rebinding protection.
+- Strict CSP for served HTML.
+- No shell, file writes, LLM calls, or persistence from deterministic query routes.
+
+### Agent Continuity
+
+AI agents can resume from dashboard projections instead of chat history.
+
+Key generated briefs:
+
+- `stakeholderBrief`: what changed, why it matters, risks, decisions, owner, next milestone.
+- `agentResumeBrief`: next safest action, blockers, validation commands, authoritative files, stale/dirty warnings.
+- `governanceEvidenceBrief`: missing evidence, stale projections, unresolved decisions, unlinked VCS records.
+
+The MCP tool `get_harness_dashboard_context` reads projections only. It does not start listeners, refresh VCS, append events, mutate state, run shell commands, or call an LLM.
+
+### Parallel-Agent Safety
+
+Parallel work is supported through explicit chunk contracts.
+
+- Workers must receive disjoint `expectedWritePaths`.
+- `audit_harness_parallel_chunk_conflicts` checks open and queued sessions for path overlap.
+- Shared surfaces such as lockfiles, CI workflows, DB migrations, API contracts, and global config are treated as integration-sensitive.
+- The hub/orchestrator owns merge review, evaluator feedback, evidence capture, and final integration.
+
+This does not magically solve merge conflicts. It reduces them by making write ownership explicit before workers begin, then requiring review receipts and integration ownership before closeout.
+
+---
 
 ## Quick Start
 
-Pick your agent tool, add the MCP server once, then ask the agent to call the tool that matches your situation.
-
-The MCP server command is always:
+The published MCP command is:
 
 ```bash
 npx -y workspace-init-mcp
 ```
 
-### New Project
+Use an absolute `workspacePath`. Relative paths are rejected by the tool schemas and runtime checks.
 
-Use this when you are starting a repository and want the harness from day one.
+### New Project
 
 Ask your agent:
 
 ```text
-Use workspace-init-mcp. Call initialize_workspace for this new project.
-Use strict governance, balanced autonomy, include harness engineering, include agent skills,
-and then call validate_workspace.
+Use workspace-init-mcp. Initialize this project with strict governance,
+balanced autonomy, harness engineering, and agent skills. Then validate the workspace.
 ```
 
-Recommended tool flow:
+Recommended flow:
 
-1. `get_init_form_schema` if the client can render a setup form.
-2. `initialize_workspace` with an absolute `workspacePath`.
-3. `validate_workspace`.
-4. Start work through the generated harness: plan, review, contract, implementation, evaluation, verification, closeout.
+1. `get_init_form_schema`
+2. `initialize_workspace`
+3. `validate_workspace`
+4. `get_harness_dashboard_context`
+5. Start governed work through plan, review, chunk contract, implementation, evaluation, verification, and closeout.
 
 ### Existing Project
-
-Use this when AI enters a legacy repo, client system, or production-adjacent service.
 
 Ask your agent:
 
@@ -88,377 +148,230 @@ Do not delete, move, truncate, or replace application source.
 If the preview is safe, call initialize_workspace with force=false, then validate_workspace.
 ```
 
-Recommended tool flow:
+Recommended flow:
 
-1. `analyze_workspace`.
-2. `preview_workspace_init`.
-3. `initialize_workspace` with `force: false`.
-4. `validate_workspace`.
-5. For an already initialized workspace, run `audit_workspace_upgrade_risk` and `reconcile_workspace_initialization` in dry-run mode before any apply run.
+1. `analyze_workspace`
+2. `preview_workspace_init`
+3. `initialize_workspace` with `force: false`
+4. `validate_workspace`
+5. `audit_workspace_upgrade_risk`
+6. `reconcile_workspace_initialization` dry run before applying future managed-file upgrades
 
-## Agent Tool Setup
+Protected application roots such as `src/`, `app/`, `packages/`, `services/`, `server/`, `client/`, `frontend/`, `backend/`, `api/`, `web/`, and `mobile/` remain outside workspace-init ownership unless a later explicit implementation contract names them.
 
-These are the common MCP-capable agent environments this project is designed for. The exact popularity order changes over time, so treat this as a practical "top 5 places users usually start" rather than a permanent ranking.
+---
 
-### 1. Codex CLI / Codex Desktop
+## Local Development
 
-Add the MCP server:
+Build a local checkout:
 
-```bash
-codex mcp add workspace-init -- npx -y workspace-init-mcp
-codex mcp get workspace-init
-```
-
-Then ask Codex:
-
-```text
-Use workspace-init-mcp. For a new project, call initialize_workspace and validate_workspace.
-For an existing project, call analyze_workspace, preview_workspace_init, initialize_workspace force=false, and validate_workspace.
-```
-
-### 2. Claude Code / Claude CLI
-
-Add the MCP server:
-
-```bash
-claude mcp add-json workspace-init '{"type":"stdio","command":"npx","args":["-y","workspace-init-mcp"]}'
-claude mcp get workspace-init
-```
-
-Then ask Claude:
-
-```text
-Use the workspace-init MCP tools. Start with analyze_workspace for an existing repo,
-or initialize_workspace for a new repo. Preserve application source.
-```
-
-### 3. Gemini CLI / Google Antigravity
-
-For Gemini CLI:
-
-```bash
-gemini mcp add workspace-init npx -y workspace-init-mcp
-gemini mcp list
-```
-
-For Google Antigravity or another Gemini-based agent IDE, add an equivalent stdio MCP server in the MCP settings:
-
-```json
-{
-  "mcpServers": {
-    "workspace-init": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "workspace-init-mcp"]
-    }
-  }
-}
-```
-
-Then ask the agent:
-
-```text
-Use workspace-init-mcp to install an AI harness.
-For this existing repo, analyze first, preview generated files, preserve source, then initialize.
-```
-
-### 4. GitHub Copilot In VS Code
-
-Add this to `.vscode/mcp.json` in the repository:
-
-```json
-{
-  "servers": {
-    "workspace-init": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "workspace-init-mcp"]
-    }
-  }
-}
-```
-
-Start the server from VS Code, open Copilot Chat in Agent mode, then ask:
-
-```text
-Use the workspace-init MCP server. If this is a new project, call initialize_workspace.
-If this is an existing project, call analyze_workspace and preview_workspace_init first.
-```
-
-### 5. Cursor, OpenHands, Open Claude, Or Other MCP-Compatible IDE/CLI
-
-Use the same stdio server shape in the tool's MCP configuration:
-
-```json
-{
-  "mcpServers": {
-    "workspace-init": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "workspace-init-mcp"]
-    }
-  }
-}
-```
-
-For OpenHands CLI-style configuration, use the tool's MCP server manager or config file and point the command to `npx` with args `["-y", "workspace-init-mcp"]`.
-
-Then ask:
-
-```text
-Use workspace-init-mcp. Choose the safe flow:
-new project = initialize_workspace -> validate_workspace;
-existing project = analyze_workspace -> preview_workspace_init -> initialize_workspace force=false -> validate_workspace.
-```
-
-## What It Generates
-
-The generated files are intentionally limited to governance, documentation, IDE configuration, dashboard, runtime, skill, and agent surfaces.
-
-| Area | Generated artifacts |
-|---|---|
-| Workspace instructions | `.github/copilot-instructions.md`, `.vscode/*.instructions.md` |
-| Agent catalog | `.github/agents/`, `.github/skills/`, optional `.cursor/`, `.claude/`, and `.agents/` mirrors |
-| Harness governance | `.github/ai-harness/harness-manifest.yaml`, `operating-model.md`, `context-strategy.md`, `evaluation-rubrics.md` |
-| Safe reconcile | `.github/ai-harness/managed-file-inventory.json`, `reconcile-policy.json`, `docs/ai-harness/migrations/` |
-| Runtime orchestration | `docs/ai-harness/runtime/` sessions, work packets, adapters, bridges, native executors, receipts, archives |
-| Dashboard | `docs/ai-harness/dashboard/` HTML, CSS, JS, schema, templates, JSON state, operations script |
-| Live artifacts dashboard | `live-artifacts-dashboard/` localhost observer for real-time governed artifacts, open markers, and SSE updates |
-| Readiness | `docs/ai-harness/readiness/` remaining-work spec, scoring model, scorecard template, semantic audits |
-| Governance records | `docs/context/`, `docs/reviews/`, `docs/plans/`, `docs/contracts/`, `docs/evaluations/`, `docs/handovers/` |
-| Governance intake | `.governance/` live-dashboard intake and staging; durable canonical ledgers remain under `docs/` |
-| Project docs | `docs/work-logs/`, `docs/changelog/`, `docs/adr/`, `docs/troubleshooting/` |
-| Editor consistency | `.editorconfig`, `.gitattributes` |
-
-## Operating Model
-
-Meaningful work follows a governance ladder before implementation:
-
-```text
-Governance open
-Plan 1 -> Review 1
-Plan 2 -> Review 2
-Plan 3 -> Review 3
-Goal freeze
-Contract proposal -> Contract review
-Implementation -> Self-check
-Independent evaluation -> Remediation
-Verification
-Governance refresh -> Governance close
-```
-
-The goal is not to slow work down. It is to make AI work resumable, auditable, and easier to split across sessions or agents without losing intent.
-
-## Legacy Adoption
-
-Use this MCP when AI enters an existing codebase, client system, or operational environment.
-
-Safe legacy adoption means:
-
-- analyze the AS-IS repository before writing
-- add harness files around the project
-- preserve application source and existing business logic
-- keep `workspacePath` absolute and review generated-file previews before apply
-- merge live dashboard/runtime JSON instead of replacing it blindly
-- hold customized managed files for review
-- archive replaced managed files under `docs/ai-harness/migrations/`
-- import legacy custom skills or agents into canonical `.github` paths when appropriate
-
-For safer reconcile runs:
-
-- `reconcile_workspace_initialization` defaults to dry run mode
-- malformed reconcile policy files fall back to the built-in non-destructive policy instead of weakening protected source-root enforcement
-- malformed managed JSON state is held for manual review instead of overwritten during reconcile
-- `requireCleanGitWhenPresent: true` can block writes when the working tree is dirty
-- `requireZeroManualReviewItemsForApply: true` can block apply runs until manual-review items are resolved
-- `audit_workspace_upgrade_risk` and `audit_workspace_managed_semantic_diff` expose managed-file drift before upgrades
-- `export_reconcile_preflight_report` writes JSON, Markdown, and HTML reports for review
-- `restore_reconcile_backup` can restore managed files from migration backups
-
-## Parallel Agent Work
-
-The harness includes a `harness-orchestrator` agent and runtime packet fields for parallel execution.
-
-The orchestrator is responsible for:
-
-- analyzing the backlog
-- marking chunks as blocked, sequential, or parallel-ready
-- assigning worker agents only to independent chunks
-- defining expected read paths, write paths, verification commands, and merge ownership
-- injecting only the relevant task contract, code snippets, DB schema fragments, API specs, logs, and commands
-
-Parallel work is allowed only when write scopes, schema changes, API contracts, runtime side effects, and deployment order do not conflict.
-Run `audit_harness_parallel_chunk_conflicts` before launching workers to catch overlapping declared write scopes in open or queued runtime sessions.
-
-Worker outputs return through contracts, evaluator records, receipts, dashboard updates, and atomic commits.
-
-## Memory-To-Skill Promotion
-
-Harness installations include `harness-memory-pattern-miner` and `harness-memory-curator`.
-They inspect durable session memories, work logs, plans, reviews, handovers, runtime sessions, dashboard state, and `.governance/` intake notes to detect repeated stable work.
-
-Promotion is conservative by default:
-
-- require at least three repetitions or evidence across two governed sessions
-- score frequency, stability, reuse value, validation clarity, and coverage gap
-- create a skill for repeatable procedure and an agent for durable role ownership
-- write only inside agent/skill ownership roots; never alter application source during memory curation
-
-## Quality Gate
-
-Every implementation chunk should pass the maturity gate before closeout:
-
-1. **Critical error and stability checks**: static analysis, syntax checks, runtime exception risk, and boundary testing.
-2. **Version compatibility**: framework/runtime sync, Java/JDK or equivalent environment checks, and dependency compatibility.
-3. **Dependency audit**: confirm new or changed libraries do not conflict with the existing system.
-4. **Maintainability**: SOLID, duplication, abstraction level, constants instead of hardcoding, and business/data-access separation.
-5. **Self-correction and traceability**: generator uncertainty report, independent evaluation, remediation evidence, and atomic commit references.
-
-## Admin Dashboard
-
-Each initialized workspace includes a file-system dashboard under `docs/ai-harness/dashboard/`.
-
-The dashboard is JSON-first and does not require a database:
-
-- `state/dashboard-state.json` is the live source of truth
-- `index.html` renders progress, KPIs, issues, artifacts, governed sessions, server operations health, and git state
-- `templates/*.state.json` provide starting points for software delivery, creative narrative, knowledge workflows, and generic transformation initiatives
-- `scripts/dashboard-ops.mjs` can refresh, validate, serve locally, and export static snapshots
-- `operationsHealth` tracks traffic, request/response counts, DBCP pool health, incident logs, and latency queries
-- Strict validation treats `operationsHealth.status=ok|healthy|connected|configured|active|operational` as an evidence claim and requires fresh source paths, DBCP checks, and latency query timestamps
-- `memoryPromotion` tracks repeated AI work patterns until they meet conservative evidence thresholds for a skill or agent
-- Contract readiness is intentionally conservative: `contract-coverage` only counts sessions with approved contract evidence
-- The required top-level state contract is shared by schema generation, dashboard operations, and runtime validation to prevent drift
-
-Useful commands inside an initialized workspace:
-
-```bash
-node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh
-node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs validate
-node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs validate --strict-governance
-node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs serve --port 43110
-node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs export-static --out docs/ai-harness/dashboard/exports/latest
-```
-
-## Live Artifacts Dashboard
-
-Harness-first work also includes a local real-time artifact observer under `live-artifacts-dashboard/`.
-
-- Default URL: `http://127.0.0.1:43111`
-- Source of truth boundary: it observes artifacts and open work, while `docs/ai-harness/dashboard/state/dashboard-state.json` remains the canonical admin dashboard state
-- Runtime output is constrained to `live-artifacts-dashboard/.state/` and `live-artifacts-dashboard/logs/`
-- APIs: `/api/health`, `/api/summary`, `POST /api/summary/refresh`, `/api/artifacts`, `/api/artifact?id=...`, and `/api/events`
-- Default scans stay inside governance, harness, and evidence documentation roots; source previews are opt-in with `LIVE_ARTIFACTS_SOURCE_PREVIEW=1`
-- API routes require a generated local token by default. Use the served UI, `x-live-artifacts-token`, or `?token=` for SSE; set `LIVE_ARTIFACTS_API_TOKEN=off` only for explicitly trusted local runs
-
-Useful commands inside an initialized workspace:
-
-```bash
-npm --prefix live-artifacts-dashboard run check
-npm --prefix live-artifacts-dashboard run health
-npm --prefix live-artifacts-dashboard start
-```
-
-## Runtime And Agent Switching
-
-Version `4.3.0` includes a compatibility layer under `docs/ai-harness/runtime/`:
-
-- `version-index.json` records capabilities by workspace-init-mcp release
-- `compatibility-matrix.json` tells `@latest` sessions how to upgrade older workspaces safely
-- `adapter-contract.json` defines stable handoff fields across Copilot, Codex, Claude, Gemini, OpenHands, generic CLI, and file-based runtimes
-- `session-continuity.md` defines the source-of-truth order when moving work between agents
-- Runtime validation, audit, and native execution status distinguish corrupted JSON state from missing state files
-- Native executor state records launch, foreground completion, background spawn failure, and operator-approved override use
-
-If a newer agent enters an older workspace, run `reconcile_workspace_initialization` before relying on the latest runtime behavior. Live dashboard and runtime state are merged; generated compatibility contracts refresh to the latest baseline.
-
-## Readiness And Archival
-
-The readiness layer answers: "What still needs to be true before this workspace is ready for repeatable DX/AX operation?"
-
-- `assess_workspace_readiness` can score the workspace and optionally write `maturity-scorecard.json`
-- Structural readiness is capped by semantic audit results so baseline files alone do not overstate operational readiness
-- `audit_workspace_readiness_semantics` performs a conservative semantic audit beyond file existence
-- `compact_harness_runtime` archives older closed sessions so active runtime ledgers stay readable
-
-## Tool Reference
-
-### Initialization
-
-| Tool | Purpose |
-|---|---|
-| `analyze_workspace` | Detect project type, tech stack, and existing workspace signals |
-| `preview_workspace_init` | Preview generated files without writing them |
-| `initialize_workspace` | Generate the governance, dashboard, runtime, docs, and agent baseline |
-| `validate_workspace` | Check initialization completeness and outdated artifacts |
-| `get_init_form_schema` | Return a client-renderable initialization form schema |
-| `list_project_types` | List supported project types |
-| `list_harness_profiles` | List lean, balanced, regulated, and autonomous harness profiles |
-
-### Reconcile And Safety
-
-| Tool | Purpose |
-|---|---|
-| `reconcile_workspace_initialization` | Upgrade an existing repository or older initialized workspace, dry-run first by default |
-| `audit_workspace_upgrade_risk` | Audit managed baseline drift, git cleanliness, and legacy resource roots |
-| `audit_workspace_managed_semantic_diff` | Report unchanged, customized, missing, and merge-diverged managed files |
-| `export_reconcile_preflight_report` | Export JSON, Markdown, and HTML reconcile preflight reports |
-| `restore_reconcile_backup` | Restore managed files from reconcile backup reports |
-
-### Runtime Orchestration
-
-| Tool | Purpose |
-|---|---|
-| `start_harness_session` | Open a governed planner/generator/evaluator runtime session |
-| `advance_harness_session` | Move the active session through the state machine |
-| `get_harness_session_status` | Read the active or requested session and next actor brief |
-| `activate_harness_session` | Move the active runtime lease to another open or queued session |
-| `audit_harness_runtime` | Audit runtime ledgers, queue state, and session consistency |
-| `audit_harness_parallel_chunk_conflicts` | Audit open and queued sessions for overlapping `expectedWritePaths` before parallel worker assignment |
-| `compact_harness_runtime` | Archive older closed sessions |
-| `prepare_harness_work_packet` | Rebuild the work packet and actor inbox files |
-
-Runtime tool inputs require an absolute `workspacePath`. Session IDs, chunk IDs, and archive IDs must be safe single path segments.
-
-### Adapter And Execution Bridges
-
-| Tool | Purpose |
-|---|---|
-| `list_harness_runtime_adapters` | List supported runtime adapters |
-| `prepare_harness_adapter_handoff` | Generate a runtime-specific handoff bundle |
-| `list_harness_execution_bridges` | List bridge profiles for external runtimes |
-| `prepare_harness_execution_bridge` | Generate a launch-ready execution bridge bundle |
-| `record_harness_execution_result` | Record a governed receipt from an external runtime |
-| `list_harness_native_executors` | List directly launchable runtime integrations and local command detection |
-| `prepare_harness_native_executor` | Build a governed native execution plan |
-| `launch_harness_native_executor` | Launch a supported native executor; real launches using executable, args, or env overrides require `allowUnsafeNativeExecutorOverride: true`; `timeoutMs` and `maxOutputBytes` bound native execution |
-| `get_harness_native_execution_status` | Read native execution state |
-
-### Readiness And Skills
-
-| Tool | Purpose |
-|---|---|
-| `assess_workspace_readiness` | Score operational readiness and optionally write a scorecard |
-| `audit_workspace_readiness_semantics` | Audit placeholder pressure, evidence freshness, and dashboard truthfulness |
-| `recommend_agent_skills` | Recommend skills and agents for the workspace |
-| `search_agent_skills` | Search the skill catalog |
-| `install_agent_skills` | Install selected skills or agents |
-| `list_agent_skills_catalog` | Browse the full catalog |
-
-## Project Types
-
-Supported project types:
-
-`learning`, `web-app`, `api`, `mobile`, `data-science`, `devops`, `creative`, `library`, `monorepo`, `consulting`, `ecommerce`, `fintech`, `healthcare`, `saas`, `iot`, `other`
-
-## Development
-
-```bash
+```powershell
+cd C:\workSpace\dev\root\workspace-init-mcp
 npm install
 npm run build
+```
+
+Run the local MCP server through an MCP client with:
+
+```powershell
+node C:\workSpace\dev\root\workspace-init-mcp\dist\index.js
+```
+
+This server uses MCP stdio. In normal use, the agent tool launches it from MCP configuration rather than keeping it as a standalone terminal service.
+
+Example local Codex configuration:
+
+```powershell
+codex mcp add workspace-init-local -- node "C:\workSpace\dev\root\workspace-init-mcp\dist\index.js"
+codex mcp get workspace-init-local
+```
+
+Generic MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "workspace-init-local": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["C:\\workSpace\\dev\\root\\workspace-init-mcp\\dist\\index.js"]
+    }
+  }
+}
+```
+
+---
+
+## Dashboard Operations
+
+After initialization, dashboard operations are available inside the target project:
+
+```bash
+node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections
+node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh
+node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs ensure-listening
+node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status
+```
+
+Common commands:
+
+| Command | Purpose |
+| --- | --- |
+| `verify-projections` | Validate required Project World Model fields and reference integrity. |
+| `refresh` | Refresh disposable projections and collect VCS/evidence signals. |
+| `rebuild-projections` | Rebuild projection files from the embedded HTML snapshot. |
+| `repair-projections` | Quarantine corrupt JSON and rebuild projections when possible. |
+| `ensure-listening` | Restore the read-only local listener on an available port. |
+| `restart` | Stop and restart the listener for the current workspace. |
+| `record-agent-platforms` | Persist the user's active AI-agent platforms into governance state. |
+| `export-static --public` | Export a redacted single-file stakeholder snapshot. |
+
+The listener exposes read-only routes under:
+
+```text
+/api/harness-dashboard/v1/snapshot
+/api/harness-dashboard/v1/index
+/api/harness-dashboard/v1/tasks
+/api/harness-dashboard/v1/sessions
+/api/harness-dashboard/v1/dictionary
+/api/harness-dashboard/v1/version-control
+/api/harness-dashboard/v1/runtime
+/api/harness-dashboard/v1/health
+/api/harness-dashboard/v1/events
+/api/harness-dashboard/v1/query
+```
+
+Every response includes API version, schema version, workspace identity, projection version, ledger offset, generated time, capabilities, and `readOnly: true`.
+
+---
+
+## Agent Platform Governance
+
+`workspace-init-mcp` detects and reinforces common AI-agent instruction surfaces:
+
+| Platform | Typical files |
+| --- | --- |
+| Codex | `AGENTS.md`, `.codex/` |
+| GitHub Copilot / VS Code | `.github/copilot-instructions.md`, `.vscode/mcp.json` |
+| Cursor | `.cursor/rules/`, `.cursorrules` |
+| Claude Code | `CLAUDE.md`, `.claude/` |
+| Antigravity / Gemini-style agent IDEs | `.agents/plugins/`, `.agents/skills/` |
+| OpenHands | `.openhands/`, `.agents/` |
+
+When platform detection is ambiguous, the generated dashboard includes an AI Agent Platform Intake panel. Persist the declaration with:
+
+```bash
+node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs record-agent-platforms --platforms codex,cursor --source user-declaration
+```
+
+Inactive platform instruction files are marked as unused governance surfaces instead of being treated as active truth.
+
+---
+
+## Generated File Ownership
+
+workspace-init owns only harness and governance surfaces such as:
+
+```text
+.github/ai-harness/
+.github/agents/
+.github/skills/
+.governance/
+.vscode/
+docs/ai-harness/
+docs/context/
+docs/plans/
+docs/reviews/
+docs/handovers/
+docs/work-logs/
+AGENTS.md
+CLAUDE.md
+```
+
+Application source remains project-owned. Reconcile prefers merge or hold behavior for live state and customized governed files. It archives managed files before replacing them when replacement is allowed.
+
+---
+
+## Tool Families
+
+Main MCP tools include:
+
+| Tool | Use |
+| --- | --- |
+| `analyze_workspace` | Inspect an existing workspace and detect project/agent surfaces. |
+| `preview_workspace_init` | Show what initialization would create before writing. |
+| `initialize_workspace` | Generate the harness baseline. |
+| `validate_workspace` | Check required and recommended artifacts. |
+| `audit_workspace_upgrade_risk` | Identify managed-file drift and upgrade risk. |
+| `reconcile_workspace_initialization` | Refresh generated harness artifacts safely. |
+| `restore_reconcile_backup` | Restore archived managed files from a reconcile run. |
+| `get_harness_dashboard_context` | Read dashboard projections for AI-agent resume. |
+| `audit_harness_parallel_chunk_conflicts` | Check expected write-path overlap before parallel work. |
+| `open_harness_session` / runtime tools | Start and manage governed sessions, chunks, handoffs, and native execution. |
+
+---
+
+## Quality And Safety Baseline
+
+Version `4.6.0` includes these guardrails:
+
+- Absolute `workspacePath` enforcement.
+- Non-destructive adoption for legacy projects.
+- Generated-path safety checks for traversal, drive-qualified paths, and protected source roots.
+- Managed-file inventory and reconcile policy validation.
+- Strict dashboard state contract shared by schema generation, dashboard ops, and validation.
+- JSONL ledger manifest with sequence and hash provenance.
+- Atomic temp-file plus rename writes for projection/runtime updates.
+- Local listener token auth, loopback-only host checks, disabled CORS, and strict CSP.
+- Public export redaction for local paths, users, tokens, secrets, private URLs, and sensitive notes.
+- Runtime state corruption reporting that distinguishes malformed JSON from missing artifacts.
+- Parallel chunk conflict audits for open and queued sessions.
+- Semantic readiness scoring that does not hide missing evidence behind structural completeness.
+
+---
+
+## Development Checks
+
+Run:
+
+```bash
 npm test
 ```
 
-## License
+This builds TypeScript and runs the harness generation regression suite:
 
-MIT
+```bash
+npm run build
+node tests/harness-generation.test.js
+```
+
+Before publishing:
+
+```bash
+npm run clean
+npm test
+npm pack --dry-run
+```
+
+`prepack` runs a build so package contents do not depend on stale local `dist/` output.
+
+---
+
+## 4.6.0 Release Notes
+
+Major changes:
+
+- Reframed the Harness Dashboard as a hypertext Project World Model.
+- Moved stakeholder communication from Markdown-centric reports to a single-file HTML dashboard.
+- Added audience lenses, slide-show briefing mode, multilingual UI, Tech Stack view, Gantt/Kanban work visualization, and clearer tab purposes.
+- Added dashboard context APIs and read-only listener behavior for AI-agent resume.
+- Added agent platform detection, user declaration flow, and instruction surface indexing.
+- Strengthened parallel-agent chunk conflict guidance and expected write-path governance.
+- Improved projection validation, runtime state handling, and dashboard operations.
+
+Compatibility notes:
+
+- No database or cloud deployment service is required.
+- The local listener is restored by harness activity, not installed as an OS startup daemon.
+- Persistent UI writes remain out of scope; dashboard controls are local view controls unless an explicit ops command records a governance event.
+- Existing projects should use preview and reconcile dry-runs before applying managed-file refreshes.

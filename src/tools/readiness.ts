@@ -58,6 +58,7 @@ const READINESS_DIMENSIONS: ReadinessDimensionDefinition[] = [
     label: "Baseline Initialization",
     weight: 15,
     paths: [
+      "AGENTS.md",
       ".github/copilot-instructions.md",
       ".github/ai-harness/harness-manifest.yaml",
       ".github/ai-harness/operating-model.md",

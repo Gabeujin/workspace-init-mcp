@@ -1,5 +1,5 @@
 ﻿/**
- * Generator for Agent Skills files and IDE-specific mirrors.
+ * Generator for Agent Skills files and platform-specific mirrors.
  *
  * Produces SKILL.md files following the open Agent Skills standard (agentskills.io)
  * and .agent.md files for GitHub Copilot agent mode.
@@ -25,11 +25,16 @@ import {
 
 // IDE path mapping and curated source locations
 
-/** Directory prefixes for each target IDE */
-const IDE_PATH_MAP: Record<TargetIDE, { skills: string; agents: string }> = {
+/** Directory prefixes for each target platform */
+const IDE_PATH_MAP: Partial<Record<TargetIDE, { skills: string; agents: string }>> = {
   vscode: { skills: ".github/skills", agents: ".github/agents" },
   cursor: { skills: ".cursor/skills", agents: ".cursor/agents" },
+  claude: { skills: ".claude/skills", agents: ".claude/agents" },
   "claude-code": { skills: ".claude/skills", agents: ".claude/agents" },
+  antigravity: {
+    skills: ".agents/plugins/workspace-init-harness/skills",
+    agents: ".agents/plugins/workspace-init-harness/agents",
+  },
   openhands: { skills: ".agents/skills", agents: ".agents/agents" },
 };
 
@@ -95,6 +100,9 @@ function getInstallTargets(params: WorkspaceInitParams): InstallTarget[] {
 
   for (const ide of params.targetIDEs ?? ["vscode"]) {
     const mapped = IDE_PATH_MAP[ide];
+    if (mapped == null) {
+      continue;
+    }
     if (
       targets.some(
         (target) => target.skills === mapped.skills && target.agents === mapped.agents
@@ -354,7 +362,11 @@ ${skill.description}
 - Split the work when interruption would force a future session to reconstruct hidden state.
 - Each chunk must have one verifiable outcome and one clear exit condition.
 - Classify every chunk as blocked, sequential, or parallel-ready before assigning workers.
+- The main agent is the hub: it owns decomposition, worker assignment, merge ownership, evidence review, and final acceptance.
 - Parallel-ready chunks must have disjoint write scopes, no shared DB/schema/API mutation, and a named merge owner when integration is required.
+- Treat dependency manifests, lockfiles, CI workflows, shared configuration, DB migrations, generated clients, and API contracts as integration-sensitive even when the paths are different.
+- Run \`audit_harness_parallel_chunk_conflicts\` before launching parallel workers. Hard conflicts must be split or made sequential; integration-sensitive warnings require one merge owner and an integration plan.
+- Capture \`expectedReadPaths\`, \`expectedWritePaths\`, \`assignedWorker\`, \`dependencyMap\`, \`mergeOwner\`, \`integrationOwner\`, \`parallelSafetyStatus\`, and \`evaluationThreshold\` in the session or work packet.
 
 ## Delegation Pattern
 
@@ -363,12 +375,20 @@ ${skill.description}
 - Use a verifier for narrow checks and test coverage.
 - Use expert reviewers for specialist lenses only when needed.
 - Use a documentation writer to keep durable artifacts current.
+- The hub reviews every worker receipt, changed path list, verification result, residual risk, and confidence note before accepting integration.
+- Repeat work -> evaluate -> improve until the threshold is met or a blocker is recorded.
 
 ## Context Injection
 
 - Give each worker only the relevant contract, code snippets, DB schema fragments, API specs, logs, commands, and expected write paths.
+- Include every path the worker may write in \`expectedWritePaths\`; if an undeclared write path becomes necessary, stop and revise the chunk contract before editing.
 - Do not pass broad repo dumps, unrelated chat history, or another worker's private scratch context unless it is an explicit dependency.
 - If a worker needs more context, update the contract and context packet before continuing.
+
+## Memory Strengthening
+
+- After each accepted worker result, update the world model with evidence links, changed assumptions, tacit context, decisions, and next safest action.
+- Do not close a session until the dashboard/runtime memory explains what changed, what remains risky, and why the hub accepted the result.
 `;
     case "harness-multi-expert-review":
       return `# ${skill.name}
@@ -1143,10 +1163,12 @@ ${agent.description}
 
 - Analyze the full backlog before assigning worker agents.
 - Classify each chunk as blocked, sequential, or parallel-ready.
-- Assign workers only to chunks with disjoint write scopes or an explicit merge owner.
+- Assign workers only to chunks with disjoint write scopes. If dependency manifests, lockfiles, CI, DB schema, API contracts, generated files, or shared config are involved, require one merge owner and an integration contract.
+- Run \`audit_harness_parallel_chunk_conflicts\` before launch; resolve hard conflicts and treat integration-sensitive warnings as requiring sequentialization or a named merge owner.
 - Inject only the relevant contract, code snippets, DB schema fragments, API specs, logs, commands, and expected write paths.
 - Keep evaluator and reviewer roles read-only unless remediation is explicitly assigned.
 - Require atomic commit traceability for every completed worker output.
+- Require each worker to stop before touching undeclared write paths.
 
 ## Output
 
@@ -1154,7 +1176,8 @@ ${agent.description}
 - worker assignment table
 - context packet per worker
 - expected write paths
-- verification and integration plan
+- merge owner and integration plan
+- verification plan
 - atomic commit plan
 `;
     case "harness-verifier":
@@ -1253,6 +1276,22 @@ export function generateAgentSkills(
   files.push(...generateCatalogSupportFiles(selectedAgents, selectedSkills, params));
 
   return files;
+}
+
+export function generateHarnessCoreAgentSkills(
+  params: WorkspaceInitParams
+): GeneratedFile[] {
+  const selectedSkills = HARNESS_CORE_SKILL_IDS
+    .map((id) => SKILL_REGISTRY.find((entry) => entry.id === id))
+    .filter((entry): entry is SkillEntry => entry != null);
+  const selectedAgents = HARNESS_CORE_AGENT_IDS
+    .map((id) => AGENT_REGISTRY.find((entry) => entry.id === id))
+    .filter((entry): entry is AgentEntry => entry != null);
+
+  return [
+    ...buildInstalledAssetFiles(selectedSkills, selectedAgents, params),
+    ...generateCatalogSupportFiles(selectedAgents, selectedSkills, params),
+  ];
 }
 
 function buildRecommendationIntent(
@@ -1669,7 +1708,7 @@ function generateSkillsIndex(
     `- \`${CANONICAL_INSTALL_TARGET.skills}/\``,
     `- \`${CANONICAL_INSTALL_TARGET.agents}/\``,
     "",
-    "### IDE Mirrors",
+    "### Platform Mirrors",
     "",
     mirrorPathLines,
     "",
@@ -1679,6 +1718,8 @@ function generateSkillsIndex(
     "- **VS Code Copilot**: Reads from `.github/skills/`",
     "- **Cursor**: Reads from `.cursor/skills/` or `.github/skills/`",
     "- **Claude Code**: Reads from `.claude/skills/` or `.github/skills/`",
+    "- **Antigravity**: Reads workspace plugins under `.agents/plugins/` when that platform is targeted",
+    "- **Codex**: Reads the root `AGENTS.md` instruction contract; canonical skills remain under `.github/skills/` for cross-agent reuse",
     "- **OpenHands**: Reads from `.agents/skills/` or `.github/skills/`",
     "",
     "## Adding New Skills",

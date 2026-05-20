@@ -6,7 +6,10 @@ import { type TargetIDE } from "../types.js";
 export const TARGET_IDE_VALUES = [
   "vscode",
   "cursor",
+  "claude",
   "claude-code",
+  "codex",
+  "antigravity",
   "openhands",
 ] as const;
 
@@ -17,8 +20,12 @@ function isTargetIDE(value: unknown): value is TargetIDE {
   );
 }
 
+function normalizeTargetIDE(value: TargetIDE): TargetIDE {
+  return value === "claude" ? "claude-code" : value;
+}
+
 function dedupeTargetIDEs(targetIDEs: TargetIDE[]): TargetIDE[] {
-  return [...new Set(targetIDEs)];
+  return [...new Set(targetIDEs.map(normalizeTargetIDE))];
 }
 
 function readTargetIDEsFromMachineIndex(workspacePath: string): TargetIDE[] | null {
@@ -42,10 +49,43 @@ function readTargetIDEsFromMachineIndex(workspacePath: string): TargetIDE[] | nu
 
 function detectTargetIDEsFromDirectories(workspacePath: string): TargetIDE[] {
   const mappings: Array<{ ide: TargetIDE; paths: string[] }> = [
-    { ide: "cursor", paths: [".cursor/skills", ".cursor/agents"] },
-    { ide: "claude-code", paths: [".claude/skills", ".claude/agents"] },
+    {
+      ide: "cursor",
+      paths: [
+        ".cursor/skills",
+        ".cursor/agents",
+        ".cursor/rules",
+        ".cursorrules",
+      ],
+    },
+    {
+      ide: "claude-code",
+      paths: [".claude/skills", ".claude/agents", ".claude/CLAUDE.md", "CLAUDE.md"],
+    },
+    {
+      ide: "codex",
+      paths: ["AGENTS.md", "AGENTS.override.md", ".codex"],
+    },
+    {
+      ide: "antigravity",
+      paths: [
+        ".agents/plugins",
+        ".agents/rules",
+        ".agents/hooks.json",
+        ".gemini",
+        "GEMINI.md",
+      ],
+    },
     { ide: "openhands", paths: [".agents/skills", ".agents/agents"] },
-    { ide: "vscode", paths: [".github/skills", ".github/agents"] },
+    {
+      ide: "vscode",
+      paths: [
+        ".github/skills",
+        ".github/agents",
+        ".github/copilot-instructions.md",
+        ".vscode",
+      ],
+    },
   ];
 
   const detected = mappings
