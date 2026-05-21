@@ -46,6 +46,12 @@ export type AutonomyMode = "guided" | "balanced" | "autonomous";
 /** Token usage strategy for long-running work. */
 export type TokenBudget = "lean" | "balanced" | "thorough";
 
+/** Domain stress profiles that promote domain-specific evidence gates into the harness. */
+export type DomainStressProfile =
+  | "identity-commerce-operations"
+  | "legacy-modernization-governance"
+  | "content-release-governance";
+
 /** Input parameters for workspace initialization. */
 export interface WorkspaceInitParams {
   /** Name of the workspace. */
@@ -110,6 +116,12 @@ export interface WorkspaceInitParams {
 
   /** Primary domains that the workspace needs to coordinate. */
   primaryDomains?: string[];
+
+  /** Optional high-risk domain profile that becomes dashboard evidence gates and domain operations state. */
+  domainStressProfile?: DomainStressProfile;
+
+  /** Existing-project modernization context that should survive reconcile and dashboard generation. */
+  legacyAdoptionProfile?: string;
 }
 
 /** Result of a single file generation. */

@@ -56,6 +56,14 @@ export function generateHarnessFiles(
       content: buildAdoptionPaths(params, domains),
     },
     {
+      relativePath: "docs/ai-harness/domain-stress-playbooks.md",
+      content: buildDomainStressPlaybooks(params, domains),
+    },
+    {
+      relativePath: "docs/ai-harness/domain-stress-profiles.json",
+      content: buildDomainStressProfiles(params, domains),
+    },
+    {
       relativePath: ".governance/_INDEX.md",
       content: buildGovernanceIndex(params),
     },
@@ -120,7 +128,7 @@ ${params.purpose}
 
 ## Status
 
-- Harness Dashboard 4.6 Hypertext Project World Model generated.
+- Harness Dashboard 4.6.1 Hypertext Project World Model generated.
 - First governed session is pending.
 - AI Agents should call \`get_harness_dashboard_context\` before starting work.
 
@@ -397,6 +405,8 @@ function buildHarnessManifest(
     `governance_profile: ${quote(params.governanceProfile ?? "strict")}`,
     `autonomy_mode: ${quote(params.autonomyMode ?? "balanced")}`,
     `token_budget: ${quote(params.tokenBudget ?? "balanced")}`,
+    `domain_stress_profile: ${quote(params.domainStressProfile ?? "auto")}`,
+    `legacy_adoption_profile: ${quote(params.legacyAdoptionProfile ?? "none")}`,
     "primary_domains:",
     ...domains.map((domain) => `  - ${quote(domain)}`),
     "tech_stack:",
@@ -734,9 +744,11 @@ This directory family defines how AI work is governed for **${params.workspaceNa
 - \`.github/ai-harness/operating-model.md\`: how humans and AI should operate
 - \`.github/ai-harness/context-strategy.md\`: when to compact vs reset context
 - \`.github/ai-harness/evaluation-rubrics.md\`: explicit grading criteria and quality thresholds
-- \`docs/ai-harness/dashboard/\`: Harness Dashboard 4.6 Hypertext Project World Model, ledger projections, single-file HTML, and read-only local API design system
+- \`docs/ai-harness/dashboard/\`: Harness Dashboard 4.6.1 Hypertext Project World Model, ledger projections, single-file HTML, and read-only local API design system
 - \`docs/ai-harness/runtime/\`: planner / generator / evaluator runtime state, prompts, and session ledgers
 - \`docs/ai-harness/adoption-paths.md\`: legacy-project and greenfield DX/AX adoption playbook
+- \`docs/ai-harness/domain-stress-playbooks.md\`: domain packs for identity commerce, legacy modernization, and content release governance
+- \`docs/ai-harness/domain-stress-profiles.json\`: machine-readable domain stress profiles that agents can copy into plans, contracts, dashboard events, and evaluator prompts
 - \`docs/context/\`: durable context, assumptions, and open questions
 - \`docs/reviews/\`: three-pass review artifacts
 - \`docs/handovers/\`: resumable status for future sessions
@@ -833,6 +845,8 @@ Use this track when the project starts fresh and the harness can shape the archi
 
 This harness can be adapted across: ${domains.join(", ")}.
 
+Before high-risk domain work, open \`docs/ai-harness/domain-stress-playbooks.md\` and choose the closest stress profile. The chosen profile must be copied into the first plan, chunk contract, dashboard event, and independent evaluation prompt.
+
 The operating rule is consistent regardless of domain:
 
 - plan clearly
@@ -842,6 +856,252 @@ The operating rule is consistent regardless of domain:
 - test and remediate
 - commit atomically with traceable work history
 - refresh governance and dashboard state last
+`;
+}
+
+function buildDomainStressProfiles(
+  params: WorkspaceInitParams,
+  domains: string[]
+): string {
+  return `${JSON.stringify(
+    {
+      schemaVersion: "1.0.0",
+      generatedFor: params.workspaceName,
+      purpose: params.purpose,
+      activeDomains: domains,
+      usage:
+        "Use these profiles as checklists for additionalContext, plannedTasks, dashboard claims, chunk contracts, and evaluator prompts. They are not implementation specs by themselves.",
+      profiles: [
+        {
+          id: "identity-commerce-operations",
+          label: "Identity Commerce Operations",
+          appliesWhen: [
+            "identity, commerce, and device-mediated flows must proceed together",
+            "web, mobile, backend, and operator surfaces share state",
+            "credentials, resource binding, orders, payments, benefits, and privacy are in scope",
+          ],
+          actors: [
+            "anonymous user",
+            "identified account",
+            "operator",
+            "business admin",
+            "support owner",
+            "payment provider",
+            "AI agent operator",
+          ],
+          criticalSurfaces: [
+            "account identity and credential lifecycle",
+            "device permission and scanner authentication",
+            "resource tag and session binding",
+            "web-app catalog, cart, and order state",
+            "third-party payment handoff and callback",
+            "offline or out-of-band payment amount handoff",
+            "benefit and entitlement ledger",
+            "reward issue, redemption, stacking, expiry, and reversal",
+            "operator audit view",
+            "PII, consent, redaction, and retention",
+          ],
+          mandatoryEvidence: [
+            "credential issuance/revocation/replay tests",
+            "permission denial/fallback tests",
+            "resource binding and spoof tests",
+            "order state transition contract",
+            "payment callback idempotency proof",
+            "benefit accrual/reversal ledger proof",
+            "reward stacking/expiry tests",
+            "provider outage and manual recovery plan",
+            "user-data privacy and export/delete policy",
+          ],
+          parallelSafety:
+            "Path-disjoint web, app, payment, benefit, and order chunks are still semantically coupled. Require a merge owner, schema owner, and end-to-end scenario owner before parallel implementation.",
+        },
+        {
+          id: "legacy-modernization-governance",
+          label: "Legacy Modernization Governance",
+          appliesWhen: [
+            "a legacy CRUD surface exists before workspace-init",
+            "workspace-init is applied as a non-destructive harness overlay",
+            "the target product grows into collaboration, records, groups, governance, organizations, and monetization",
+          ],
+          actors: [
+            "legacy visitor",
+            "registered member",
+            "moderator",
+            "collaboration host",
+            "participant",
+            "group steward",
+            "organization admin",
+            "sponsor/customer",
+          ],
+          criticalSurfaces: [
+            "legacy records, comments, categories, and users",
+            "modern identity and profiles",
+            "collaboration lifecycle, attendance, and record continuity",
+            "group roles, rules, proposals, voting, and approvals",
+            "moderation and safety workflows",
+            "organization transition model",
+            "plans, entitlements, billing, sponsorship, settlement, and tax assumptions",
+            "legacy data migration and rollback",
+          ],
+          mandatoryEvidence: [
+            "AS-IS entity and route map",
+            "TO-BE capability map",
+            "migration waves and cutover plan",
+            "data migration rehearsal and rollback proof",
+            "collaboration governance decision records",
+            "moderation and abuse handling tests",
+            "collaboration lifecycle E2E tests",
+            "monetization readiness and payment-risk review",
+          ],
+          parallelSafety:
+            "Do not split legacy data model, identity, group roles, payments, and governance votes into independent chunks without a named integration owner and migration contract.",
+        },
+        {
+          id: "content-release-governance",
+          label: "Content Release Governance",
+          appliesWhen: [
+            "creative or knowledge content is the main product",
+            "channel and derivative assets are produced while canonical content evolves",
+            "visual generation is used for promotional or editorial assets",
+          ],
+          actors: [
+            "content owner",
+            "canon editor",
+            "developmental reviewer",
+            "language editor",
+            "source/provenance librarian",
+            "channel content operator",
+            "visual art director",
+            "audience persona",
+          ],
+          criticalSurfaces: [
+            "central message and audience promise",
+            "concept dictionary and approved language",
+            "argument map and counterargument coverage",
+            "content outline, draft stage, editorial debt, and cut list",
+            "channel derivative map",
+            "visual asset queue",
+            "visual prompt ledger and style guide",
+            "release calendar and feedback loop",
+            "promotion content promoted back into canonical content",
+          ],
+          mandatoryEvidence: [
+            "message consistency review",
+            "concept boundary and contradiction checks",
+            "content-to-message coverage map",
+            "counterargument and ethical nuance review",
+            "prose voice QA",
+            "derivative compression risk review",
+            "visual prompt/style/provenance record",
+            "alt text, platform size, typography safe-zone, and rights checks",
+            "content finish burn-up and next production session brief",
+          ],
+          parallelSafety:
+            "Channel, derivative, visual, and canonical-content workers may run in parallel only when a canon editor owns consistency and all derivatives declare whether they change, promote, or merely market the canonical content.",
+        },
+      ],
+    },
+    null,
+    2
+  )}\n`;
+}
+
+function buildDomainStressPlaybooks(
+  params: WorkspaceInitParams,
+  domains: string[]
+): string {
+  return `# Domain Stress Playbooks
+
+These playbooks turn a generic harness into a domain-aware operating system. Use them when a project is too broad for a single \`projectType\` label.
+
+Generated for: **${params.workspaceName}**
+
+Active domains: ${domains.join(", ")}
+
+## How To Use
+
+1. Pick one profile from \`domain-stress-profiles.json\`.
+2. Copy the profile id into the first plan, chunk contract, evaluator prompt, and dashboard event.
+3. Expand \`additionalContext\` with actors, critical surfaces, data classes, integrations, and failure modes.
+4. Convert mandatory evidence into missing-evidence claims before implementation begins.
+5. Promote semantic coupling to a blocker when path-disjoint chunks share identity, schema, payment, canonical content, or governance state.
+6. Run \`dashboard-ops.mjs export-report --focus today --public\` only after validation passes.
+
+## Identity Commerce Operations
+
+Use this profile for products where identity, commerce, device, and operator surfaces share state.
+
+### Required Intake
+
+- Actors: anonymous user, identified account, operator, business admin, support owner, provider, AI operator.
+- Device flows: credential scan, resource binding, web surface, mobile deep link, device permission denial.
+- Commerce flows: cart, order, payment handoff, provider callback, offline amount handoff, refund, void.
+- Benefit flows: accrual, reversal, reward issue, stacking, expiry, redemption, abuse prevention.
+- Data classes: account PII, credential, bound resource, session, order, payment attempt, payment callback, benefit ledger, reward ledger, audit log.
+- Providers: configured payment or identity providers, or explicit mock provider contracts.
+
+### Evidence Gates
+
+- Credential issuance, revocation, replay prevention, and expiry.
+- Device permission denial and fallback.
+- Resource binding, spoofing, stale tag, and reassignment.
+- Order state machine and operator/admin audit history.
+- Payment callback idempotency and provider outage recovery.
+- Benefit ledger double-entry or equivalent reconciliation.
+- Reward stacking, expiry, cancellation, and reversal.
+- Privacy redaction, user export/delete, and retention policy.
+
+## Legacy Modernization Governance
+
+Use this profile when workspace-init enters after a legacy CRUD surface already exists.
+
+### Required Preflight
+
+- AS-IS map: tables/models, routes, screens, auth assumptions, deployment state, tests, hidden coupling.
+- TO-BE map: records, comments, profiles, collaboration flows, continuity records, groups, roles, proposals, votes, organizations, monetization.
+- Migration waves: preserve CRUD, add identity, add collaboration, add continuity records, add group governance, add organization transition, add monetization.
+- Cutover plan: data migration rehearsal, rollback, seeded demo data, legacy URL compatibility.
+- Moderation plan: reports, blocks, roles, audit log, abuse handling.
+
+### Evidence Gates
+
+- Legacy CRUD still works after harness adoption.
+- Every legacy route/table is mapped to keep, replace, archive, or migrate.
+- Collaboration lifecycle E2E: create, join, attend, record continuity, moderate.
+- Governance lifecycle: proposal, vote/quorum, approval, role change, audit.
+- Monetization readiness: plan, entitlement, payment, refund, sponsorship, settlement assumptions.
+- Collaboration health KPIs: activation, retention, participation, moderation load, organization growth.
+
+## Content Release Governance
+
+Use this profile when the output is canonical content plus derivative channel and visual assets.
+
+### Required Intake
+
+- Content title, central message, audience promise, target audience, taboo positions, tone, outline, finish definition.
+- Concept dictionary, approved language, "do not say this" boundaries, contradiction risks.
+- Content channels: canonical draft, newsletter, owned channels, derivative visuals.
+- Release cadence and feedback loop.
+- Visual generation style guide, platform dimensions, typography safe zones, alt text, rights/provenance rules.
+
+### Evidence Gates
+
+- Message consistency and concept boundary review.
+- Content-to-message coverage and counterargument coverage.
+- Prose voice QA and harmful oversimplification check.
+- Derivative map: promote to canonical content, market only, or revise canon.
+- Visual prompt/version ledger, visual consistency, typography, alt text, and rights checks.
+- Content finish report: progress, draft stage, editorial debt, cut list, source gaps, next production session brief.
+
+## Parallel Session Rule
+
+When a domain profile names semantic coupling, the orchestrator must treat it as a dependency even if files do not overlap. The contract must name:
+
+- merge owner
+- schema or canon owner
+- end-to-end scenario owner
+- verification command
+- dashboard state update required at closeout
 `;
 }
 

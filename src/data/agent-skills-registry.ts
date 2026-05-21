@@ -386,7 +386,7 @@ export const AGENT_REGISTRY: AgentEntry[] = [
   {
     id: "harness-dashboard-operator",
     name: "Harness Dashboard Operator",
-    description: "Maintains and matures the Harness Dashboard 4.6 Hypertext Project World Model, ledger projections, governance/evidence scores, briefs, VCS evidence, and read-only local listener",
+    description: "Maintains and matures the Harness Dashboard 4.6.1 Hypertext Project World Model, ledger projections, governance/evidence scores, briefs, VCS evidence, and read-only local listener",
     categories: ["documentation", "meta", "platform"],
     tags: ["dashboard", "project-world-model", "ledger", "governance-score", "operational-evidence", "stakeholder-brief", "agent-resume", "vcs", "sse", "json"],
     relevantProjectTypes: ["*"],
@@ -1170,7 +1170,7 @@ export const SKILL_REGISTRY: SkillEntry[] = [
   {
     id: "harness-dashboard-state-manager",
     name: "Harness Dashboard State Manager",
-    description: "Maintains HTML-backed Harness Dashboard 4.6 world-model projections, maturity contracts, briefs, dictionary, VCS records, and listener state without using a database",
+    description: "Maintains HTML-backed Harness Dashboard 4.6.1 world-model projections, maturity contracts, briefs, dictionary, VCS records, and listener state without using a database",
     categories: ["analysis", "document-gen", "governance"],
     tags: ["dashboard", "json", "project-world-model", "maturity-loop", "governance-score", "operational-evidence", "agent-resume", "stakeholder-brief", "ontology", "vcs", "operator-view", "ax", "dx"],
     relevantProjectTypes: ["*"],

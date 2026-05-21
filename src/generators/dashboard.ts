@@ -10,9 +10,9 @@ import {
   inferDashboardDomainMode,
 } from "../data/dashboard-profiles.js";
 
-const DASHBOARD_SCHEMA_VERSION = "4.6.0";
+const DASHBOARD_SCHEMA_VERSION = "4.6.1";
 const DASHBOARD_API_VERSION = "v1";
-const DASHBOARD_PROJECTION_VERSION = "4.6.0";
+const DASHBOARD_PROJECTION_VERSION = "4.6.1";
 const BOOTSTRAP_SEQUENCE = 1;
 const BOOTSTRAP_TIME = "bootstrap";
 
@@ -308,7 +308,7 @@ function buildAgentPlatformGovernance(params: WorkspaceInitParams) {
     governanceIndexing: {
       factId: "fact-agent-platform-selection",
       decisionId: "decision-agent-platform-selection",
-      taskId: "task-confirm-agent-platforms",
+      actionId: "governance.agent-platform-declaration",
       evidenceRefs: activeInstructionPaths,
       indexedAs: "inferred until user declaration is recorded",
       nextAction:
@@ -385,7 +385,7 @@ function buildAudienceLensContract() {
           "release-incident-data",
           "listener-health",
         ],
-        slideshowEnabled: false,
+        slideshowEnabled: true,
       },
     },
     slideshow: {
@@ -483,18 +483,565 @@ function buildServiceContracts(params: WorkspaceInitParams) {
   };
 }
 
+const DOMAIN_STRESS_DEFINITIONS = [
+  {
+    id: "identity-commerce-operations",
+    label: "Identity Commerce Operations",
+    programKey: "commerceOperations",
+    defaultOwner: "domain-commerce-orchestrator",
+    activationDomains: [
+      "commerce",
+      "payments",
+      "identity",
+      "device-auth",
+      "credential-flow",
+      "order-management",
+      "benefits",
+      "entitlements",
+      "privacy",
+    ],
+    appliesWhen: [
+      "identity, device-mediated access, ordering, payment, benefits, and audit surfaces are in scope",
+      "web and mobile or device-assisted work must proceed together",
+      "commerce-critical state, account credentials, provider callbacks, and benefit ledgers must remain traceable",
+    ],
+    actors: [
+      "anonymous user",
+      "registered account",
+      "operator",
+      "administrator",
+      "payment provider",
+      "support agent",
+      "AI agent operator",
+    ],
+    criticalSurfaces: [
+      "account identity and credential lifecycle",
+      "device permission and credential verification",
+      "resource or session binding",
+      "catalog, cart, order, or request flow",
+      "third-party payment handoff and callback",
+      "amount handoff, settlement, refund, and reversal",
+      "benefit or entitlement ledger",
+      "promotion, benefit, expiry, stacking, and reversal rules",
+      "operator/admin audit view",
+      "PII, consent, redaction, and retention",
+    ],
+    mandatoryEvidence: [
+      "credential issuance, revocation, replay prevention, and expiry tests",
+      "device permission denial and fallback tests",
+      "wrong-resource binding, stale binding, spoofing, and reassignment tests",
+      "order state transition contract and staff audit history",
+      "payment callback idempotency and provider outage recovery proof",
+      "amount handoff and settlement reconciliation proof",
+      "benefit accrual, redemption, and reversal ledger proof",
+      "promotion stacking, expiry, cancellation, abuse, and reversal tests",
+      "user PII, consent, export/delete, redaction, and retention policy",
+    ],
+    reportSections: [
+      "Credential/Auth",
+      "Device/Binding",
+      "Orders",
+      "Payments",
+      "Benefits",
+      "Operator Audit",
+      "Privacy/PII",
+      "Readiness Blockers",
+    ],
+    operatingQuestion:
+      "Can users and operators complete identity, ordering, payment, benefit, and audit flows without untracked value, state, or PII risk?",
+  },
+  {
+    id: "legacy-modernization-governance",
+    label: "Legacy Modernization Governance",
+    programKey: "modernizationGovernance",
+    defaultOwner: "legacy-modernization-orchestrator",
+    activationDomains: [
+      "legacy",
+      "legacy-modernization",
+      "modernization",
+      "migration",
+      "collaboration",
+      "organization",
+      "governance",
+      "monetization",
+    ],
+    appliesWhen: [
+      "an existing CRUD or workflow system exists before workspace-init",
+      "workspace-init is applied as a non-destructive harness overlay",
+      "the target product grows into identity, collaborative records, role governance, organizations, and monetization",
+    ],
+    actors: [
+      "legacy user",
+      "registered user",
+      "domain moderator",
+      "workflow owner",
+      "participant",
+      "group steward",
+      "organization admin",
+      "sponsor/customer",
+    ],
+    criticalSurfaces: [
+      "legacy entities, routes, screens, users, and permissions",
+      "modern identity and profiles",
+      "collaborative workflow creation, participation, and records",
+      "group roles, rules, proposals, voting, and approvals",
+      "moderation and safety workflows",
+      "organization transition model",
+      "plans, entitlements, billing, sponsorship, settlement, and tax assumptions",
+      "legacy data migration and rollback",
+    ],
+    mandatoryEvidence: [
+      "AS-IS entity, route, screen, auth, deployment, and data inventory",
+      "TO-BE capability map for records, collaboration, groups, governance, organizations, and monetization",
+      "keep/replace/archive/migrate classification for every legacy route and table",
+      "migration waves, dry-run rehearsal, rollback, and legacy URL compatibility proof",
+      "legacy CRUD preservation smoke tests after harness adoption",
+      "collaborative workflow lifecycle tests from creation to retained record and moderation",
+      "governance lifecycle tests for proposal, vote, quorum, approval, role change, and audit",
+      "monetization evidence for plans, entitlements, payments, refunds, sponsorship, settlement, and tax assumptions",
+      "moderation and abuse handling tests with role-based audit trail",
+    ],
+    reportSections: [
+      "Legacy Preservation",
+      "AS-IS/TO-BE",
+      "Migration Waves",
+      "Collaboration Records",
+      "Governance",
+      "Monetization",
+      "Moderation/Safety",
+      "Cutover Blockers",
+    ],
+    operatingQuestion:
+      "Can the existing system keep working while the product evolves into a governed, monetizable platform with reversible migrations?",
+  },
+  {
+    id: "content-release-governance",
+    label: "Content Release Governance",
+    programKey: "contentRelease",
+    defaultOwner: "content-governance-owner",
+    activationProjectTypes: ["creative"],
+    activationDomains: [
+      "content",
+      "editorial",
+      "content-release",
+      "campaign",
+      "media-assets",
+      "visual-assets",
+      "content-operations",
+    ],
+    appliesWhen: [
+      "long-form or multi-channel content is the main deliverable",
+      "derivative content is produced while the primary content evolves",
+      "visual or media assets need provenance and accessibility governance",
+    ],
+    actors: [
+      "content owner",
+      "editorial lead",
+      "reviewer",
+      "source/provenance librarian",
+      "channel operator",
+      "visual designer",
+      "audience persona",
+    ],
+    criticalSurfaces: [
+      "content promise and audience transformation",
+      "concept dictionary and approved language",
+      "argument map and counterargument coverage",
+      "content unit outline, draft stage, editorial debt, and cut list",
+      "channel derivative map",
+      "visual asset queue",
+      "asset prompt ledger and style guide",
+      "release calendar and feedback loop",
+      "promotion content promoted back into canonical content",
+    ],
+    mandatoryEvidence: [
+      "message map, concept boundary, and contradiction ledger",
+      "unit-to-message coverage and counterargument coverage map",
+      "content progress, draft stage, editorial debt, and cut-list burn-up",
+      "voice QA and audience empathy review",
+      "derivative content map from canonical source to channel asset and feedback loop",
+      "compression risk review and source concept links",
+      "asset prompt, style, rights/provenance, alt text, and layout safe-zone ledger",
+      "release calendar, audience feedback routing, and canonical impact policy",
+      "content finish report with next production session brief",
+    ],
+    reportSections: [
+      "Content Stage",
+      "Unit Heatmap",
+      "Message Consistency",
+      "Unresolved Tensions",
+      "Channel Pipeline",
+      "Derivative Pipeline",
+      "Visual Governance",
+      "Release Readiness",
+    ],
+    operatingQuestion:
+      "Can content operators finish one coherent canonical deliverable while derivative assets stay consistent, accessible, and provenance-safe?",
+  },
+] as const;
+
+type DomainStressDefinition = (typeof DOMAIN_STRESS_DEFINITIONS)[number];
+
+function normalizeDomain(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function resolveDomainStressDefinitions(
+  params: WorkspaceInitParams
+): DomainStressDefinition[] {
+  const normalizedDomains = new Set(
+    (params.primaryDomains ?? []).map((domain) => normalizeDomain(domain))
+  );
+  const explicit = params.domainStressProfile;
+  const active = new Set<string>();
+
+  if (explicit) {
+    active.add(explicit);
+  }
+
+  const hasDomain = (values: string[]) =>
+    values.some((value) => normalizedDomains.has(normalizeDomain(value)));
+
+  for (const definition of DOMAIN_STRESS_DEFINITIONS) {
+    const activationProjectTypes =
+      "activationProjectTypes" in definition
+        ? (definition.activationProjectTypes as readonly string[] | undefined)
+        : undefined;
+    const projectTypeMatch =
+      activationProjectTypes?.includes(params.projectType ?? "other") ?? false;
+    let domainMatch = definition.activationDomains.some((domain) =>
+      normalizedDomains.has(normalizeDomain(domain))
+    );
+    if (definition.id === "identity-commerce-operations") {
+      domainMatch =
+        hasDomain(["commerce", "order-management", "identity-commerce"]) ||
+        (hasDomain(["device-auth", "credential-flow", "resource-binding"]) &&
+          hasDomain(["benefits", "entitlements", "payments"]));
+    }
+    if (definition.id === "legacy-modernization-governance") {
+      domainMatch =
+        hasDomain(["legacy", "legacy-modernization", "modernization", "migration"]) ||
+        (hasDomain(["collaboration"]) && hasDomain(["governance", "organization", "monetization"]));
+    }
+    if (definition.id === "content-release-governance") {
+      domainMatch =
+        hasDomain(["content", "editorial", "content-release", "content-operations"]) ||
+        (hasDomain(["campaign", "media-assets"]) && hasDomain(["visual-assets", "release-governance"]));
+    }
+    if (projectTypeMatch || domainMatch) {
+      active.add(definition.id);
+    }
+  }
+
+  if (params.legacyAdoptionProfile?.trim()) {
+    active.add("legacy-modernization-governance");
+  }
+
+  return DOMAIN_STRESS_DEFINITIONS.filter((definition) => active.has(definition.id));
+}
+
+function buildDomainStressState(params: WorkspaceInitParams) {
+  const definitions = resolveDomainStressDefinitions(params);
+  const profiles = definitions.map((definition) => {
+    const evidenceGates = definition.mandatoryEvidence.map((evidence, index) => {
+      const gateSlug = slugify(evidence);
+      return {
+        id: `domain.${definition.id}.evidence.${String(index + 1).padStart(2, "0")}.${gateSlug}`,
+        label: evidence,
+        status: "missing-evidence",
+        owner: definition.defaultOwner,
+        requiredEvidenceType: evidence,
+        reportSection: definition.reportSections[index % definition.reportSections.length],
+      };
+    });
+    return {
+      id: definition.id,
+      label: definition.label,
+      programKey: definition.programKey,
+      activation: params.domainStressProfile === definition.id ? "explicit" : "inferred",
+      appliesWhen: definition.appliesWhen,
+      actors: definition.actors,
+      criticalSurfaces: definition.criticalSurfaces,
+      reportSections: definition.reportSections,
+      operatingQuestion: definition.operatingQuestion,
+      evidenceGates,
+      hardGate:
+        "All mandatory evidence gates must be resolved, explicitly waived, or marked not-applicable before production/readiness claims are trusted.",
+    };
+  });
+  const missingEvidenceItems = profiles.flatMap((profile) =>
+    profile.evidenceGates.map((gate) => ({
+      id: gate.id,
+      label: gate.label,
+      blocksClaimIds: [`claim.domain.${profile.id}.readiness`],
+      requiredEvidenceType: gate.requiredEvidenceType,
+      owner: gate.owner,
+      resolutionTaskId: `task.${gate.id}`,
+      queueVisibility: "task",
+      surfaceAsTask: true,
+      domainStressProfile: profile.id,
+      reportSection: gate.reportSection,
+      blocksReadiness: true,
+    }))
+  );
+  const workItems = profiles.flatMap((profile) =>
+    profile.evidenceGates.map((gate, index) => ({
+      id: `task.${gate.id}`,
+      title: `Prove ${gate.label}`,
+      status: "blocked",
+      lane: profile.label,
+      owner: gate.owner,
+      startAt: BOOTSTRAP_TIME,
+      plannedStartAt: BOOTSTRAP_TIME,
+      plannedEndAt: "before-domain-readiness-claim",
+      endAt: null,
+      progressPercent: 0,
+      kpiTags: ["domain-stress", profile.id, gate.reportSection],
+      evidenceRefs: ["docs/ai-harness/domain-stress-playbooks.md", gate.id],
+      nextActionRef: gate.id,
+      blockingClaimIds: [`claim.domain.${profile.id}.readiness`],
+      exitCriteria:
+        "Attach concrete project evidence or an approved not-applicable decision to this gate.",
+      domainStressProfile: profile.id,
+      sequence: index + 1,
+    }))
+  );
+  const claims = profiles.map((profile) => ({
+    claimId: `claim.domain.${profile.id}.readiness`,
+    statement: `${profile.label} is ready for trusted execution.`,
+    subjectRef: `domain-stress:${profile.id}`,
+    claimStatus: "missing-evidence",
+    confidence: 0.08,
+    sign:
+      "A domain stress profile is active, but its mandatory evidence gates are not yet connected to project artifacts.",
+    object: profile.label,
+    interpretant:
+      "Domain work is only trustworthy when the profile's actors, critical surfaces, mandatory evidence, and report sections are reflected in real artifacts and dashboard state.",
+    evidenceRefs: ["docs/ai-harness/domain-stress-playbooks.md", "docs/ai-harness/domain-stress-profiles.json"],
+    counterEvidenceRefs: profile.evidenceGates.map((gate) => gate.id),
+    falsificationTests: [
+      "Reject readiness if any mandatory evidence gate is missing, stale, or unsupported.",
+      "Reject readiness if the final report omits profile-specific report sections.",
+      "Reject readiness if parallel chunks share identity, payment, schema, governance, or canon state without an integration owner.",
+    ],
+    nextActionRef: profile.evidenceGates[0]?.id ?? "domain-stress-profile-review",
+    domainStressProfile: profile.id,
+  }));
+  const decisionContracts = profiles.map((profile) => ({
+    id: `decision.domain-stress.${profile.id}`,
+    status: "pending",
+    owner: "stakeholder-product-owner",
+    decision: `Approve ${profile.label} evidence gates, owners, and report sections.`,
+    alternatives: [
+      "activate the full profile",
+      "split the profile into release waves",
+      "mark specific gates not-applicable with an explicit rationale",
+    ],
+    evidence: ["docs/ai-harness/domain-stress-playbooks.md", "docs/ai-harness/domain-stress-profiles.json"],
+    reversalCondition:
+      "Scope, domain, compliance, payment, data, governance, or release assumptions change.",
+    stakeholderImpact:
+      "Controls which domain-specific blockers appear in work queues, reports, and readiness judgments.",
+    approvalThreshold:
+      "Explicit stakeholder or orchestrator approval recorded before claiming domain readiness.",
+    domainStressProfile: profile.id,
+  }));
+
+  return {
+    schemaVersion: DASHBOARD_SCHEMA_VERSION,
+    activeProfileIds: profiles.map((profile) => profile.id),
+    selectionSource: params.domainStressProfile ? "explicit-or-explicit-plus-inferred" : "primary-domain-inference",
+    requestedProfile: params.domainStressProfile ?? null,
+    legacyAdoptionProfile: params.legacyAdoptionProfile ?? null,
+    profiles,
+    claims,
+    missingEvidenceItems,
+    workItems,
+    decisionContracts,
+    hardGates: profiles.map((profile) => ({
+      profileId: profile.id,
+      label: profile.label,
+      gateCount: profile.evidenceGates.length,
+      status: profile.evidenceGates.length > 0 ? "blocked" : "not-applicable",
+      validatorExpectation:
+        "validateDashboardStateShape requires domainStress profile arrays; readiness remains blocked until evidence gates are resolved.",
+    })),
+    reportSections: profiles.flatMap((profile) =>
+      profile.reportSections.map((section) => ({
+        profileId: profile.id,
+        section,
+        status: "missing-evidence",
+        requiredInBriefing: true,
+      }))
+    ),
+    parallelSafetyRule:
+      "Path-disjoint chunks are still coupled when they share identity, schema, payments, governance, or canonical content state.",
+  };
+}
+
+function gateIdsFor(profile: Record<string, unknown>, pattern: RegExp): string[] {
+  const evidenceGates = Array.isArray(profile.evidenceGates)
+    ? profile.evidenceGates as Record<string, unknown>[]
+    : [];
+  return evidenceGates
+    .filter((gate) => pattern.test(String(gate.label ?? "")))
+    .map((gate) => String(gate.id));
+}
+
+function buildDomainOperations(domainStress: ReturnType<typeof buildDomainStressState>) {
+  const operations: Record<string, unknown> = {
+    schemaVersion: DASHBOARD_SCHEMA_VERSION,
+    activeProfileIds: domainStress.activeProfileIds,
+    status: domainStress.activeProfileIds.length > 0 ? "domain-evidence-required" : "no-active-domain-stress-profile",
+    dashboardQuestion:
+      "What domain-specific evidence is blocking trusted execution, production readiness, or publication readiness?",
+    programs: domainStress.profiles.map((profile) => ({
+      profileId: profile.id,
+      label: profile.label,
+      status: "blocked-by-mandatory-evidence",
+      operatingQuestion: profile.operatingQuestion,
+      criticalSurfaceCount: profile.criticalSurfaces.length,
+      evidenceGateCount: profile.evidenceGates.length,
+      reportSections: profile.reportSections,
+      nextAction: profile.evidenceGates[0]?.label ?? "No domain gates active.",
+    })),
+  };
+
+  for (const profile of domainStress.profiles) {
+    if (profile.id === "identity-commerce-operations") {
+      operations.commerceOperations = {
+        profileId: profile.id,
+        status: "blocked-by-mandatory-evidence",
+        operatingQuestion: profile.operatingQuestion,
+        sections: [
+          { id: "credential-auth", label: "Credential/Auth", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /credential|device permission/i) },
+          { id: "device-binding", label: "Device/Binding", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /resource|binding|device/i) },
+          { id: "orders", label: "Orders", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /order|audit/i) },
+          { id: "payments", label: "Payments", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /payment|settlement|callback/i) },
+          { id: "benefits", label: "Benefits", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /benefit|promotion|entitlement/i) },
+          { id: "operator-audit", label: "Operator Audit", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /audit|order/i) },
+          { id: "privacy", label: "Privacy/PII", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /PII|consent|retention|delete/i) },
+          { id: "readiness-blockers", label: "Readiness Blockers", status: "blocked", evidenceGateIds: profile.evidenceGates.map((gate) => gate.id) },
+        ],
+        operatingKpis: [
+          { id: "resource-binding-health", label: "Resource Binding Health", value: "not-proven", target: "wrong-resource, stale binding, reassignment, and spoof cases tested" },
+          { id: "order-lifecycle-sla", label: "Order Lifecycle SLA", value: "not-proven", target: "request to operator acceptance to payment handoff is idempotent and observable" },
+          { id: "provider-reconciliation", label: "Provider Reconciliation", value: "not-proven", target: "callbacks, manual recovery, refunds, and settlement are auditable" },
+          { id: "benefit-liability", label: "Benefit Liability", value: "not-proven", target: "benefit issuance, redemption, reversal, expiry, and abuse are ledger-backed" },
+          { id: "operator-audit-coverage", label: "Operator Audit Coverage", value: "not-proven", target: "operator actions include actor, resource/order/account, timestamp, and reason" },
+        ],
+        productionGate:
+          "Do not claim operating product readiness until payment, benefit, resource binding, and privacy evidence gates are resolved.",
+      };
+    }
+    if (profile.id === "legacy-modernization-governance") {
+      operations.modernizationGovernance = {
+        profileId: profile.id,
+        status: "blocked-by-modernization-preflight",
+        operatingQuestion: profile.operatingQuestion,
+        asIsToBe: {
+          asIsInventoryStatus: "required",
+          toBeCapabilityMapStatus: "required",
+          routeTableCoverageTarget: "100% keep/replace/archive/migrate classification",
+          coveragePercent: 0,
+          unmappedLegacyItems: [],
+          requiredArtifactLinks: [
+            "AS-IS entity/route/table inventory",
+            "TO-BE capability map",
+            "migration wave contract",
+            "rollback proof",
+          ],
+        },
+        monetizationLedger: {
+          status: "missing-evidence",
+          requiredEvidence: [
+            "plan and entitlement map",
+            "payment state machine",
+            "refund/reversal audit",
+            "sponsorship and settlement assumptions",
+            "tax/accounting responsibility note",
+          ],
+        },
+        organizationTransitionGates: [
+          "legal entity assumption",
+          "ownership and revenue-share policy",
+          "operator authority transfer",
+          "accounting and tax owner",
+          "member governance accountability",
+        ],
+        domains: [
+          { id: "legacy-crud", label: "Legacy CRUD Preservation", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /legacy|CRUD|route|table/i) },
+          { id: "collaboration-records", label: "Collaboration Records", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /collaborative|record|workflow/i) },
+          { id: "governance", label: "Governance", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /governance|proposal|vote|quorum|role/i) },
+          { id: "monetization", label: "Monetization", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /monetization|plan|entitlement|payment|refund|sponsor|tax/i) },
+          { id: "moderation", label: "Moderation/Safety", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /moderation|abuse|audit/i) },
+        ],
+      };
+    }
+    if (profile.id === "content-release-governance") {
+      operations.contentRelease = {
+        profileId: profile.id,
+        status: "blocked-by-editorial-and-release-evidence",
+        operatingQuestion: profile.operatingQuestion,
+        content: {
+          titleStatus: "declared-by-project",
+          messageMapStatus: "required",
+          contentProgressStatus: "required",
+          finishDefinitionStatus: "required",
+        },
+        contentProgress: {
+          overallDraftPercent: 0,
+          unitHeatmap: [],
+          editorialDebtCount: 0,
+          contradictionCount: 0,
+          nextProductionDecision: "Define message map and first content unit coverage before release claims.",
+        },
+        contentPipeline: {
+          channelAssetsReady: 0,
+          derivativeAssetsReady: 0,
+          visualAssetsApproved: 0,
+          releaseReadinessPercent: 0,
+        },
+        visualAssetGovernance: {
+          promptLedgerStatus: "required",
+          rightsProvenanceStatus: "required",
+          altTextStatus: "required",
+          layoutSafeZoneStatus: "required",
+        },
+        pipelines: [
+          { id: "message", label: "Message Consistency", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /message|concept|contradiction/i) },
+          { id: "units", label: "Unit Heatmap", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /unit|content progress|counterargument/i) },
+          { id: "channels", label: "Channel Pipeline", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /channel|feedback/i) },
+          { id: "derivatives", label: "Derivative Pipeline", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /derivative|compression/i) },
+          { id: "visuals", label: "Visual Governance", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /asset|style|rights|alt|layout/i) },
+          { id: "release", label: "Release Readiness", status: "missing-evidence", evidenceGateIds: gateIdsFor(profile, /release|finish/i) },
+        ],
+        firstViewport:
+          "Show content stage, unit heatmap, message consistency, unresolved tensions, ready derivative assets, and next production decision.",
+      };
+    }
+  }
+
+  return operations;
+}
+
 function buildDashboardState(params: WorkspaceInitParams) {
   const workspaceId = buildWorkspaceId(params);
   const projectType = params.projectType ?? "other";
   const domainMode = inferDashboardDomainMode(params.projectType);
+  const primaryDomains = params.primaryDomains ?? [];
   const requiredKpis = getRequiredDashboardKpis({
     domainMode,
     projectType: params.projectType,
+    primaryDomains,
   });
   const kpiProfile = getDashboardKpiProfile({
     domainMode,
     projectType: params.projectType,
+    primaryDomains,
   });
+  const domainStress = buildDomainStressState(params);
+  const domainOperations = buildDomainOperations(domainStress);
   const projectWorldModel = buildProjectWorldModel(params, workspaceId);
   const contracts = buildServiceContracts(params);
   const stateHashSeed = {
@@ -629,10 +1176,14 @@ function buildDashboardState(params: WorkspaceInitParams) {
       governanceProfile: params.governanceProfile ?? "strict",
       autonomyMode: params.autonomyMode ?? "balanced",
       tokenBudget: params.tokenBudget ?? "balanced",
+      domainStressProfile: params.domainStressProfile ?? "auto",
+      legacyAdoptionProfile: params.legacyAdoptionProfile ?? "none",
     },
     agentPlatformGovernance,
     audienceLens: buildAudienceLensContract(),
     projectWorldModel,
+    domainStress,
+    domainOperations,
     worldModelFacts: [
       {
         id: "fact-bootstrap-purpose",
@@ -742,7 +1293,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
       nextRequiredDecisionLabel:
         "Confirm whether the project is greenfield creation, running-service adoption, or modernization.",
       highestRiskSignal: "signal-bootstrap-evidence-gap",
-      valueAtRisk: ["value-save-integrity", "value-agent-continuity"],
+      valueAtRisk: ["value-user-outcome", "value-agent-continuity"],
       decisionDeadline: "TBD",
       owner: "stakeholder-product-owner",
     },
@@ -784,31 +1335,32 @@ function buildDashboardState(params: WorkspaceInitParams) {
     ],
     valueHierarchy: {
       purpose:
-        "Make project decisions by balancing player value, data safety, operational simplicity, and AI-agent continuity.",
+        "Make project decisions by balancing user value, project-specific safety, operational simplicity, and AI-agent continuity.",
       values: [
         {
-          id: "value-player-fun",
-          label: "Player fun and continuity",
+          id: "value-user-outcome",
+          label: "User outcome and continuity",
           priority: 1,
-          rationale: "Game changes should preserve playability, responsiveness, and saved progress.",
+          rationale:
+            "Project changes should preserve the primary user or stakeholder outcome the workspace exists to deliver.",
           conflictPolicy:
-            "Do not improve harness governance at the cost of breaking playable game flows.",
+            "Do not improve harness governance at the cost of disrupting the project's real value path.",
         },
         {
-          id: "value-save-integrity",
-          label: "Save integrity",
+          id: "value-project-state-integrity",
+          label: "Project state integrity",
           priority: 2,
           rationale:
-            "Local-first and cloud-sync paths must avoid progress loss, duplication, and silent overwrite.",
+            "Configuration, data, content, and operational state should not be silently lost, duplicated, or overwritten.",
           conflictPolicy:
-            "When cloud sync confidence is low, prefer localStorage fallback and explicit recovery.",
+            "When state ownership is unclear, prefer explicit review, backup, and recovery over implicit mutation.",
         },
         {
-          id: "value-privacy-cost",
-          label: "Privacy and free-tier cost",
+          id: "value-privacy-cost-control",
+          label: "Privacy and cost control",
           priority: 3,
           rationale:
-            "Supabase Auth/Postgres usage must respect privacy, quota, and graceful degradation.",
+            "External services, accounts, datasets, and environments must respect privacy, quota, cost, and graceful degradation.",
           conflictPolicy:
             "Do not persist secrets or unnecessary personal data in harness projections.",
         },
@@ -830,7 +1382,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
       claims: [
         {
           claimId: "claim.world-model.bootstrap",
-          statement: "The Harness Dashboard 4.6 world model exists for this workspace.",
+          statement: "The Harness Dashboard 4.6.1 world model exists for this workspace.",
           subjectRef: `workspace:${workspaceId}`,
           claimStatus: "supported",
           confidence: 0.78,
@@ -907,7 +1459,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
             "Reject this claim if the dashboard platform declaration conflicts with active instruction files.",
             "Reject this claim if unused platform instruction files are not marked unused-instruction.",
           ],
-          nextActionRef: "task-confirm-agent-platforms",
+          nextActionRef: "agentPlatformGovernance.intake",
         },
         {
           claimId: "claim.vcs.linkage",
@@ -925,7 +1477,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
             "Reject this claim if any commit, SVN revision, or dirty path has no session/task/decision/claim linkage.",
             "Reject this claim if collectionProvenance.exitCode is non-zero or stale.",
           ],
-          nextActionRef: "task-link-vcs-records",
+          nextActionRef: "missing.vcs-task-links",
         },
         {
           claimId: "claim.release.traceability",
@@ -943,26 +1495,29 @@ function buildDashboardState(params: WorkspaceInitParams) {
             "Reject release readiness if releaseReadiness.releases is empty.",
             "Reject release readiness if smoke test result or rollback command is missing.",
           ],
-          nextActionRef: "task-map-deployment-target",
+          nextActionRef: "missing.deployment-target",
         },
         {
-          claimId: "claim.data.save-integrity",
-          statement: "Player progress and data integrity risks are visible before service work proceeds.",
-          subjectRef: "value:value-save-integrity",
-          claimStatus: "partial",
-          confidence: 0.44,
-          sign: "Value hierarchy identifies save integrity, but database and backup evidence remain unknown.",
-          object: "save integrity governance",
+          claimId: "claim.data.integrity",
+          statement:
+            "Project data or state integrity risks are visible when the project has a data surface.",
+          subjectRef: "value:value-project-state-integrity",
+          claimStatus: "conditional",
+          confidence: 0.32,
+          sign:
+            "The bootstrap world model tracks data readiness as conditional until project-specific data ownership is declared or observed.",
+          object: "project state integrity governance",
           interpretant:
-            "Game work can proceed safely only when local-save, cloud-sync, migration, backup, and restore implications are visible.",
+            "Data readiness should become work only when this workspace owns a database, dataset, migration path, storage layer, or other persistent state surface.",
           evidenceRefs: ["valueHierarchy", "databaseReadiness", "runningServiceContract.dataOwnership"],
           counterEvidenceRefs: ["databaseReadiness.backupFreshness", "databaseReadiness.restoreDrillEvidence"],
           falsificationTests: [
-            "Reject this claim if databaseReadiness has no migration, retention, backup, or restore evidence.",
-            "Reject this claim if service changes can overwrite progress without explicit recovery guidance.",
+            "Do not queue data-readiness work if the project has no declared or observed data surface.",
+            "Reject data readiness if a declared data surface has no ownership, migration, backup, or recovery evidence.",
           ],
           nextActionRef: "missing.database-readiness",
         },
+        ...domainStress.claims,
       ],
       missingEvidenceItems: [
         {
@@ -971,7 +1526,8 @@ function buildDashboardState(params: WorkspaceInitParams) {
           blocksClaimIds: ["claim.service.operational-readiness"],
           requiredEvidenceType: "health check, smoke test, or local run verification",
           owner: "maintainer",
-          resolutionTaskId: "task-collect-service-health",
+          resolutionTaskId: "evidence.service-health",
+          queueVisibility: "evidence-only",
         },
         {
           id: "missing.deployment-target",
@@ -979,7 +1535,8 @@ function buildDashboardState(params: WorkspaceInitParams) {
           blocksClaimIds: ["claim.service.operational-readiness"],
           requiredEvidenceType: "deployment URL, CI run, artifact, and rollback path",
           owner: "maintainer",
-          resolutionTaskId: "task-map-deployment-target",
+          resolutionTaskId: "evidence.deployment-target",
+          queueVisibility: "evidence-only",
         },
         {
           id: "missing.vcs-task-links",
@@ -987,7 +1544,8 @@ function buildDashboardState(params: WorkspaceInitParams) {
           blocksClaimIds: ["claim.agent.safe-resume"],
           requiredEvidenceType: "commit/revision links to sessions, tasks, and decisions",
           owner: "harness-dashboard-operator",
-          resolutionTaskId: "task-link-vcs-records",
+          resolutionTaskId: "evidence.vcs-linkage",
+          queueVisibility: "evidence-only",
         },
         {
           id: "missing.agent-platform-declaration",
@@ -995,16 +1553,20 @@ function buildDashboardState(params: WorkspaceInitParams) {
           blocksClaimIds: ["claim.agent.platform-governance", "claim.agent.safe-resume"],
           requiredEvidenceType: "user-declared active AI agent platform set and unused-instruction classification",
           owner: "stakeholder-product-owner",
-          resolutionTaskId: "task-confirm-agent-platforms",
+          resolutionTaskId: "agentPlatformGovernance.intake",
+          queueVisibility: "governance-only",
         },
         {
           id: "missing.database-readiness",
-          label: "Data and save-integrity evidence",
-          blocksClaimIds: ["claim.data.save-integrity", "claim.service.operational-readiness"],
-          requiredEvidenceType: "schema, migration, retention, backup, restore, and local fallback evidence",
+          label: "Data readiness evidence when applicable",
+          blocksClaimIds: ["claim.data.integrity"],
+          requiredEvidenceType:
+            "data ownership, schema, migration, retention, backup, restore, or not-applicable decision",
           owner: "maintainer",
-          resolutionTaskId: "task-map-data-readiness",
+          resolutionTaskId: "evidence.data-readiness",
+          queueVisibility: "evidence-only",
         },
+        ...domainStress.missingEvidenceItems,
       ],
     },
     readinessJudgments: [
@@ -1053,6 +1615,15 @@ function buildDashboardState(params: WorkspaceInitParams) {
         requiredNextAction: "Keep blocker and missing evidence items visible in the agent context pack.",
         evidenceRefs: ["agentResumeBrief", "claimEvidenceMatrix"],
       },
+      ...domainStress.profiles.map((profile) => ({
+        id: `ready-for-domain-stress.${profile.id}`,
+        label: `${profile.label} ready`,
+        status: "not-ready",
+        rationale:
+          "The selected domain stress profile has mandatory evidence gates that must be resolved before readiness or reporting claims are trusted.",
+        requiredNextAction: profile.evidenceGates[0]?.label ?? "Review domain stress gates.",
+        evidenceRefs: ["domainStress", "domainOperations", "claimEvidenceMatrix"],
+      })),
     ],
     trustBoundary: {
       schemaVersion: DASHBOARD_SCHEMA_VERSION,
@@ -1086,15 +1657,20 @@ function buildDashboardState(params: WorkspaceInitParams) {
     dashboardQualityScorecard: {
       schemaVersion: DASHBOARD_SCHEMA_VERSION,
       targetScore: 9.5,
-      uiUxDesignScore: 9.6,
+      uiUxDesignScore: 9.2,
       projectEvidenceScore: 1.2,
       scoringPolicy:
-        "UI/UX design can score above 9.5 while real project evidence remains lower; the dashboard must expose that distinction instead of hiding it.",
+        "UI/UX design is capped below 9.5 until current browser QA evidence proves render, console, keyboard, and responsive checks.",
+      qaEvidence: {
+        requiredFor95: ["rendered-browser-smoke", "console-clean", "keyboard-and-modal-flow", "responsive-viewport-check"],
+        status: "pending-run",
+        note: "No generated dashboard may self-certify above the 9.5 target until a current browser QA artifact is linked.",
+      },
       dimensions: [
         {
           id: "executive-judgment",
           label: "Executive judgment clarity",
-          score: 9.6,
+          score: 9.3,
           evidenceRefs: ["judgmentConsole", "worldJudgment", "criticalSignals"],
           rationale:
             "First-screen panels answer trust, blocked actions, required decision, owner, and value at risk.",
@@ -1102,7 +1678,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         {
           id: "gantt-readiness-map",
           label: "Gantt as readiness map",
-          score: 9.5,
+          score: 9.3,
           evidenceRefs: ["workTimeline", "readinessJudgments", "claimEvidenceMatrix"],
           rationale:
             "Timeline rows connect task span, status, evidence, blocker, exit criteria, and next action.",
@@ -1110,7 +1686,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         {
           id: "triadic-evidence",
           label: "Claim-evidence interpretability",
-          score: 9.6,
+          score: 9.3,
           evidenceRefs: ["claimEvidenceMatrix.claims"],
           rationale:
             "Claims expose sign, object, interpretant, counter-evidence, falsification test, and next action.",
@@ -1118,7 +1694,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         {
           id: "agent-resume",
           label: "AI Agent resumability",
-          score: 9.5,
+          score: 9.3,
           evidenceRefs: ["agentResumeBrief", "agentContextPacks", "dashboard-index.json"],
           rationale:
             "Agent-facing briefs identify next safest action, forbidden assumptions, validation commands, and authoritative files.",
@@ -1126,7 +1702,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         {
           id: "accessibility-shareability",
           label: "Accessible single-file shareability",
-          score: 9.7,
+          score: 9.3,
           evidenceRefs: ["docs/ai-harness/dashboard/index.html"],
           rationale:
             "Single-file HTML keeps semantic tabs, keyboard navigation, table alternatives, reduced motion, and no remote assets.",
@@ -1168,15 +1744,16 @@ function buildDashboardState(params: WorkspaceInitParams) {
       capReason:
         "Release and operations remain blocked by unresolved decisions and missing service/release/data evidence, not by a failed harness setup.",
       inputs: {
-        uiUxDesignScore: 9.6,
+        uiUxDesignScore: 9.2,
         projectEvidenceScore: 1.2,
         dirtyOrUnclassifiedVcsPaths: 0,
-        missingEvidenceClaims: 5,
-        unresolvedDecisions: 1,
+        missingEvidenceClaims: 5 + domainStress.missingEvidenceItems.length,
+        unresolvedDecisions: 1 + domainStress.decisionContracts.length,
       },
       nextToReach95: [
         "Resolve decision-first-governed-goal.",
         "Collect and link VCS, release, data, service health, and operations evidence.",
+        ...domainStress.profiles.map((profile) => `Resolve mandatory evidence gates for ${profile.label}.`),
         "Use Work and Evidence tabs to turn missing claims into owned tasks.",
       ],
     },
@@ -1239,12 +1816,20 @@ function buildDashboardState(params: WorkspaceInitParams) {
       schemaVersion: DASHBOARD_SCHEMA_VERSION,
       source: "projected-from-workTimeline-backlog-sessions-evidence",
       generatedAt: BOOTSTRAP_TIME,
-      rows: [],
+      rows: domainStress.workItems.map((item) => ({
+        id: item.id,
+        title: item.title,
+        status: item.status,
+        owner: item.owner,
+        evidenceRefs: item.evidenceRefs,
+        blocksClaimIds: item.blockingClaimIds,
+        domainStressProfile: item.domainStressProfile,
+      })),
       summary: {
-        visibleRows: 0,
+        visibleRows: domainStress.workItems.length,
         activeRows: 0,
-        blockedRows: 0,
-        gateCount: 0,
+        blockedRows: domainStress.workItems.length,
+        gateCount: domainStress.missingEvidenceItems.length,
       },
       apiParity:
         "dashboard-ops refresh populates this with the exact rows used for stakeholder Gantt and AI Agent task APIs.",
@@ -1258,8 +1843,11 @@ function buildDashboardState(params: WorkspaceInitParams) {
         "package manifest",
         "CI workflow",
         "deployment target",
-        "database schema",
+        "data surface declaration",
         "service smoke test",
+        ...domainStress.reportSections.map(
+          (section) => `${section.profileId} / ${section.section} evidence`
+        ),
       ],
     },
     agentContextPacks: {
@@ -1279,6 +1867,8 @@ function buildDashboardState(params: WorkspaceInitParams) {
           "claimEvidenceMatrix",
           "taskQueues",
           "workTimeline",
+          "domainStress",
+          "domainOperations",
         ],
         forbiddenAssumptions: [
           "Do not assume service readiness from bootstrap state.",
@@ -1291,17 +1881,27 @@ function buildDashboardState(params: WorkspaceInitParams) {
       maintainer: {
         label: "Maintainer Operations Pack",
         primaryQuestion: "What must be connected before release or operation?",
-        mustRead: ["serviceRegistry", "releaseReadiness", "incidentReadiness", "sloSli", "databaseReadiness"],
+        mustRead: [
+          "serviceRegistry",
+          "releaseReadiness",
+          "incidentReadiness",
+          "sloSli",
+          "databaseReadiness",
+          "domainStress",
+          "domainOperations",
+        ],
       },
     },
     stakeholderBrief: {
       currentGoal: params.purpose,
       whatChangedSinceLastReview:
-        "Workspace initialized with the Harness Dashboard 4.6 Hypertext Project World Model.",
+        "Workspace initialized with the Harness Dashboard 4.6.1 Hypertext Project World Model.",
       whyItMatters:
         "Stakeholders and AI Agents now share a durable, evidence-backed view of project reality.",
       currentRisk:
-        "Bootstrap projections are not yet connected to real service, release, VCS, or incident evidence.",
+        domainStress.activeProfileIds.length
+          ? `Bootstrap projections are not yet connected to real service, release, VCS, incident, or domain evidence for ${domainStress.activeProfileIds.join(", ")}.`
+          : "Bootstrap projections are not yet connected to real service, release, VCS, or incident evidence.",
       requiredDecision:
         "Confirm the first governed project goal and service lifecycle mode.",
       owner: "stakeholder-product-owner",
@@ -1315,13 +1915,20 @@ function buildDashboardState(params: WorkspaceInitParams) {
       activeSession: null,
       lastSafeCheckpoint: "Harness dashboard bootstrap generated.",
       nextSafestAction:
-        "Run dashboard-ops.mjs verify-projections, confirm active AI agent platforms, then start the first governed harness session.",
-      openDecisions: ["decision-first-governed-goal", "decision-agent-platform-selection"],
-      blockers: ["bootstrap-state-needs-real-evidence", "agent-platform-declaration-needed"],
+        domainStress.activeProfileIds.length
+          ? "Resolve the active domain stress profile decision, convert mandatory evidence gates into session contracts, then verify and refresh projections."
+          : "Run dashboard-ops.mjs verify-projections, refresh projections, then start the first governed harness session for this workspace.",
+      openDecisions: ["decision-first-governed-goal"],
+      governanceOnlyDecisions: ["decision-agent-platform-selection"],
+      blockers: [
+        "bootstrap-state-needs-real-evidence",
+        ...domainStress.activeProfileIds.map((profileId) => `domain-stress.${profileId}.mandatory-evidence`),
+      ],
       validationCommands: [
         "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections",
-        "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs record-agent-platforms --platforms codex,cursor --source user-declaration",
+        "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
         "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status",
+        "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs validate",
       ],
       authoritativeFiles,
       dirtyStateWarning:
@@ -1338,10 +1945,14 @@ function buildDashboardState(params: WorkspaceInitParams) {
         "VCS history",
         "operations telemetry",
         "stakeholder approval",
-        "AI platform declaration",
+        ...domainStress.missingEvidenceItems.map((item) => item.label),
       ],
       unlinkedCommitsOrRevisions: [],
-      unresolvedDecisions: ["decision-first-governed-goal", "decision-agent-platform-selection"],
+      unresolvedDecisions: [
+        "decision-first-governed-goal",
+        "decision-agent-platform-selection",
+        ...domainStress.decisionContracts.map((decision) => decision.id),
+      ],
       staleProjections: ["dashboard-state.json"],
       failedValidations: [],
     },
@@ -1377,6 +1988,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         approvalThreshold:
           "User declaration recorded with dashboard-ops.mjs record-agent-platforms or an equivalent MCP governance event.",
       },
+      ...domainStress.decisionContracts,
     ],
     agile: {
       iteration: {
@@ -1394,52 +2006,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           blocksClaimIds: ["claim.world-model.bootstrap"],
           exitCriteria: "verify-projections and refresh complete without stale/corrupt projection warnings",
         },
-        {
-          id: "task-confirm-agent-platforms",
-          status: "waiting",
-          title: "Confirm active AI agent platforms and mark unused instructions",
-          owner: "stakeholder-product-owner",
-          evidenceRefs: ["agentPlatformGovernance", "missing.agent-platform-declaration"],
-          blocksClaimIds: ["claim.agent.platform-governance", "claim.agent.safe-resume"],
-          exitCriteria:
-            "User-declared active platforms are recorded to the ledger and stale instruction files are classified as unused-instruction.",
-        },
-        {
-          id: "task-collect-service-health",
-          status: "blocked",
-          title: "Collect service health and smoke-test evidence",
-          owner: "maintainer",
-          evidenceRefs: ["missing.service-health"],
-          blocksClaimIds: ["claim.service.operational-readiness"],
-          exitCriteria: "health check, local run, and smoke-test evidence linked to the running service contract",
-        },
-        {
-          id: "task-map-deployment-target",
-          status: "blocked",
-          title: "Map deployment target, CI, release, and rollback path",
-          owner: "maintainer",
-          evidenceRefs: ["missing.deployment-target", "claim.release.traceability"],
-          blocksClaimIds: ["claim.release.traceability"],
-          exitCriteria: "release traceability record includes revision, CI run, target URL, smoke result, and rollback command",
-        },
-        {
-          id: "task-link-vcs-records",
-          status: "blocked",
-          title: "Link Git/SVN changes to sessions, tasks, decisions, and claims",
-          owner: "harness-dashboard-operator",
-          evidenceRefs: ["missing.vcs-task-links", "versionControl.unlinkedChanges"],
-          blocksClaimIds: ["claim.vcs.linkage", "claim.agent.safe-resume"],
-          exitCriteria: "each revision or dirty path is linked or explicitly classified as a governance warning",
-        },
-        {
-          id: "task-map-data-readiness",
-          status: "blocked",
-          title: "Map save-data, migration, backup, and restore readiness",
-          owner: "maintainer",
-          evidenceRefs: ["missing.database-readiness", "databaseReadiness"],
-          blocksClaimIds: ["claim.data.save-integrity", "claim.service.operational-readiness"],
-          exitCriteria: "schema, migration, retention, backup, restore, and local fallback evidence are connected",
-        },
+        ...domainStress.workItems,
       ],
       review: { status: "not-started", dueAt: "TBD" },
       retro: { status: "not-started", lastInsight: "no-new-learning" },
@@ -1464,52 +2031,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           blocksClaimIds: ["claim.world-model.bootstrap"],
           exitCriteria: "verify-projections and refresh complete without stale/corrupt projection warnings",
         },
-        {
-          id: "task-confirm-agent-platforms",
-          status: "waiting",
-          title: "Confirm active AI agent platforms and mark unused instructions",
-          owner: "stakeholder-product-owner",
-          evidenceRefs: ["agentPlatformGovernance", "missing.agent-platform-declaration"],
-          blocksClaimIds: ["claim.agent.platform-governance", "claim.agent.safe-resume"],
-          exitCriteria:
-            "User-declared active platforms are recorded to the ledger and stale instruction files are classified as unused-instruction.",
-        },
-        {
-          id: "task-collect-service-health",
-          status: "blocked",
-          title: "Collect service health and smoke-test evidence",
-          owner: "maintainer",
-          evidenceRefs: ["missing.service-health"],
-          blocksClaimIds: ["claim.service.operational-readiness"],
-          exitCriteria: "health check, local run, and smoke-test evidence linked to the running service contract",
-        },
-        {
-          id: "task-map-deployment-target",
-          status: "blocked",
-          title: "Map deployment target, CI, release, and rollback path",
-          owner: "maintainer",
-          evidenceRefs: ["missing.deployment-target", "claim.release.traceability"],
-          blocksClaimIds: ["claim.release.traceability"],
-          exitCriteria: "release traceability record includes revision, CI run, target URL, smoke result, and rollback command",
-        },
-        {
-          id: "task-link-vcs-records",
-          status: "blocked",
-          title: "Link Git/SVN changes to sessions, tasks, decisions, and claims",
-          owner: "harness-dashboard-operator",
-          evidenceRefs: ["missing.vcs-task-links", "versionControl.unlinkedChanges"],
-          blocksClaimIds: ["claim.vcs.linkage", "claim.agent.safe-resume"],
-          exitCriteria: "each revision or dirty path is linked or explicitly classified as a governance warning",
-        },
-        {
-          id: "task-map-data-readiness",
-          status: "blocked",
-          title: "Map save-data, migration, backup, and restore readiness",
-          owner: "maintainer",
-          evidenceRefs: ["missing.database-readiness", "databaseReadiness"],
-          blocksClaimIds: ["claim.data.save-integrity", "claim.service.operational-readiness"],
-          exitCriteria: "schema, migration, retention, backup, restore, and local fallback evidence are connected",
-        },
+        ...domainStress.workItems,
       ],
       review: { status: "not-started", dueAt: "TBD" },
       retro: { status: "not-started", lastInsight: "no-new-learning" },
@@ -1519,16 +2041,14 @@ function buildDashboardState(params: WorkspaceInitParams) {
       gates: contracts.serviceCreationContract.readinessGates,
     },
     taskQueues: {
-      waiting: ["task-bootstrap-refresh-projections", "task-confirm-agent-platforms"],
+      waiting: ["task-bootstrap-refresh-projections"],
       inProgress: [],
       completed: [],
-      blocked: [
-        "task-collect-service-health",
-        "task-map-deployment-target",
-        "task-link-vcs-records",
-        "task-map-data-readiness",
+      blocked: domainStress.workItems.map((item) => item.id),
+      needsUser: [
+        "decision-first-governed-goal",
+        ...domainStress.decisionContracts.map((decision) => decision.id),
       ],
-      needsUser: ["decision-first-governed-goal", "decision-agent-platform-selection"],
       realWorld: [],
       failed: [],
     },
@@ -1569,97 +2089,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           exitCriteria:
             "Projection verification and refresh complete without stale/corrupt projection warnings.",
         },
-        {
-          id: "task-confirm-agent-platforms",
-          title: "Confirm active AI agent platforms and unused instructions",
-          status: "waiting",
-          lane: "Harness Governance",
-          owner: "stakeholder-product-owner",
-          startAt: BOOTSTRAP_TIME,
-          plannedStartAt: BOOTSTRAP_TIME,
-          plannedEndAt: "before-first-cross-agent-work",
-          endAt: null,
-          progressPercent: 20,
-          kpiTags: ["agent-continuity", "instruction-governance"],
-          evidenceRefs: ["agentPlatformGovernance", "decision-agent-platform-selection"],
-          nextActionRef:
-            "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs record-agent-platforms --platforms codex,cursor --source user-declaration",
-          blockingClaimIds: ["claim.agent.platform-governance", "claim.agent.safe-resume"],
-          exitCriteria:
-            "Active AI platforms are declared and unused instruction files are indexed as unused-instruction.",
-        },
-        {
-          id: "task-collect-service-health",
-          title: "Collect service health and smoke-test evidence",
-          status: "blocked",
-          lane: "Readiness Evidence",
-          owner: "maintainer",
-          startOffsetDays: -5,
-          plannedStartOffsetDays: -5,
-          plannedEndOffsetDays: 5,
-          endAt: null,
-          progressPercent: 5,
-          kpiTags: ["blocked-duration", "operational-readiness"],
-          evidenceRefs: ["missing.service-health", "claim.service.operational-readiness"],
-          nextActionRef: "missing.service-health",
-          blockingClaimIds: ["claim.service.operational-readiness"],
-          exitCriteria:
-            "Health check, local run, and smoke-test evidence are linked to the running service contract.",
-        },
-        {
-          id: "task-map-deployment-target",
-          title: "Map deployment target, CI, release, and rollback path",
-          status: "blocked",
-          lane: "Release Gate",
-          owner: "maintainer",
-          startOffsetDays: -3,
-          plannedStartOffsetDays: -3,
-          plannedEndOffsetDays: 8,
-          endAt: null,
-          progressPercent: 0,
-          kpiTags: ["release-readiness", "rollback-readiness"],
-          evidenceRefs: ["missing.deployment-target", "claim.release.traceability"],
-          nextActionRef: "task-map-deployment-target",
-          blockingClaimIds: ["claim.release.traceability"],
-          exitCriteria:
-            "Release traceability record includes revision, CI run, target URL, smoke result, and rollback command.",
-        },
-        {
-          id: "task-link-vcs-records",
-          title: "Link Git/SVN changes to governed work",
-          status: "blocked",
-          lane: "Evidence Recovery",
-          owner: "harness-dashboard-operator",
-          startOffsetDays: -2,
-          plannedStartOffsetDays: -2,
-          plannedEndOffsetDays: 4,
-          endAt: null,
-          progressPercent: 10,
-          kpiTags: ["handover-latency", "vcs-linkage"],
-          evidenceRefs: ["missing.vcs-task-links", "versionControl.unlinkedChanges"],
-          nextActionRef: "task-link-vcs-records",
-          blockingClaimIds: ["claim.vcs.linkage", "claim.agent.safe-resume"],
-          exitCriteria:
-            "Each revision or dirty path is linked or explicitly classified as a governance warning.",
-        },
-        {
-          id: "task-map-data-readiness",
-          title: "Map save-data, migration, backup, and restore readiness",
-          status: "waiting",
-          lane: "Data Integrity",
-          owner: "maintainer",
-          startOffsetDays: 1,
-          plannedStartOffsetDays: 1,
-          plannedEndOffsetDays: 12,
-          endAt: null,
-          progressPercent: 0,
-          kpiTags: ["data-readiness", "restore-readiness"],
-          evidenceRefs: ["missing.database-readiness", "databaseReadiness"],
-          nextActionRef: "task-map-data-readiness",
-          blockingClaimIds: ["claim.data.save-integrity"],
-          exitCriteria:
-            "Schema, migration, retention, backup, restore, and local fallback evidence are connected.",
-        },
+        ...domainStress.workItems,
       ],
       openSourceAdapters: [
         {
@@ -1684,7 +2114,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         },
       ],
       singleFileConstraint:
-        "the 4.6 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
+        "the 4.6.1 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
     },
     listener: {
       workspaceId,
@@ -1710,7 +2140,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6", "world model"],
+          aliases: ["Harness Dashboard 4.6.1", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -1767,7 +2197,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         "supports",
       ],
       interoperabilityRule:
-        "Project-specific worldview extensions must preserve these root ontology anchors so AI Agents can resume across projects.",
+        "Project-specific ontology extensions must preserve these root anchors so AI Agents can resume across projects.",
     },
     workDictionary: {
       entries: [
@@ -1775,7 +2205,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6", "world model"],
+          aliases: ["Harness Dashboard 4.6.1", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -1866,7 +2296,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         type: "dashboard-bootstrap",
         status: "complete",
         occurredAt: BOOTSTRAP_TIME,
-        summary: "Harness Dashboard 4.6 world model bootstrap generated.",
+        summary: "Harness Dashboard 4.6.1 world model bootstrap generated.",
         evidenceRefs: ["event-000001-bootstrap"],
       },
     ],
@@ -1943,7 +2373,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         completeness: "partial",
       },
     },
-    // Runtime-facing facade fields projected from the 4.6 world model.
+    // Runtime-facing facade fields projected from the 4.6.1 world model.
     executiveSummary: {
       headline: `${params.workspaceName} Project World Model`,
       overallStatus: "bootstrap",
@@ -1976,7 +2406,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     },
     governanceState: {
       policyId: "project-world-model-4-6",
-      policyLabel: "Harness Dashboard 4.6 Hypertext Project World Model",
+      policyLabel: "Harness Dashboard 4.6.1 Hypertext Project World Model",
       status: "active",
       sessionGovernanceRule:
         "Every meaningful AI session must append canonical events, refresh projections, and leave an agent resume brief.",
@@ -1989,6 +2419,8 @@ function buildDashboardState(params: WorkspaceInitParams) {
         "docs/ai-harness/dashboard/schemas/events/harness-event.schema.json",
         "docs/ai-harness/dashboard/schemas/entities/project-world-model.schema.json",
         "docs/ai-harness/dashboard/schemas/projections/dashboard-state.schema.json",
+        "docs/ai-harness/domain-stress-playbooks.md",
+        "docs/ai-harness/domain-stress-profiles.json",
       ],
       requiredKpiIds: kpiProfile.requiredKpiIds,
       mandatorySessionFields: [
@@ -2111,11 +2543,14 @@ function buildDashboardState(params: WorkspaceInitParams) {
       title: "Project World Model",
       primaryQuestion:
         "Can a stakeholder and the next AI Agent understand the same project reality without chat history?",
+      activeStressProfiles: domainStress.activeProfileIds,
+      operationsProjection: "domainOperations",
+      reportSections: domainStress.reportSections,
     },
     timeline: [
       {
         id: "timeline-bootstrap",
-        label: "dashboard 4.6 Bootstrap",
+        label: "dashboard 4.6.1 Bootstrap",
         type: "governance",
         status: "complete",
         owner: "workspace-init-mcp",
@@ -2130,11 +2565,18 @@ function buildDashboardState(params: WorkspaceInitParams) {
         status: "bootstrap",
         summary: params.purpose,
       },
+      ...domainStress.profiles.map((profile) => ({
+        id: `domain-stress:${profile.id}`,
+        label: profile.label,
+        type: "domain-stress-profile",
+        status: "evidence-required",
+        summary: profile.operatingQuestion,
+      })),
     ],
     versionLedger: [
       {
         id: "harness-dashboard-4-6",
-        label: "Harness Dashboard 4.6",
+        label: "Harness Dashboard 4.6.1",
         status: "bootstrap",
         scope: "Project World Model",
         progressPercent: 8,
@@ -2174,7 +2616,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           actor: "initializer",
           action: "bootstrap",
           outcome: "project-world-model-created",
-          note: "dashboard 4.6 projections and canonical ledger initialized.",
+          note: "dashboard 4.6.1 projections and canonical ledger initialized.",
         },
       ],
     },
@@ -2316,6 +2758,7 @@ function buildDashboardIndex(state: Record<string, unknown>) {
       "/api/harness-dashboard/v1/dictionary",
       "/api/harness-dashboard/v1/version-control",
       "/api/harness-dashboard/v1/runtime",
+      "/api/harness-dashboard/v1/briefing",
       "/api/harness-dashboard/v1/health",
       "/api/harness-dashboard/v1/events",
       "/api/harness-dashboard/v1/query",
@@ -2440,6 +2883,171 @@ function buildSchema(title: string, required: string[]): string {
   )}\n`;
 }
 
+function buildDashboardStateSchema(): string {
+  const properties: Record<string, unknown> = Object.fromEntries(
+    DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS.map((key) => [key, {}])
+  );
+  properties.taskQueues = {
+    type: "object",
+    required: ["waiting", "inProgress", "completed", "blocked", "needsUser"],
+    additionalProperties: true,
+    properties: {
+      waiting: { type: "array", items: { type: "string" } },
+      inProgress: { type: "array", items: { type: "string" } },
+      completed: { type: "array", items: { type: "string" } },
+      blocked: { type: "array", items: { type: "string" } },
+      needsUser: { type: "array", items: { type: "string" } },
+      realWorld: { type: "array", items: { type: "string" } },
+      failed: { type: "array", items: { type: "string" } },
+    },
+  };
+  properties.claimEvidenceMatrix = {
+    type: "object",
+    required: ["claims", "missingEvidenceItems"],
+    additionalProperties: true,
+    properties: {
+      claims: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["claimId", "statement", "claimStatus", "confidence", "evidenceRefs"],
+          additionalProperties: true,
+          properties: {
+            claimId: { type: "string" },
+            statement: { type: "string" },
+            claimStatus: { type: "string" },
+            confidence: { type: "number" },
+            evidenceRefs: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+      missingEvidenceItems: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["id", "label", "blocksClaimIds", "requiredEvidenceType", "owner", "resolutionTaskId"],
+          additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            label: { type: "string" },
+            blocksClaimIds: { type: "array", items: { type: "string" } },
+            requiredEvidenceType: { type: "string" },
+            owner: { type: "string" },
+            resolutionTaskId: { type: "string" },
+            queueVisibility: { type: "string" },
+          },
+        },
+      },
+    },
+  };
+  properties.domainStress = {
+    type: "object",
+    required: [
+      "schemaVersion",
+      "activeProfileIds",
+      "profiles",
+      "claims",
+      "missingEvidenceItems",
+      "workItems",
+      "decisionContracts",
+      "hardGates",
+      "reportSections",
+    ],
+    additionalProperties: true,
+    properties: {
+      schemaVersion: { type: "string" },
+      activeProfileIds: { type: "array", items: { type: "string" } },
+      profiles: { type: "array" },
+      claims: { type: "array" },
+      missingEvidenceItems: { type: "array" },
+      workItems: { type: "array" },
+      decisionContracts: { type: "array" },
+      hardGates: { type: "array" },
+      reportSections: { type: "array" },
+    },
+  };
+  properties.domainOperations = {
+    type: "object",
+    required: ["schemaVersion", "activeProfileIds", "status", "programs"],
+    additionalProperties: true,
+    properties: {
+      schemaVersion: { type: "string" },
+      activeProfileIds: { type: "array", items: { type: "string" } },
+      status: { type: "string" },
+      programs: { type: "array" },
+    },
+  };
+  properties.decisionContracts = {
+    type: "array",
+    items: {
+      type: "object",
+      required: ["id", "status", "owner", "decision", "evidence"],
+      additionalProperties: true,
+      properties: {
+        id: { type: "string" },
+        status: { type: "string" },
+        owner: { type: "string" },
+        decision: { type: "string" },
+        evidence: { type: "array", items: { type: "string" } },
+      },
+    },
+  };
+  properties.workTimeline = {
+    type: "object",
+    required: ["items"],
+    additionalProperties: true,
+    properties: {
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["id", "title", "status", "owner", "evidenceRefs"],
+          additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            title: { type: "string" },
+            status: { type: "string" },
+            owner: { type: "string" },
+            evidenceRefs: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+    },
+  };
+  properties.dashboardQualityScorecard = {
+    type: "object",
+    required: ["targetScore", "uiUxDesignScore", "projectEvidenceScore", "qaEvidence"],
+    additionalProperties: true,
+    properties: {
+      targetScore: { type: "number" },
+      uiUxDesignScore: { type: "number" },
+      projectEvidenceScore: { type: "number" },
+      qaEvidence: {
+        type: "object",
+        required: ["requiredFor95", "status", "note"],
+        additionalProperties: true,
+        properties: {
+          requiredFor95: { type: "array", items: { type: "string" } },
+          status: { type: "string" },
+          note: { type: "string" },
+        },
+      },
+    },
+  };
+  return `${JSON.stringify(
+    {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      title: "Harness Dashboard State Projection",
+      type: "object",
+      required: [...DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS],
+      additionalProperties: true,
+      properties,
+    },
+    null,
+    2
+  )}\n`;
+}
+
 function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: string): string {
   const workspaceName = escapeHtml(params.workspaceName);
   const htmlLang = (params.docLanguage ?? "").toLowerCase().includes("korean")
@@ -2452,7 +3060,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
-    <title>${workspaceName} Harness Dashboard 4.6</title>
+    <title>${workspaceName} Harness Dashboard 4.6.1</title>
     <style>
       :root {
         --bg: #f6f8fb;
@@ -2494,6 +3102,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       .audience-note { display: block; margin-top: 6px; font-size: 0.78rem; color: var(--muted); max-width: 280px; }
       .lens-statement { border: 1px solid rgba(23, 105, 170, 0.22); border-radius: 8px; background: #f5f9ff; padding: 10px 12px; font-size: 0.86rem; color: var(--text); }
       .lens-statement strong { display: block; margin-bottom: 4px; }
+      .report-scope-control { display: grid; gap: 6px; font-weight: 700; }
       .button-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
       .mode-banner { padding: 12px 14px; margin-bottom: 14px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
       .status-rail { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; overflow: hidden; margin-bottom: 14px; }
@@ -2677,6 +3286,9 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       .deck-progress-row span { display: flex; justify-content: space-between; gap: 12px; color: #dbeafe; font-weight: 800; }
       .deck-progress-track { height: 11px; border-radius: 999px; background: rgba(255,255,255,0.12); overflow: hidden; }
       .deck-progress-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #78c2ff, #79e6a5); }
+      .deck-workflow { display: grid; gap: 12px; }
+      .deck-workflow-card { border: 1px solid rgba(255,255,255,0.16); border-radius: 8px; background: rgba(255,255,255,0.07); padding: 14px; color: #dbeafe; }
+      .deck-workflow-card strong { display: block; color: #fff; font-size: 1rem; }
       .world-prism { position: relative; height: min(52vh, 430px); transform-style: preserve-3d; transform: rotateX(58deg) rotateZ(-32deg); display: grid; place-items: center; }
       .prism-layer { position: absolute; width: min(56vw, 430px); height: min(30vw, 220px); border: 1px solid rgba(120,194,255,0.5); border-radius: 8px; background: linear-gradient(135deg, rgba(120,194,255,0.16), rgba(121,230,165,0.08)); box-shadow: 0 16px 40px rgba(29, 140, 216, 0.18); transform: translateZ(var(--z)); }
       .prism-layer::before, .prism-layer::after { content: ""; position: absolute; inset: 18%; border: 1px dashed rgba(255,255,255,0.22); border-radius: 8px; }
@@ -2689,13 +3301,56 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       .deck-dots { display: flex; gap: 7px; align-items: center; justify-content: center; }
       .deck-dot { width: 9px; height: 9px; border-radius: 999px; background: rgba(255,255,255,0.26); border: 0; padding: 0; }
       .deck-dot[aria-current="true"] { background: #78c2ff; width: 28px; border-radius: 999px; }
+      .ops-command { display: grid; gap: 16px; }
+      .ops-command-hero { display: grid; grid-template-columns: minmax(220px, 0.32fr) minmax(0, 0.68fr); gap: 16px; align-items: stretch; }
+      .ops-ring-card, .ops-now-card, .ops-meta-card, .ops-flow-card, .report-lab { border: 1px solid var(--line); border-radius: 8px; background: #fbfcfd; padding: 16px; min-width: 0; }
+      .ops-ring { width: min(210px, 100%); aspect-ratio: 1; margin: 0 auto 12px; border-radius: 999px; background: conic-gradient(#1f7a4d var(--pct), #dbe5ee 0); display: grid; place-items: center; box-shadow: inset 0 0 0 18px #fff; }
+      .ops-ring strong { font-size: 2.2rem; line-height: 1; }
+      .ops-now-card { display: grid; gap: 10px; border-left: 5px solid var(--accent); }
+      .ops-now-title { font-size: clamp(1.35rem, 2vw, 2rem); line-height: 1.15; margin: 0; overflow-wrap: anywhere; }
+      .ops-action-strip, .ops-meta-grid, .ops-flow-grid, .report-action-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+      .ops-action { border: 1px solid rgba(23,105,170,0.18); border-radius: 8px; background: #f5f9ff; padding: 12px; }
+      .ops-action strong, .ops-meta-card strong, .ops-flow-card strong { display: block; }
+      .ops-meta-card.ok { border-left: 5px solid var(--ok); }
+      .ops-meta-card.warn { border-left: 5px solid var(--warn); }
+      .ops-meta-card.risk { border-left: 5px solid var(--risk); }
+      .ops-flow-card { position: relative; overflow: hidden; }
+      .ops-flow-card::after { content: ""; position: absolute; inset: auto 0 0; height: 4px; background: var(--flow-color, var(--accent)); opacity: 0.82; }
+      .ops-flow-card.waiting { --flow-color: var(--info); }
+      .ops-flow-card.in-progress { --flow-color: var(--ok); }
+      .ops-flow-card.blocked { --flow-color: var(--risk); }
+      .ops-flow-card.completed { --flow-color: var(--muted); }
+      .work-focus-list { display: grid; gap: 8px; }
+      .work-focus-button { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; text-align: left; cursor: pointer; display: grid; gap: 4px; }
+      .work-focus-button[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(23,105,170,0.14); }
+      .work-focus-button strong { overflow-wrap: anywhere; }
+      .event-ticker { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      .event-pill { border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; background: #fff; font-size: 0.82rem; }
+      .report-lab { display: grid; gap: 12px; }
+      .report-action-row button { width: 100%; }
+      .ops-lens-strip { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      .ops-lens-button { border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--text); padding: 7px 11px; font-weight: 900; cursor: pointer; }
+      .ops-lens-button[aria-pressed="true"] { border-color: var(--accent); background: #eaf4ff; box-shadow: 0 0 0 3px rgba(23,105,170,0.14); }
+      .ops-lens-panel { border: 1px solid rgba(23,105,170,0.2); border-radius: 8px; background: #f7fbff; padding: 14px; display: grid; gap: 10px; }
+      .insight-stack { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+      .insight-item { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px; min-width: 0; display: grid; gap: 5px; }
+      .insight-item.risk { border-left: 5px solid var(--risk); }
+      .insight-item.warn { border-left: 5px solid var(--warn); }
+      .insight-item.ok { border-left: 5px solid var(--ok); }
+      .report-brief-preview { border: 1px solid var(--line); border-radius: 8px; background: #0f1720; color: #e8f4ff; padding: 12px; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .projection-warning { border: 1px solid rgba(197, 76, 76, 0.35); border-left: 5px solid var(--risk); border-radius: 8px; background: #fff4f4; color: #742626; padding: 12px; margin: 12px 0; font-weight: 800; }
       .hidden { display: none !important; }
       .mono { font-family: Consolas, "Courier New", monospace; }
       @media (max-width: 900px) {
-        .hero, .control-grid, .overview-guide, .guide-strip, .judgment-console, .judgment-actions, .score-duo, .actionability, .decision-strip, .trust-boundary, .status-rail, .metric-grid, .card-grid, .signal-grid, .open-work-grid, .work-hero, .stack-grid, .architecture-map, .platform-intake, .platform-grid, .deck-slide, .deck-metrics, .gantt-axis, .gantt-row { grid-template-columns: 1fr; }
+        .hero, .control-grid, .overview-guide, .guide-strip, .judgment-console, .judgment-actions, .score-duo, .actionability, .decision-strip, .trust-boundary, .status-rail, .metric-grid, .card-grid, .signal-grid, .open-work-grid, .work-hero, .stack-grid, .architecture-map, .platform-intake, .platform-grid, .deck-slide, .deck-metrics, .gantt-axis, .gantt-row, .ops-command-hero { grid-template-columns: 1fr; }
         .panel, .panel-wide { grid-column: span 12; }
         .control-card { min-width: 0; }
         .slide-deck { padding: 12px; }
+        .deck-viewport { overflow-y: auto; }
+        .deck-track { min-height: 100%; align-items: stretch; }
+        .deck-slide { height: auto; min-height: 100%; align-items: start; padding: 18px 4px 24px; }
+        .deck-slide h2 { font-size: clamp(2rem, 9vw, 3rem); }
+        .world-prism { height: 260px; }
       }
       @media (prefers-reduced-motion: reduce) {
         *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
@@ -2716,7 +3371,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <div class="shell">
       <header class="hero">
         <div>
-          <p class="eyebrow">Harness Dashboard 4.6</p>
+          <p class="eyebrow">Harness Dashboard 4.6.1</p>
           <h1 id="dashboard-title" data-workspace="${workspaceName}">${workspaceName} Project World Model</h1>
           <p class="lede" id="dashboard-lede">A canonical, ledger-backed view of project reality for stakeholders, AI Agents, and maintainers.</p>
         </div>
@@ -2740,7 +3395,16 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           </div>
           <span class="audience-note" id="control-note">View controls only change the dashboard lens. They do not write to harness state.</span>
           <div class="lens-statement" id="lens-statement"></div>
-          <div class="button-row stakeholder-only">
+          <label class="report-scope-control">
+            <span id="report-focus-label">Report focus</span>
+            <select id="report-focus" aria-label="Report focus">
+              <option value="today" id="report-focus-option-today">Today</option>
+              <option value="active" id="report-focus-option-active">Active work</option>
+              <option value="blocked" id="report-focus-option-blocked">Blocked work</option>
+              <option value="all" id="report-focus-option-all">All work</option>
+            </select>
+          </label>
+          <div class="button-row">
             <button class="secondary" type="button" id="slideshow-button" data-slideshow-open>Slide Show View</button>
           </div>
         </div>
@@ -2780,6 +3444,13 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         locale: document.documentElement.lang === "ko" ? "ko" : "en",
         timelineRange: "this-month",
         workView: "kanban",
+        reportFocus: "today",
+        reportScopeFallback: false,
+        opsLens: "action",
+        selectedWorkId: null,
+        uiEvents: [],
+        reportCopyStatus: "",
+        projectionError: "",
         slideIndex: 0,
         slideDeckOpen: false,
         deckReturnFocus: null,
@@ -2797,6 +3468,47 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "controlNote": "View controls only change the dashboard lens. They do not write to harness state.",
           "slideShowView": "Slide Show View",
           "slideDeck": "Stakeholder Slide Show",
+          "slideDeck.stakeholder": "Stakeholder Slide Show",
+          "slideDeck.agent": "AI Agent Resume Slides",
+          "slideDeck.maintainer": "Maintainer Report Deck",
+          "reportFocus": "Report focus",
+          "reportFocus.today": "Today",
+          "reportFocus.active": "Active work",
+          "reportFocus.blocked": "Blocked work",
+          "reportFocus.all": "All work",
+          "reportLab": "Report Deck Lab",
+          "reportLabCopy": "The HTML report deck rebuilds from the selected work scope. Use Today when someone asks to apply today's work report to the dashboard.",
+          "openPptDashboard": "Open report deck",
+          "applyTodayReport": "Apply today's work report",
+          "currentWorkInfographic": "Current Work Infographic",
+          "nowDoing": "Now doing",
+          "nextOperatorMove": "Next operator move",
+          "metaThinking": "Meta Thinking Signals",
+          "whatDoing": "What are we doing?",
+          "whyDoing": "Why does it matter?",
+          "whatNext": "What should happen next?",
+          "whatBlocks": "What can block this?",
+          "workFlow": "Work flow",
+          "focusWork": "Focus work",
+          "recentUiEvents": "Recent UI events",
+          "jumpToWork": "Jump to Work",
+          "jumpToEvidence": "Jump to Evidence",
+          "jumpToGovernance": "Jump to Governance",
+          "reportScope": "Report scope",
+          "opsLens": "Operator lens",
+          "opsLens.action": "Action",
+          "opsLens.evidence": "Evidence",
+          "opsLens.risk": "Risk",
+          "opsLens.report": "Report",
+          "operatorInsightPanel": "Operator Insight Panel",
+          "claimActionGraph": "Claim-action graph",
+          "reportBrief": "Report brief",
+          "copyReportBrief": "Copy report brief",
+          "printReport": "Print / PDF",
+          "copiedReportBrief": "Report brief copied",
+          "projectionWarning": "Projection warning",
+          "reportScopeFallback": "Scope fallback applied",
+          "reportScopeStrictEmpty": "No rows matched the selected scope.",
           "startPresentation": "Start fullscreen",
           "closePresentation": "Close",
           "previousSlide": "Previous",
@@ -2808,7 +3520,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "stakeholderReport": "Stakeholder Report",
           "agentResumeBoard": "AI Agent Resume Board",
           "maintainerHealthBoard": "Maintainer Health Board",
-          "reportCta": "Open slide show for a clean PM-ready report.",
+          "reportCta": "Open slide show for a clean review-oriented report.",
           "thisWeekProgress": "This Week Progress",
           "deckExecutiveTitle": "Project state in one view",
           "deckWorkTitle": "Open work and remaining effort",
@@ -2870,7 +3582,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "no": "no",
           "worldJudgmentHeader": "World Judgment Header",
           "criticalSignals": "Critical Signals",
-          "executiveWorldview": "Executive Worldview",
+          "executiveOverview": "Executive Overview",
           "dashboardQualityScorecard": "Dashboard Quality Scorecard",
           "decisionRiskPulse": "Decision And Risk Pulse",
           "trustContinuity": "Trust And Continuity Snapshot",
@@ -2901,6 +3613,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "visibleWork": "Visible work",
           "activeNow": "Active now",
           "blockedGates": "Blocked gates",
+          "evidenceBlockers": "Evidence blockers",
           "oldestWip": "Oldest WIP",
           "timelineRange": "Timeline range",
           "thisMonth": "This month",
@@ -2960,6 +3673,47 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "controlNote": "보기 방식과 언어만 바뀝니다. 하네스 상태에는 아무것도 기록하지 않습니다.",
           "slideShowView": "슬라이드 쇼 보기",
           "slideDeck": "이해관계자 슬라이드 쇼",
+          "slideDeck.stakeholder": "이해관계자 슬라이드 쇼",
+          "slideDeck.agent": "AI Agent 재개 슬라이드",
+          "slideDeck.maintainer": "운영자 보고 덱",
+          "reportFocus": "보고 범위",
+          "reportFocus.today": "오늘",
+          "reportFocus.active": "진행 작업",
+          "reportFocus.blocked": "차단 작업",
+          "reportFocus.all": "전체 작업",
+          "reportLab": "보고 덱 랩",
+          "reportLabCopy": "선택한 작업 범위로 HTML 보고 덱을 다시 구성합니다. '오늘 작업내역을 대시보드에 적용해줘' 같은 요청에는 오늘 범위를 사용합니다.",
+          "openPptDashboard": "보고 덱 열기",
+          "applyTodayReport": "오늘 작업 보고 적용",
+          "currentWorkInfographic": "현재 진행 작업 인포그래픽",
+          "nowDoing": "지금 하는 일",
+          "nextOperatorMove": "다음 운영 행동",
+          "metaThinking": "메타 사고 신호",
+          "whatDoing": "무엇을 하고 있나?",
+          "whyDoing": "왜 중요한가?",
+          "whatNext": "다음에 무엇을 해야 하나?",
+          "whatBlocks": "무엇이 막을 수 있나?",
+          "workFlow": "작업 흐름",
+          "focusWork": "작업 포커스",
+          "recentUiEvents": "최근 UI 이벤트",
+          "jumpToWork": "작업으로 이동",
+          "jumpToEvidence": "근거로 이동",
+          "jumpToGovernance": "거버넌스로 이동",
+          "reportScope": "보고 범위",
+          "opsLens": "운영 렌즈",
+          "opsLens.action": "행동",
+          "opsLens.evidence": "근거",
+          "opsLens.risk": "위험",
+          "opsLens.report": "보고",
+          "operatorInsightPanel": "운영 인사이트 패널",
+          "claimActionGraph": "주장-행동 그래프",
+          "reportBrief": "보고 브리프",
+          "copyReportBrief": "보고 브리프 복사",
+          "printReport": "인쇄 / PDF",
+          "copiedReportBrief": "보고 브리프를 복사했습니다",
+          "projectionWarning": "프로젝션 경고",
+          "reportScopeFallback": "보고 범위 대체 적용됨",
+          "reportScopeStrictEmpty": "선택한 범위에 해당하는 행이 없습니다.",
           "startPresentation": "전체화면 시작",
           "closePresentation": "닫기",
           "previousSlide": "이전",
@@ -3033,7 +3787,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "no": "대기",
           "worldJudgmentHeader": "월드 판단 헤더",
           "criticalSignals": "핵심 신호",
-          "executiveWorldview": "이해관계자 요약",
+          "executiveOverview": "이해관계자 요약",
           "dashboardQualityScorecard": "대시보드 품질 점수표",
           "decisionRiskPulse": "결정과 위험 흐름",
           "trustContinuity": "신뢰와 연속성 스냅샷",
@@ -3064,6 +3818,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "visibleWork": "표시 작업",
           "activeNow": "현재 진행",
           "blockedGates": "차단 게이트",
+          "evidenceBlockers": "근거 차단 요인",
           "oldestWip": "최장 WIP",
           "timelineRange": "기간",
           "thisMonth": "이번 달",
@@ -3137,7 +3892,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       }
       function tabLabel(defaultLabel, key) {
         const labels = getAudienceConfig().tabLabels || {};
-        return labels[key] || defaultLabel;
+        return app.locale === "en" ? (labels[key] || defaultLabel) : defaultLabel;
       }
       function rowLimit(defaultLimit) {
         const mode = getAudienceMode();
@@ -3155,6 +3910,14 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const translated = t(key);
         return translated === key ? raw : translated;
       }
+      function reportFocusLabel(value) {
+        return t("reportFocus." + (value || app.reportFocus || "today"));
+      }
+      function slideDeckTitle() {
+        const key = "slideDeck." + getAudienceMode();
+        const translated = t(key);
+        return translated === key ? t("slideDeck") : translated;
+      }
       function esc(value) {
         return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
       }
@@ -3166,6 +3929,16 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         return '<span class="badge ' + klass + '">' + esc(value || "unknown") + "</span>";
       }
       async function loadState() {
+        if (window.__HARNESS_STATIC_EXPORT__ && !localApiToken) {
+          app.state = bootstrapState;
+          app.mode = "Static Export";
+          app.source = "embedded export";
+          app.stale = false;
+          app.projectionError = "";
+          render();
+          connectEvents();
+          return;
+        }
         try {
           const snapshotUrl = localApiToken ? "./api/harness-dashboard/v1/snapshot?token=" + encodeURIComponent(localApiToken) : "./state/dashboard-state.json";
           const response = await fetch(snapshotUrl, { cache: "no-store" });
@@ -3175,24 +3948,27 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           app.mode = localApiToken ? "Local Live" : "Static Snapshot";
           app.source = localApiToken ? "api snapshot" : "state/dashboard-state.json";
           app.stale = false;
+          app.projectionError = "";
         } catch (error) {
           app.state = bootstrapState;
           app.mode = "Degraded Offline";
           app.source = "embedded snapshot";
           app.stale = true;
+          app.projectionError = error && error.message ? error.message : String(error || "state load failed");
         }
         render();
         connectEvents();
       }
       function renderMode() {
         const meta = app.state.meta || {};
-        const mode = app.mode === "Local Live" ? "Local Live" : app.stale ? "Degraded Offline" : "Static Snapshot";
+        const mode = app.mode === "Local Live" ? "Local Live" : app.mode === "Static Export" ? "Static Export" : app.stale ? "Degraded Offline" : "Static Snapshot";
         document.getElementById("mode-banner").innerHTML =
           badge(mode) +
           '<span><strong>' + esc(t("source")) + ':</strong> ' + esc(app.source) + '</span>' +
           '<span><strong>' + esc(t("eventSequence")) + ':</strong> ' + esc(meta.sourceEventSequence || 0) + '</span>' +
           '<span><strong>' + esc(t("projection")) + ':</strong> ' + esc(meta.projectionVersion || meta.schemaVersion || "unknown") + '</span>' +
-          '<span><strong>' + esc(t("freshness")) + ':</strong> ' + esc(meta.staleness || "unknown") + '</span>';
+          '<span><strong>' + esc(t("freshness")) + ':</strong> ' + esc(meta.staleness || "unknown") + '</span>' +
+          (app.projectionError ? '<span class="projection-warning"><strong>' + esc(t("projectionWarning")) + ':</strong> ' + esc(app.projectionError) + '</span>' : "");
       }
       function renderRail() {
         const state = app.state;
@@ -3309,6 +4085,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         }
         const matrix = app.state.claimEvidenceMatrix || {};
         for (const gap of matrix.missingEvidenceItems || []) {
+          if (!(gap && (gap.surfaceAsTask === true || gap.queueVisibility === "task"))) continue;
           const id = String(gap.id || gap.resolutionTaskId || "missing-evidence");
           if (seen.has(id)) continue;
           timelineItems.push({
@@ -3345,6 +4122,131 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       }
       function formatShortDate(date) {
         return date.toISOString().slice(0, 10);
+      }
+      function isTodayDate(value) {
+        const parsed = new Date(value || "");
+        if (!Number.isFinite(parsed.getTime())) return false;
+        return formatShortDate(parsed) === formatShortDate(new Date());
+      }
+      function itemTouchesToday(item) {
+        if (item.startAt === "bootstrap" || item.plannedStartAt === "bootstrap") return true;
+        if (Number.isFinite(Number(item.startOffsetDays)) && Math.abs(Number(item.startOffsetDays)) <= 1) return true;
+        return isTodayDate(item.startAt || item.plannedStartAt) ||
+          isTodayDate(item.endAt || item.endedAt || item.completedAt) ||
+          isActiveTimelineStatus(item.status);
+      }
+      function itemMatchesReportFocus(item, focus) {
+        const status = normalizeTimelineStatus(item.status);
+        if (focus === "active") return isActiveTimelineStatus(status);
+        if (focus === "blocked") return ["blocked", "failed"].includes(status);
+        if (focus === "all") return true;
+        return itemTouchesToday(item);
+      }
+      function buildReportItems() {
+        const items = buildTimelineItems();
+        const scoped = items.filter((item) => itemMatchesReportFocus(item, app.reportFocus));
+        app.reportScopeFallback = scoped.length === 0;
+        return scoped.length > 0 ? scoped : items.filter((item) => !["complete", "completed", "closed"].includes(String(item.status || "").toLowerCase())).slice(0, 8);
+      }
+      function addUiEvent(label, detail) {
+        app.uiEvents = [{ at: new Date().toLocaleTimeString(), label, detail }, ...app.uiEvents].slice(0, 6);
+      }
+      function selectedWorkItem(items) {
+        const pool = items && items.length ? items : buildTimelineItems();
+        if (app.selectedWorkId) {
+          const selected = pool.find((item) => String(item.id) === String(app.selectedWorkId));
+          if (selected) return selected;
+        }
+        return pool.find((item) => isActiveTimelineStatus(item.status)) ||
+          pool.find((item) => ["blocked", "failed"].includes(normalizeTimelineStatus(item.status))) ||
+          pool.find((item) => normalizeTimelineStatus(item.status) === "waiting") ||
+          pool[0] ||
+          null;
+      }
+      function workFlowCounts(items) {
+        const counts = { waiting: 0, "in-progress": 0, blocked: 0, completed: 0 };
+        for (const item of items) {
+          const status = normalizeTimelineStatus(item.status);
+          if (isActiveTimelineStatus(status)) counts["in-progress"] += 1;
+          else if (["blocked", "failed"].includes(status)) counts.blocked += 1;
+          else if (["complete", "completed", "closed"].includes(status)) counts.completed += 1;
+          else counts.waiting += 1;
+        }
+        return counts;
+      }
+      function normalizeOpsLens(value) {
+        return ["action", "evidence", "risk", "report"].includes(value) ? value : "action";
+      }
+      function opsLensLabel(value) {
+        return t("opsLens." + normalizeOpsLens(value));
+      }
+      function buildReportBrief(items) {
+        const state = app.state || {};
+        const reportItems = items && items.length ? items : buildReportItems();
+        const evidenceBlockers = evidenceBlockerCount();
+        const focus = selectedWorkItem(reportItems) || {};
+        const brief = state.stakeholderBrief || {};
+        const evidence = state.governanceEvidenceBrief || {};
+        const blocked = reportItems.filter((item) => ["blocked", "failed"].includes(normalizeTimelineStatus(item.status)));
+        const active = reportItems.filter((item) => isActiveTimelineStatus(item.status));
+        const nextAction = focus.nextActionRef || focus.exitCriteria || (state.agentResumeBrief || {}).nextSafestAction || t("notDeclared");
+        const blockers = (focus.blockingClaimIds || focus.blocksClaimIds || []).join(", ") || (blocked.length ? blocked.map((item) => item.title || item.id).slice(0, 3).join(", ") : t("none"));
+        return [
+          t("reportScope") + ": " + reportFocusLabel(app.reportFocus) + (app.reportScopeFallback ? " (" + t("reportScopeFallback") + ")" : ""),
+          t("currentGoal") + ": " + (brief.currentGoal || focus.goal || focus.title || t("notDeclared")),
+          t("whatChanged") + ": " + (brief.whatChangedSinceLastReview || t("notDeclared")),
+          t("nowDoing") + ": " + (focus.title || focus.id || t("noOpenWork")),
+          t("activeNow") + ": " + active.length + " / " + t("blockedGates") + ": " + blocked.length + " / " + t("evidenceBlockers") + ": " + evidenceBlockers + " / " + t("openWork") + ": " + reportItems.length,
+          t("nextOperatorMove") + ": " + nextAction,
+          t("evidence") + ": " + ((focus.evidenceRefs || focus.outputs || []).join(", ") || t("noEvidence")) + " | missing: " + ((evidence.missingEvidenceClaims || []).slice(0, 4).join(", ") || t("none")),
+          t("whatBlocks") + ": " + blockers,
+          t("requiredDecision") + ": " + (brief.requiredDecision || (state.judgmentConsole || {}).nextRequiredDecision || t("none")),
+        ].join("\\n");
+      }
+      function evidenceBlockerCount() {
+        const matrix = app.state.claimEvidenceMatrix || {};
+        return (matrix.missingEvidenceItems || []).filter((gap) => gap && gap.blocksReadiness !== false).length;
+      }
+      function buildOperatorInsights(focus, timelineItems) {
+        const state = app.state || {};
+        const matrix = state.claimEvidenceMatrix || {};
+        const missing = (matrix.missingEvidenceItems || []).slice(0, 4);
+        const signals = (state.criticalSignals || []).slice(0, 4);
+        const unresolved = ((state.governanceEvidenceBrief || {}).unresolvedDecisions || []).slice(0, 3);
+        const blocked = (timelineItems || []).filter((item) => ["blocked", "failed"].includes(normalizeTimelineStatus(item.status))).slice(0, 3);
+        const nextAction = focus.nextActionRef || focus.exitCriteria || (state.agentResumeBrief || {}).nextSafestAction || t("notDeclared");
+        const focusEvidence = (focus.evidenceRefs || focus.outputs || []).slice(0, 4);
+        const blockers = (focus.blockingClaimIds || focus.blocksClaimIds || []).slice(0, 4);
+        const fallbackInsight = [{ tone: "warn", title: t("reportScopeStrictEmpty"), detail: t("openWorkHint"), source: t("reportScope") }];
+        return {
+          action: [
+            { tone: "ok", title: t("nextOperatorMove"), detail: nextAction, source: focus.owner || focus.agentRole || "unassigned" },
+            { tone: "warn", title: t("requiredDecision"), detail: (state.stakeholderBrief || {}).requiredDecision || (state.judgmentConsole || {}).nextRequiredDecision || t("none"), source: "judgmentConsole" },
+            { tone: blocked.length ? "risk" : "ok", title: t("blockedGates"), detail: blocked.map((item) => item.title || item.id).join(", ") || t("none"), source: "workTimeline" },
+          ],
+          evidence: (missing.length ? missing.map((gap) => ({ tone: gap.blocksReadiness ? "risk" : "warn", title: gap.claimId || gap.id || t("evidence"), detail: gap.requiredEvidence || gap.description || gap.expectedEvidence || t("notDeclared"), source: gap.sourceRef || gap.queueVisibility || "claimEvidenceMatrix" })) : [
+            { tone: focusEvidence.length ? "ok" : "warn", title: t("evidence"), detail: focusEvidence.join(", ") || t("noEvidence"), source: focus.id || "selected work" },
+          ]),
+          risk: (signals.length ? signals.map((signal) => ({ tone: signal.severity === "critical" || signal.severity === "high" ? "risk" : "warn", title: signal.label || signal.id || t("risk"), detail: signal.nextAction || signal.whyItMatters || signal.summary || "", source: signal.source || signal.id || "criticalSignals" })) : [
+            { tone: blockers.length ? "risk" : "ok", title: t("whatBlocks"), detail: blockers.join(", ") || t("none"), source: focus.id || "selected work" },
+          ]),
+          report: [
+            { tone: app.reportScopeFallback ? "warn" : "ok", title: t("reportScope"), detail: reportFocusLabel(app.reportFocus), source: app.reportScopeFallback ? t("reportScopeFallback") : "strict scope" },
+            { tone: unresolved.length ? "warn" : "ok", title: "Decisions", detail: unresolved.join(", ") || t("none"), source: "governanceEvidenceBrief" },
+            { tone: "ok", title: t("reportBrief"), detail: buildReportBrief([focus].filter(Boolean)).split("\\n").slice(0, 3).join(" · "), source: "copy-ready" },
+          ],
+        };
+      }
+      function renderOperatorLensPanel(focus, timelineItems) {
+        const lens = normalizeOpsLens(app.opsLens);
+        const controls = ["action", "evidence", "risk", "report"].map((value) =>
+          '<button class="ops-lens-button" type="button" data-ops-lens="' + esc(value) + '" aria-pressed="' + String(lens === value) + '">' + esc(opsLensLabel(value)) + '</button>'
+        ).join("");
+        const insights = (buildOperatorInsights(focus || {}, timelineItems || [])[lens] || []).filter(Boolean);
+        const cards = (insights.length ? insights : [{ tone: "warn", title: t("operatorInsightPanel"), detail: t("notDeclared"), source: "empty" }]).map((item) =>
+          '<div class="insight-item ' + esc(item.tone || "") + '"><span class="rail-label">' + esc(item.title || "") + '</span><strong>' + esc(item.detail || "") + '</strong><span class="source">' + esc(item.source || "") + '</span></div>'
+        ).join("");
+        return '<div class="ops-lens-panel"><div class="ops-lens-strip"><span class="rail-label">' + esc(t("opsLens")) + '</span>' + controls + '</div><div><h3>' + esc(t("operatorInsightPanel")) + ' · ' + esc(opsLensLabel(lens)) + '</h3><div class="insight-stack">' + cards + '</div></div></div>';
       }
       function renderGantt(items) {
         const now = new Date();
@@ -3533,12 +4435,14 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         }).join("");
         const provenance = (scorecard.evaluatorProvenance || []).map((item) => '<li>' + esc(item.evaluatorRole || item.id) + ': ' + esc(item.status || "unknown") + ' · ' + esc(item.checkedAt || "") + '</li>').join("");
         const whyNot = (scorecard.whyNot95Yet || []).map((item) => '<li>' + esc(item) + '</li>').join("");
+        const qa = scorecard.qaEvidence || {};
+        const qaRows = (qa.requiredFor95 || []).map((item) => '<li>' + esc(item) + '</li>').join("");
         return metricGrid([
           ["UI/UX", (Number(scorecard.uiUxDesignScore || 0)).toFixed(1) + "/10", "target " + (scorecard.targetScore || 9.5)],
           ["Project Evidence", (Number(scorecard.projectEvidenceScore || 0)).toFixed(1) + "/10", "truth score, not beautified"],
           ["Dimensions", dimensions.length, "scorecard rows"],
-          ["Policy", "split", "design vs evidence"],
-        ]) + '<p class="muted">' + esc(scorecard.scoringPolicy || "") + '</p><div class="quality-meter">' + rows + '</div><h3>Evaluator provenance</h3><ul>' + provenance + '</ul><h3>Why not 9.5 yet</h3><ul>' + whyNot + '</ul>';
+          ["QA Evidence", qa.status || "not-declared", "browser gate"],
+        ]) + '<p class="muted">' + esc(scorecard.scoringPolicy || "") + '</p><div class="quality-meter">' + rows + '</div><h3>QA contract</h3><p class="muted">' + esc(qa.note || "") + '</p><ul>' + qaRows + '</ul><h3>Evaluator provenance</h3><ul>' + provenance + '</ul><h3>Why not 9.5 yet</h3><ul>' + whyNot + '</ul>';
       }
       function renderActionabilityScore() {
         const score = app.state.governanceActionabilityScore || {};
@@ -3653,17 +4557,123 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
             ["Open decisions", (agent.openDecisions || []).length, (agent.openDecisions || []).join(", ") || t("none")],
           ]);
       }
+      function renderReportLab() {
+        const reportItems = buildReportItems();
+        const active = reportItems.filter((item) => isActiveTimelineStatus(item.status)).length;
+        const blocked = reportItems.filter((item) => ["blocked", "failed"].includes(normalizeTimelineStatus(item.status))).length;
+        const reportBrief = buildReportBrief(reportItems);
+        const fallback = app.reportScopeFallback ? '<div class="projection-warning"><strong>' + esc(t("reportScopeFallback")) + ':</strong> ' + esc(t("reportScopeStrictEmpty")) + '</div>' : "";
+        const copyStatus = app.reportCopyStatus ? '<span class="source" aria-live="polite">' + esc(app.reportCopyStatus) + '</span>' : "";
+        return '<div class="report-lab"><div><span class="rail-label">' + esc(t("reportLab")) + '</span><p class="muted">' + esc(t("reportLabCopy")) + '</p></div>' +
+          metricGrid([
+            [t("reportScope"), reportFocusLabel(app.reportFocus), "local view state"],
+            [t("openWork"), reportItems.length, "deck input rows"],
+            [t("activeNow"), active, "in progress"],
+            [t("blockedGates"), blocked, "blocked / failed"],
+          ]) +
+          fallback +
+          '<div><h3>' + esc(t("reportBrief")) + '</h3><pre class="report-brief-preview" id="report-brief-preview">' + esc(reportBrief) + '</pre></div>' +
+          '<div class="report-action-row">' +
+          '<button class="primary" type="button" data-report-focus="today" data-slideshow-open>' + esc(t("applyTodayReport")) + '</button>' +
+          '<button class="secondary" type="button" data-report-focus="active" data-slideshow-open>' + esc(t("openPptDashboard")) + ' · ' + esc(t("reportFocus.active")) + '</button>' +
+          '<button class="secondary" type="button" data-report-focus="blocked" data-slideshow-open>' + esc(t("openPptDashboard")) + ' · ' + esc(t("reportFocus.blocked")) + '</button>' +
+          '<button class="secondary" type="button" data-report-copy>' + esc(t("copyReportBrief")) + '</button>' +
+          '<button class="secondary" type="button" data-report-print>' + esc(t("printReport")) + '</button>' +
+          '</div>' + copyStatus + '</div>';
+      }
+      function renderDomainStressBoard() {
+        const stress = app.state.domainStress || {};
+        const operations = app.state.domainOperations || {};
+        const profiles = stress.profiles || [];
+        if (!profiles.length) {
+          return '<p class="muted">No domain stress profile is active. Add primaryDomains or domainStressProfile to promote domain-specific gates.</p>';
+        }
+        const profileCards = profiles.map((profile) => {
+          const gates = profile.evidenceGates || [];
+          const sections = profile.reportSections || [];
+          return '<article class="work-card blocked"><div><span class="badge risk">domain gate</span></div><span class="work-title">' + esc(profile.label || profile.id) + '</span><p>' + esc(profile.operatingQuestion || "") + '</p>' + metricGrid([
+            ["Actors", (profile.actors || []).length, (profile.actors || []).slice(0, 3).join(", ")],
+            ["Surfaces", (profile.criticalSurfaces || []).length, (profile.criticalSurfaces || []).slice(0, 2).join(", ")],
+            ["Evidence Gates", gates.length, "mandatory"],
+            ["Report Sections", sections.length, sections.slice(0, 2).join(", ")],
+          ]) + '<p class="source"><strong>Next:</strong> ' + esc((gates[0] || {}).label || "Review profile gates") + '</p></article>';
+        }).join("");
+        const programRows = (operations.programs || []).map((program) => [
+          esc(program.label || program.profileId),
+          badge(program.status || "unknown"),
+          esc(program.operatingQuestion || ""),
+          esc((program.reportSections || []).join(", ")),
+          esc(program.nextAction || ""),
+        ]);
+        const missing = (stress.missingEvidenceItems || []).slice(0, rowLimit(16));
+        return '<div class="domain-stress-board"><div class="open-work-grid">' + profileCards + '</div>' +
+          '<h3>Domain Operations Projection</h3>' + table(["Program", "Status", "Operating question", "Report sections", "Next"], programRows) +
+          '<h3>Mandatory Evidence Gates</h3>' + table(["Gate", "Profile", "Section", "Owner", "Task"], missing.map((item) => [
+            esc(item.label || item.id),
+            esc(item.domainStressProfile || ""),
+            esc(item.reportSection || ""),
+            esc(item.owner || ""),
+            esc(item.resolutionTaskId || ""),
+          ])) + '</div>';
+      }
       function renderMaintainerHealthBoard() {
         const release = app.state.releaseReadiness || {};
         const incident = app.state.incidentReadiness || {};
         const slo = app.state.sloSli || {};
         const db = app.state.databaseReadiness || {};
         const listener = app.state.listener || ((app.state.dashboardRuntime || {}).listener) || {};
-        return '<div class="judgment-console"><div class="judgment-headline"><span class="rail-label">' + esc(t("maintainerHealthBoard")) + '</span><strong>' + esc((app.state.operationsHealth || {}).summary || "Operational evidence is not connected yet.") + '</strong><p><strong>Listener:</strong> ' + esc(listener.status || "not-started") + ' ' + esc(listener.url || "") + '</p></div><div class="card"><h3>Operational gates</h3>' + metricGrid([
+        const timelineItems = buildTimelineItems();
+        const reportItems = buildReportItems();
+        const counts = workFlowCounts(timelineItems);
+        const focus = selectedWorkItem(reportItems) || {};
+        const evidenceBlockers = evidenceBlockerCount();
+        const activeItems = timelineItems.filter((item) => isActiveTimelineStatus(item.status));
+        const blockedItems = timelineItems.filter((item) => ["blocked", "failed"].includes(normalizeTimelineStatus(item.status)));
+        const openItems = timelineItems.filter((item) => !["complete", "completed", "closed"].includes(normalizeTimelineStatus(item.status)));
+        const avgProgress = openItems.length ? Math.round(openItems.reduce((sum, item) => sum + progressPercent(item), 0) / openItems.length) : 100;
+        const nextAction = focus.nextActionRef || focus.exitCriteria || (app.state.agentResumeBrief || {}).nextSafestAction || t("notDeclared");
+        const focusBlockers = (focus.blockingClaimIds || focus.blocksClaimIds || []).join(", ") || (blockedItems.length ? blockedItems.map((item) => item.title || item.id).slice(0, 2).join(", ") : t("none"));
+        const eventPills = (app.uiEvents.length ? app.uiEvents : [{ at: "--:--", label: "load", detail: reportFocusLabel(app.reportFocus) }])
+          .map((event) => '<span class="event-pill"><strong>' + esc(event.at) + '</strong> ' + esc(event.label) + ' · ' + esc(event.detail || "") + '</span>').join("");
+        const focusButtons = reportItems.slice(0, 5).map((item) => {
+          const pressed = String(item.id) === String((focus || {}).id);
+          return '<button class="work-focus-button" type="button" data-focus-work="' + esc(item.id || "") + '" aria-pressed="' + String(pressed) + '"><strong>' + esc(item.title || item.id) + '</strong><span>' + badge(statusText(item.status)) + ' ' + esc(item.owner || "unassigned") + '</span><span class="source">' + esc(item.nextActionRef || item.exitCriteria || t("notDeclared")) + '</span></button>';
+        }).join("");
+        const flowCards = [
+          ["waiting", t("waiting"), counts.waiting, "queue"],
+          ["in-progress", t("activeNow"), counts["in-progress"], "WIP"],
+          ["blocked", t("blockedGates"), counts.blocked, "timeline blocked"],
+          ["blocked", t("evidenceBlockers"), evidenceBlockers, "needs proof / decision"],
+          ["completed", t("closedItems"), counts.completed, "done"],
+        ].map(([klass, label, count, source]) => '<div class="ops-flow-card ' + esc(klass) + '"><span class="rail-label">' + esc(label) + '</span><strong>' + esc(count) + '</strong><span class="source">' + esc(source) + '</span></div>').join("");
+        return '<div class="ops-command"><div class="ops-command-hero">' +
+          '<div class="ops-ring-card"><span class="rail-label">' + esc(t("currentWorkInfographic")) + '</span><div class="ops-ring" style="--pct:' + esc(avgProgress) + '%"><strong>' + esc(avgProgress) + '%</strong></div>' + metricGrid([
+            [t("activeNow"), activeItems.length, "currently moving"],
+            [t("blockedGates"), blockedItems.length, "timeline blocked"],
+            [t("evidenceBlockers"), evidenceBlockers, "claim graph"],
+          ]) + '</div>' +
+          '<div class="ops-now-card"><span class="rail-label">' + esc(t("nowDoing")) + '</span><h3 class="ops-now-title">' + esc(focus.title || focus.goal || t("noOpenWork")) + '</h3><div class="ops-action-strip">' +
+          '<div class="ops-action"><span class="rail-label">' + esc(t("nextOperatorMove")) + '</span><strong>' + esc(nextAction) + '</strong></div>' +
+          '<div class="ops-action"><span class="rail-label">' + esc(t("owner")) + '</span><strong>' + esc(focus.owner || focus.agentRole || "unassigned") + '</strong></div>' +
+          '<div class="ops-action"><span class="rail-label">' + esc(t("evidence")) + '</span><strong>' + esc((focus.evidenceRefs || focus.outputs || []).length) + '</strong><span class="source">' + esc(((focus.evidenceRefs || focus.outputs || []).slice(0, 2).join(", ")) || t("noEvidence")) + '</span></div>' +
+          '</div><div class="button-row"><button type="button" class="secondary" data-jump-tab="view-work">' + esc(t("jumpToWork")) + '</button><button type="button" class="secondary" data-jump-tab="view-evidence">' + esc(t("jumpToEvidence")) + '</button><button type="button" class="secondary" data-jump-tab="view-governance">' + esc(t("jumpToGovernance")) + '</button></div></div></div>' +
+          '<div class="ops-meta-grid">' +
+          '<div class="ops-meta-card ok"><span class="rail-label">' + esc(t("whatDoing")) + '</span><strong>' + esc(focus.title || focus.goal || t("noOpenWork")) + '</strong><span class="source">' + esc(focus.lane || "Work") + '</span></div>' +
+          '<div class="ops-meta-card"><span class="rail-label">' + esc(t("whyDoing")) + '</span><strong>' + esc((app.state.stakeholderBrief || {}).whyItMatters || (app.state.operationsHealth || {}).summary || "") + '</strong></div>' +
+          '<div class="ops-meta-card warn"><span class="rail-label">' + esc(t("whatNext")) + '</span><strong>' + esc(nextAction) + '</strong></div>' +
+          '<div class="ops-meta-card risk"><span class="rail-label">' + esc(t("whatBlocks")) + '</span><strong>' + esc(focusBlockers) + '</strong></div>' +
+          '</div>' +
+          renderOperatorLensPanel(focus, timelineItems) +
+          '<div class="ops-flow-grid">' + flowCards + '</div>' +
+          renderDomainStressBoard() +
+          '<div class="grid"><div class="card" style="grid-column:span 6"><h3>' + esc(t("focusWork")) + '</h3><div class="work-focus-list">' + (focusButtons || '<p class="muted">' + esc(t("noOpenWork")) + '</p>') + '</div></div><div class="card" style="grid-column:span 6"><h3>' + esc(t("recentUiEvents")) + '</h3><div class="event-ticker">' + eventPills + '</div></div></div>' +
+          renderReportLab() +
+          '<div class="card"><h3>Operational gates</h3>' + metricGrid([
           ["Release", release.status || "unknown", release.releaseId || "not declared"],
           ["Incident", incident.mitigationStatus || "unknown", incident.escalationOwner || "owner TBD"],
           ["SLO", slo.lastTelemetryTimestamp || "not-connected", "telemetry freshness"],
           ["DB", db.migrationStatus || "not-connected", db.backupFreshness || "backup unknown"],
+          ["Listener", listener.status || "not-started", listener.url || "local bridge"],
         ]) + '</div></div>';
       }
       function renderOverview() {
@@ -3698,7 +4708,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           panel(t("stakeholderReport"), renderStakeholderReport(), true) +
           panel(t("overviewGuide"), renderOverviewGuide(), true) +
           panel(t("governanceActionabilityScore"), renderActionabilityScore(), true) +
-          panel(t("executiveWorldview"), '<p><strong>' + esc(t("currentGoal")) + ':</strong> ' + esc(brief.currentGoal) + '</p><p><strong>' + esc(t("whatChanged")) + ':</strong> ' + esc(brief.whatChangedSinceLastReview) + '</p><p><strong>' + esc(t("whyMatters")) + ':</strong> ' + esc(brief.whyItMatters) + '</p><p><strong>' + esc(t("requiredDecision")) + ':</strong> ' + esc(brief.requiredDecision) + '</p><p><strong>' + esc(t("risk")) + ':</strong> ' + esc(brief.currentRisk) + '</p>', true) +
+          panel(t("executiveOverview"), '<p><strong>' + esc(t("currentGoal")) + ':</strong> ' + esc(brief.currentGoal) + '</p><p><strong>' + esc(t("whatChanged")) + ':</strong> ' + esc(brief.whatChangedSinceLastReview) + '</p><p><strong>' + esc(t("whyMatters")) + ':</strong> ' + esc(brief.whyItMatters) + '</p><p><strong>' + esc(t("requiredDecision")) + ':</strong> ' + esc(brief.requiredDecision) + '</p><p><strong>' + esc(t("risk")) + ':</strong> ' + esc(brief.currentRisk) + '</p>', true) +
           panel(t("trustContinuity"), metricGrid([
             ["World Model", (completeness.score || 0) + "/" + (completeness.maxScore || 100), "completeness score"],
             ["Evidence", evidence.evidenceCoverage || "unknown", "coverage state"],
@@ -3983,8 +4993,8 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           ]), true) +
           panel(t("dataStorage"), table(["Asset", "State", t("evidence")], [
             ["Database", badge(db.migrationStatus || "not-connected"), esc(db.schemaVersion || "not declared")],
-            ["Supabase", badge(tech.some((item) => item.label === "Supabase") ? "declared" : "unknown"), esc("docs/012-supabase-cloud-save-plan.md")],
-            ["Postgres SQL", badge(tech.some((item) => item.label === "Postgres") ? "observed" : "unknown"), esc("supabase/game_progress.sql")],
+            ["Supabase", badge(tech.some((item) => item.label === "Supabase") ? "declared" : "unknown"), esc("project Supabase plan, if present")],
+            ["Postgres SQL", badge(tech.some((item) => item.label === "Postgres") ? "observed" : "unknown"), esc("supabase/*.sql")],
             ["Browser persistence", badge(tech.some((item) => item.label === "localStorage") ? "declared" : "unknown"), esc("local save fallback")],
           ]), true) +
           panel(t("harnessIntegration") + " / Agent Context Packs", '<p class="muted">AI Agents should resume from the projected world model, not from chat memory. This panel intentionally describes project composition instead of exposing dashboard API routes.</p>' + renderAgentContextPacks(), true) +
@@ -4004,28 +5014,38 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           return '<div class="deck-progress-row"><span><strong>' + esc(item.title || item.id) + '</strong><em>' + esc(pct + "% · " + remainingLabel(item)) + '</em></span><div class="deck-progress-track"><div class="deck-progress-fill" style="width:' + pct + '%"></div></div></div>';
         }).join("") + '</div>';
       }
+      function deckWorkflow(items) {
+        const rows = items.slice(0, 5).map((item) =>
+          '<div class="deck-workflow-card"><strong>' + esc(item.title || item.id) + '</strong><span>' + esc(statusText(item.status)) + ' · ' + esc(item.owner || "unassigned") + '</span><br /><span>' + esc(item.nextActionRef || item.exitCriteria || t("notDeclared")) + '</span></div>'
+        ).join("");
+        return '<div class="deck-workflow">' + (rows || '<div class="deck-workflow-card">' + esc(t("noOpenWork")) + '</div>') + '</div>';
+      }
       function buildSlides() {
         const state = app.state;
         const brief = state.stakeholderBrief || {};
         const agent = state.agentResumeBrief || {};
         const evidence = state.governanceEvidenceBrief || {};
         const queues = state.taskQueues || {};
-        const items = buildTimelineItems();
+        const allItems = buildTimelineItems();
+        const items = buildReportItems();
+        const evidenceBlockers = evidenceBlockerCount();
         const open = items.filter((item) => !["complete", "completed", "closed"].includes(String(item.status || "").toLowerCase()));
         const active = items.filter((item) => isActiveTimelineStatus(item.status));
         const blocked = items.filter((item) => ["blocked", "failed"].includes(String(item.status || "").toLowerCase()));
-        const completed = items.filter((item) => ["complete", "completed", "closed"].includes(String(item.status || "").toLowerCase()));
+        const completed = allItems.filter((item) => ["complete", "completed", "closed"].includes(String(item.status || "").toLowerCase()));
         const averageProgress = open.length ? Math.round(open.reduce((sum, item) => sum + progressPercent(item), 0) / open.length) : 100;
+        const focus = selectedWorkItem(items) || {};
         const risks = (state.criticalSignals || []).slice(0, 4);
         const nextItems = [
+          focus.nextActionRef || focus.exitCriteria,
           brief.requiredDecision,
           agent.nextSafestAction,
           brief.nextMilestone,
         ].filter(Boolean);
-        return [
+        const slides = [
           {
-            kicker: t("stakeholderReport"),
-            title: t("deckExecutiveTitle"),
+            kicker: t("reportFocus") + " · " + reportFocusLabel(app.reportFocus),
+            title: getAudienceMode() === "maintainer" ? t("currentWorkInfographic") : t("deckExecutiveTitle"),
             body: '<p>' + esc(brief.whatChangedSinceLastReview || "") + '</p><p><strong>' + esc(t("whyMatters")) + ':</strong> ' + esc(brief.whyItMatters || "") + '</p>' + deckMetricGrid([
               [t("progress"), averageProgress + "%", "open work average"],
               [t("openWork"), open.length, "waiting / active / blocked"],
@@ -4036,25 +5056,25 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           },
           {
             kicker: t("thisWeekProgress"),
-            title: t("deckWorkTitle"),
-            body: '<p>' + esc(t("openWorkHint")) + '</p>' + deckProgress(open.slice(0, 5)),
+            title: getAudienceMode() === "maintainer" ? t("nowDoing") : t("deckWorkTitle"),
+            body: '<p><strong>' + esc(focus.title || focus.goal || t("noOpenWork")) + '</strong></p><p>' + esc(focus.nextActionRef || focus.exitCriteria || t("openWorkHint")) + '</p>' + deckProgress(open.slice(0, 5)),
             visual: deckMetricGrid([
               [t("activeNow"), active.length, "animated WIP"],
               [t("blockedGates"), blocked.length, "needs help"],
-              [t("closedItems"), completed.length, "done"],
-              [t("waiting"), (queues.waiting || []).length, "waiting queue"],
+              [t("evidenceBlockers"), evidenceBlockers, "claim graph"],
+              [t("closedItems"), completed.length, "all done"],
             ]),
           },
           {
             kicker: t("workKpiInputs"),
             title: t("deckTimelineTitle"),
             body: '<p>' + esc(t("readinessMapCopy")) + '</p>' + deckMetricGrid([
-              [t("timelineLanes"), new Set(items.map((item) => item.lane || "Work")).size, "delivery lanes"],
-              [t("timelineCoverage"), items.length > 0 ? Math.round((items.filter((item) => item.startAt || item.plannedStartAt).length / items.length) * 100) + "%" : "none", "dated items"],
+              [t("timelineLanes"), new Set(allItems.map((item) => item.lane || "Work")).size, "delivery lanes"],
+              [t("timelineCoverage"), allItems.length > 0 ? Math.round((allItems.filter((item) => item.startAt || item.plannedStartAt).length / allItems.length) * 100) + "%" : "none", "dated items"],
               [t("oldestActiveAge"), active.length ? Math.max(...active.map((item) => Math.ceil((Date.now() - timelineStart(item, new Date()).getTime()) / DAY_MS))) + "d" : t("none"), "WIP aging"],
               [t("handoff"), (state.governedSessions || []).length, "governed sessions"],
             ]),
-            visual: worldPrism(t("kanban"), t("gantt"), "KPI"),
+            visual: deckWorkflow(items),
           },
           {
             kicker: t("decisionRiskPulse"),
@@ -4063,7 +5083,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
             visual: deckMetricGrid([
               [t("risk"), risks.length, "critical signals"],
               ["Decisions", (evidence.unresolvedDecisions || []).length, "unresolved"],
-              [t("blockedGates"), blocked.length, "blocked work"],
+              [t("evidenceBlockers"), evidenceBlockers, "missing proof"],
               [t("confidence"), agent.confidence || "unknown", "resume brief"],
             ]),
           },
@@ -4074,6 +5094,35 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
             visual: worldPrism(t("owner"), t("nextSafestAction"), t("evidence")),
           },
         ];
+        if (getAudienceMode() === "maintainer") {
+          slides.splice(3, 0, {
+            kicker: t("maintainerHealthBoard"),
+            title: t("metaThinking"),
+            body: '<ul class="deck-list">' +
+              '<li><strong>' + esc(t("whatDoing")) + '</strong><br />' + esc(focus.title || focus.goal || t("noOpenWork")) + '</li>' +
+              '<li><strong>' + esc(t("whatNext")) + '</strong><br />' + esc(focus.nextActionRef || focus.exitCriteria || agent.nextSafestAction || t("notDeclared")) + '</li>' +
+              '<li><strong>' + esc(t("whatBlocks")) + '</strong><br />' + esc(((focus.blockingClaimIds || focus.blocksClaimIds || []).join(", ")) || t("none")) + '</li>' +
+              '</ul>',
+            visual: deckMetricGrid([
+              ["Release", (state.releaseReadiness || {}).status || "unknown", "gate"],
+              ["Incident", (state.incidentReadiness || {}).mitigationStatus || "unknown", "ops"],
+              ["DB", (state.databaseReadiness || {}).migrationStatus || "unknown", "data"],
+              ["Listener", (state.listener || {}).status || "not-started", "bridge"],
+            ]),
+          });
+          slides.splice(4, 0, {
+            kicker: t("reportScope") + " · " + reportFocusLabel(app.reportFocus),
+            title: t("reportBrief"),
+            body: '<pre class="report-brief-preview">' + esc(buildReportBrief(items)) + '</pre>',
+            visual: deckMetricGrid([
+              [t("operatorInsightPanel"), opsLensLabel(app.opsLens), "interactive lens"],
+              [t("claimActionGraph"), ((state.claimEvidenceMatrix || {}).missingEvidenceItems || []).length, "missing evidence"],
+              [t("reportScope"), app.reportScopeFallback ? t("reportScopeFallback") : "strict", reportFocusLabel(app.reportFocus)],
+              [t("needsUser"), ((state.taskQueues || {}).needsUser || []).length, "user decisions"],
+            ]),
+          });
+        }
+        return slides;
       }
       function renderSlideDeck() {
         const deck = document.getElementById("slide-deck");
@@ -4089,8 +5138,8 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const dots = slides.map((_, index) => '<button class="deck-dot" type="button" data-slide-go="' + index + '" aria-label="Go to slide ' + (index + 1) + '" aria-current="' + String(index === app.slideIndex) + '"></button>').join("");
         deck.style.setProperty("--slide-index", String(app.slideIndex));
         deck.innerHTML =
-          '<div class="deck-topbar"><div><span class="deck-title" id="deck-heading">' + esc(t("slideDeck")) + '</span><span class="deck-count"> ' + esc(app.slideIndex + 1) + ' / ' + esc(slides.length) + '</span></div><div class="deck-controls"><button class="deck-button" type="button" data-slide-fullscreen>' + esc(t("startPresentation")) + '</button><button class="deck-button" type="button" data-slide-close>' + esc(t("closePresentation")) + '</button></div></div>' +
-          '<div class="deck-viewport"><div class="deck-track">' + slides.map((slide) => '<article class="deck-slide"><div><span class="deck-kicker">' + esc(slide.kicker) + '</span><h2>' + esc(slide.title) + '</h2>' + slide.body + '</div><div>' + slide.visual + '</div></article>').join("") + '</div></div>' +
+          '<div class="deck-topbar"><div><span class="deck-title" id="deck-heading">' + esc(slideDeckTitle()) + '</span><span class="deck-count"> ' + esc(app.slideIndex + 1) + ' / ' + esc(slides.length) + '</span></div><div class="deck-controls"><button class="deck-button" type="button" data-slide-fullscreen>' + esc(t("startPresentation")) + '</button><button class="deck-button" type="button" data-slide-close>' + esc(t("closePresentation")) + '</button></div></div>' +
+          '<div class="deck-viewport"><div class="deck-track">' + slides.map((slide, index) => '<article class="deck-slide" aria-hidden="' + String(index !== app.slideIndex) + '"><div><span class="deck-kicker">' + esc(slide.kicker) + '</span><h2>' + esc(slide.title) + '</h2>' + slide.body + '</div><div>' + slide.visual + '</div></article>').join("") + '</div></div>' +
           '<div class="deck-controls"><button class="deck-button" type="button" data-slide-prev>' + esc(t("previousSlide")) + '</button><div class="deck-dots">' + dots + '</div><button class="deck-button primary" type="button" data-slide-next>' + esc(t("nextSlide")) + '</button></div>';
         if (deck.getAttribute("data-rendered") !== "true") {
           const close = deck.querySelector("[data-slide-close]");
@@ -4099,14 +5148,20 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         deck.setAttribute("data-rendered", "true");
       }
       function openSlideDeck(trigger) {
-        if (getAudienceMode() !== "stakeholder") return;
+        if (!getAudienceConfig().slideshowEnabled) return;
         app.deckReturnFocus = trigger || document.activeElement;
         app.slideDeckOpen = true;
         app.slideIndex = 0;
+        const main = document.getElementById("main");
+        if (main && "inert" in main) main.inert = true;
+        if (main) main.setAttribute("aria-hidden", "true");
         renderSlideDeck();
       }
       function closeSlideDeck() {
         app.slideDeckOpen = false;
+        const main = document.getElementById("main");
+        if (main && "inert" in main) main.inert = false;
+        if (main) main.removeAttribute("aria-hidden");
         renderSlideDeck();
         if (app.deckReturnFocus && app.deckReturnFocus.focus) app.deckReturnFocus.focus();
       }
@@ -4120,6 +5175,23 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         if (deck && deck.requestFullscreen) {
           deck.requestFullscreen().catch(() => {});
         }
+      }
+      function copyReportBrief() {
+        const text = buildReportBrief(buildReportItems());
+        const finish = (status) => {
+          app.reportCopyStatus = status || t("copiedReportBrief");
+          addUiEvent("report-copy", reportFocusLabel(app.reportFocus));
+          render();
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(() => finish(t("copiedReportBrief"))).catch(() => finish(t("reportBrief") + " " + t("notDeclared")));
+        } else {
+          finish(t("reportBrief") + " " + t("notDeclared"));
+        }
+      }
+      function printReport() {
+        addUiEvent("report-print", reportFocusLabel(app.reportFocus));
+        window.print();
       }
       function render() {
         renderChromeText();
@@ -4157,7 +5229,19 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const slideshowButton = document.getElementById("slideshow-button");
         if (slideshowButton) {
           slideshowButton.textContent = t("slideShowView");
-          slideshowButton.classList.toggle("hidden", getAudienceMode() !== "stakeholder");
+          slideshowButton.classList.toggle("hidden", !getAudienceConfig().slideshowEnabled);
+        }
+        const reportFocusLabelNode = document.getElementById("report-focus-label");
+        if (reportFocusLabelNode) reportFocusLabelNode.textContent = t("reportFocus");
+        const reportOptionMap = {
+          "report-focus-option-today": "reportFocus.today",
+          "report-focus-option-active": "reportFocus.active",
+          "report-focus-option-blocked": "reportFocus.blocked",
+          "report-focus-option-all": "reportFocus.all",
+        };
+        for (const [id, key] of Object.entries(reportOptionMap)) {
+          const option = document.getElementById(id);
+          if (option) option.textContent = t(key);
         }
         const optionMap = {
           "audience-option-stakeholder": "stakeholderView",
@@ -4199,14 +5283,16 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         if (language) language.value = app.locale;
         const timelineRange = document.getElementById("timeline-range");
         if (timelineRange) timelineRange.value = app.timelineRange;
+        const reportFocus = document.getElementById("report-focus");
+        if (reportFocus) reportFocus.value = app.reportFocus;
         document.querySelectorAll("[data-work-view]").forEach((button) => {
           button.setAttribute("aria-pressed", String(button.getAttribute("data-work-view") === app.workView));
         });
       }
       function connectEvents() {
-        if (!window.EventSource || app.mode === "Degraded Offline") return;
+        if (!window.EventSource || app.mode === "Degraded Offline" || !localApiToken) return;
         try {
-          const eventsUrl = localApiToken ? "./api/harness-dashboard/v1/events?token=" + encodeURIComponent(localApiToken) : "./api/harness-dashboard/v1/events";
+          const eventsUrl = "./api/harness-dashboard/v1/events?token=" + encodeURIComponent(localApiToken);
           const source = new EventSource(eventsUrl);
           source.addEventListener("harness.snapshot", (event) => {
             const envelope = JSON.parse(event.data);
@@ -4257,6 +5343,12 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
             tabs[next].focus();
             switchTab(tabs[next].getAttribute("aria-controls"));
           }
+          if (event.key === "Home" || event.key === "End") {
+            event.preventDefault();
+            const next = event.key === "Home" ? 0 : tabs.length - 1;
+            tabs[next].focus();
+            switchTab(tabs[next].getAttribute("aria-controls"));
+          }
         });
       });
       document.addEventListener("change", (event) => {
@@ -4264,7 +5356,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         if (!target || !target.id) return;
         if (target.id === "audience-mode") {
           app.audienceMode = target.value;
-          if (app.audienceMode !== "stakeholder") {
+          if (app.audienceMode === "agent") {
             app.slideDeckOpen = false;
           }
           render();
@@ -4278,12 +5370,27 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           app.locale = target.value === "en" ? "en" : "ko";
           render();
         }
+        if (target.id === "report-focus") {
+          app.reportFocus = ["today", "active", "blocked", "all"].includes(target.value) ? target.value : "today";
+          addUiEvent("report-focus", reportFocusLabel(app.reportFocus));
+          render();
+        }
       });
       document.addEventListener("click", (event) => {
-        const target = event.target;
+        const rawTarget = event.target;
+        const target = rawTarget && rawTarget.closest ? rawTarget.closest("[data-slideshow-open], [data-slide-close], [data-slide-prev], [data-slide-next], [data-slide-fullscreen], [data-slide-go], [data-work-view], [data-focus-work], [data-jump-tab], [data-platform-submit], [data-report-focus], [data-ops-lens], [data-report-copy], [data-report-print]") : rawTarget;
         if (!target || !target.getAttribute) return;
-        if (target.hasAttribute("data-slideshow-open")) {
-          openSlideDeck(target);
+        const opensSlideDeck = target.hasAttribute("data-slideshow-open");
+        const reportFocus = target.getAttribute("data-report-focus");
+        if (reportFocus) {
+          app.reportFocus = ["today", "active", "blocked", "all"].includes(reportFocus) ? reportFocus : "today";
+          addUiEvent("report-focus", reportFocusLabel(app.reportFocus));
+          render();
+          if (!opensSlideDeck) return;
+        }
+        if (opensSlideDeck) {
+          const refreshedTrigger = reportFocus ? document.querySelector('[data-report-focus="' + reportFocus + '"][data-slideshow-open]') : target;
+          openSlideDeck(refreshedTrigger || target);
           return;
         }
         if (target.hasAttribute("data-slide-close")) {
@@ -4302,6 +5409,14 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           requestDeckFullscreen();
           return;
         }
+        if (target.hasAttribute("data-report-copy")) {
+          copyReportBrief();
+          return;
+        }
+        if (target.hasAttribute("data-report-print")) {
+          printReport();
+          return;
+        }
         const goSlide = target.getAttribute("data-slide-go");
         if (goSlide != null) {
           app.slideIndex = Number(goSlide) || 0;
@@ -4313,6 +5428,26 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           app.workView = workView;
           renderWork();
           bindDynamicControls();
+        }
+        const focusWork = target.getAttribute("data-focus-work");
+        if (focusWork) {
+          app.selectedWorkId = focusWork;
+          addUiEvent("focus-work", focusWork);
+          render();
+          return;
+        }
+        const opsLens = target.getAttribute("data-ops-lens");
+        if (opsLens) {
+          app.opsLens = normalizeOpsLens(opsLens);
+          addUiEvent("ops-lens", opsLensLabel(app.opsLens));
+          render();
+          return;
+        }
+        const jumpTab = target.getAttribute("data-jump-tab");
+        if (jumpTab) {
+          addUiEvent("jump-tab", jumpTab.replace("view-", ""));
+          switchTab(jumpTab);
+          return;
         }
         if (target.hasAttribute("data-platform-submit")) {
           const selected = Array.from(document.querySelectorAll("[data-platform-checkbox]:checked")).map((input) => input.value);
@@ -4335,6 +5470,21 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       });
       document.addEventListener("keydown", (event) => {
         if (!app.slideDeckOpen) return;
+        if (event.key === "Tab") {
+          const deck = document.getElementById("slide-deck");
+          const focusables = deck ? Array.from(deck.querySelectorAll('button, [href], select, textarea, input, [tabindex]:not([tabindex="-1"])')).filter((node) => !node.disabled && node.offsetParent !== null) : [];
+          if (focusables.length) {
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+              event.preventDefault();
+              last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+              event.preventDefault();
+              first.focus();
+            }
+          }
+        }
         if (event.key === "Escape") {
           event.preventDefault();
           closeSlideDeck();
@@ -4366,7 +5516,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
 }
 
 function buildDashboardReadme(): string {
-  return `# Harness Dashboard 4.6: Project World Model
+  return `# Harness Dashboard 4.6.1: Project World Model
 
 The dashboard is a ledger-backed Project World Model, not a Markdown-derived report page.
 
@@ -4385,9 +5535,10 @@ The dashboard is a ledger-backed Project World Model, not a Markdown-derived rep
 3. Treat \`state/dashboard-index.json\` as an AI Agent cache, not canonical truth.
 4. Keep the local listener loopback-only, read-only, and token-protected.
 5. Audience Lens is a deterministic view layer: Stakeholder, AI Agent, and Maintainer modes reorder, rename, and limit the same canonical data without creating separate truth.
-6. Stakeholder mode includes a read-only fullscreen slide show for PM-ready reporting.
+6. Stakeholder mode includes a read-only fullscreen slide show for review-oriented reporting.
 7. Record active AI-agent platforms with \`scripts/dashboard-ops.mjs record-agent-platforms --platforms ...\`; the dashboard UI prepares the command but does not write through the listener.
 8. Use public-share export when a snapshot leaves the local machine.
+9. Use \`scripts/dashboard-ops.mjs export-report --focus today --public\` to produce a reusable briefing, speaker notes, appendix, and manifest from the selected dashboard truth.
 `;
 }
 
@@ -4418,7 +5569,7 @@ Audience Lens is not a cosmetic selector. It is a deterministic presentation lay
 
 ## Slideshow Contract
 
-- Stakeholder mode exposes a Slide Show View button.
+- Stakeholder and Maintainer modes expose a Slide Show View / report deck entry point.
 - Slides are generated from the same loaded state as the dashboard.
 - Each slide has one headline message, one evidence or provenance cue, and one explicit next-action implication.
 - Slides support next, previous, direct dot navigation, Escape close, ArrowLeft, ArrowRight, Home, End, reduced motion, and print/PDF capture.
@@ -4443,8 +5594,8 @@ function buildDesignFrameworkHtml(): string {
 <meta charset="utf-8" />
 <title>Harness Dashboard Design Framework</title>
 <body>
-  <h1>Harness Dashboard 4.6 Design Framework</h1>
-  <p>Executive Worldview first. Same data, different density for Stakeholder, AI Agent, and Maintainer modes.</p>
+  <h1>Harness Dashboard 4.6.1 Design Framework</h1>
+  <p>Executive Overview first. Same data, different density for Stakeholder, AI Agent, and Maintainer modes.</p>
   <ul>
     <li>Modes: Local Live, Static Snapshot, Degraded Offline.</li>
     <li>Components: status rail, decision cards, open-work board, Gantt/Kanban switcher, evidence tables, relationship maps, and technology stack panels.</li>
@@ -4463,7 +5614,7 @@ function buildBackendBlueprintHtml(): string {
 <title>Optional Backend Dashboard Blueprint</title>
 <body>
   <h1>Optional Backend Dashboard Blueprint</h1>
-  <p>The default 4.6 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
+  <p>The default 4.6.1 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
   <ul>
     <li>Must preserve ledger-first governance.</li>
     <li>Must not replace the local single-file dashboard contract.</li>
@@ -4521,14 +5672,14 @@ export function generateDashboardFiles(
     }),
     jsonFile("docs/ai-harness/dashboard/state/design-profile.json", {
       schemaVersion: DASHBOARD_SCHEMA_VERSION,
-      defaultLandingView: "Executive Worldview",
+      defaultLandingView: "Executive Overview",
       tabs: ["Overview", "Work", "Evidence", "Governance", "System", "Tech Stack"],
       audienceLens: {
         modes: ["Stakeholder", "AI Agent", "Maintainer"],
         behavior:
           "Changing Audience Lens must visibly change tab labels, first-panel priority, information density, row limits, vocabulary, and primary actions while preserving the same canonical source truth.",
         slideshow:
-          "Stakeholder mode includes a built-in no-CDN swiper-style fullscreen slide show for PM-ready reporting.",
+          "Stakeholder mode includes a built-in no-CDN swiper-style fullscreen slide show for review-oriented reporting.",
       },
       informationArchitecture: {
         antiDuplicationRule:
@@ -4603,7 +5754,7 @@ export function generateDashboardFiles(
         "Specification for future opt-in backend dashboard implementation.",
       nonGoals: [
         "No backend dashboard app is generated by default.",
-        "No database is required for 4.6 MVP.",
+        "No database is required for 4.6.1 MVP.",
         "No persistent UI writes are allowed by default.",
       ],
     }),
@@ -4668,15 +5819,11 @@ export function generateDashboardFiles(
     },
     {
       relativePath: "docs/ai-harness/dashboard/schemas/projections/dashboard-state.schema.json",
-      content: buildSchema("Harness Dashboard State Projection", [
-        ...DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS,
-      ]),
+      content: buildDashboardStateSchema(),
     },
     {
       relativePath: "docs/ai-harness/dashboard/state/dashboard-state.schema.json",
-      content: buildSchema("Harness Dashboard State Projection", [
-        ...DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS,
-      ]),
+      content: buildDashboardStateSchema(),
     },
   ];
 }

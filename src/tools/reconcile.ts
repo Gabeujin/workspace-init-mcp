@@ -163,7 +163,7 @@ export interface ReconcilePreflightExportResult {
   summary: string;
 }
 
-const RECONCILE_VERSION = "4.6.0";
+const RECONCILE_VERSION = "4.6.1";
 const RECONCILE_POLICY_PATH = ".github/ai-harness/reconcile-policy.json";
 
 const LEGACY_RESOURCE_ROOTS: Array<{
@@ -693,6 +693,14 @@ function readExistingHarnessManifest(workspacePath: string): Partial<WorkspaceIn
       governanceProfile: parsed.scalars.governance_profile as GovernanceProfile,
       autonomyMode: parsed.scalars.autonomy_mode as AutonomyMode,
       tokenBudget: parsed.scalars.token_budget as TokenBudget,
+      domainStressProfile:
+        parsed.scalars.domain_stress_profile === "auto"
+          ? undefined
+          : (parsed.scalars.domain_stress_profile as WorkspaceInitParams["domainStressProfile"]),
+      legacyAdoptionProfile:
+        parsed.scalars.legacy_adoption_profile === "none"
+          ? undefined
+          : parsed.scalars.legacy_adoption_profile,
       primaryDomains: parsed.arrays.primary_domains,
       techStack: parsed.arrays.tech_stack?.filter((entry) => entry !== "TBD"),
       plannedTasks: parsed.arrays.planned_tasks?.filter((entry) => entry !== "TBD"),
@@ -752,6 +760,18 @@ function readExistingDashboardConfig(workspacePath: string): Partial<WorkspaceIn
       typeof workspace.autonomyMode === "string"
         ? (workspace.autonomyMode as AutonomyMode)
         : undefined,
+    tokenBudget:
+      typeof workspace.tokenBudget === "string"
+        ? (workspace.tokenBudget as WorkspaceInitParams["tokenBudget"])
+        : undefined,
+    domainStressProfile:
+      typeof workspace.domainStressProfile === "string"
+        ? (workspace.domainStressProfile as WorkspaceInitParams["domainStressProfile"])
+        : undefined,
+    legacyAdoptionProfile:
+      typeof workspace.legacyAdoptionProfile === "string"
+        ? workspace.legacyAdoptionProfile
+        : undefined,
   };
 }
 
@@ -791,20 +811,18 @@ function mergeGeneratedState(baseValue: unknown, existingValue: unknown): unknow
   }
 
   if (Array.isArray(baseValue) && Array.isArray(existingValue)) {
-    const generatedHasIdObjects = baseValue.every(
-      (entry) => isPlainObject(entry) && typeof entry.id === "string"
-    );
-    const existingHasIdObjects = existingValue.every(
-      (entry) => isPlainObject(entry) && typeof entry.id === "string"
+    const mergeKey = ["id", "claimId", "decisionId", "artifactId"].find((key) =>
+      baseValue.every((entry) => isPlainObject(entry) && typeof entry[key] === "string") &&
+      existingValue.every((entry) => isPlainObject(entry) && typeof entry[key] === "string")
     );
 
-    if (generatedHasIdObjects && existingHasIdObjects) {
+    if (mergeKey) {
       const merged = new Map<string, Record<string, unknown>>();
       for (const entry of baseValue as Array<Record<string, unknown>>) {
-        merged.set(String(entry.id), entry);
+        merged.set(String(entry[mergeKey]), entry);
       }
       for (const entry of existingValue as Array<Record<string, unknown>>) {
-        const id = String(entry.id);
+        const id = String(entry[mergeKey]);
         const current = merged.get(id);
         merged.set(
           id,
@@ -841,6 +859,290 @@ function mergeGeneratedState(baseValue: unknown, existingValue: unknown): unknow
   }
 
   return existingValue ?? baseValue;
+}
+
+const DASHBOARD_BOOTSTRAP_NOISE_TASK_IDS = new Set([
+  "task-confirm-agent-platforms",
+  "task-collect-service-health",
+  "task-map-deployment-target",
+  "task-map-data-readiness",
+  "task-link-vcs-records",
+]);
+
+const DASHBOARD_BOOTSTRAP_TASK_REF_REPLACEMENTS = new Map<string, string>([
+  ["task-confirm-agent-platforms", "agentPlatformGovernance.intake"],
+  ["task-collect-service-health", "missing.service-health"],
+  ["task-map-deployment-target", "missing.deployment-target"],
+  ["task-map-data-readiness", "missing.database-readiness"],
+  ["task-link-vcs-records", "missing.vcs-task-links"],
+]);
+
+const GENERATED_DASHBOARD_NOISE_TITLES = new Map<string, string[]>([
+  ["task-confirm-agent-platforms", ["confirm active ai agent platforms", "legacy noisy platform task"]],
+  ["task-collect-service-health", ["collect service health", "legacy noisy service health task"]],
+  ["task-map-deployment-target", ["map deployment target", "legacy noisy deployment task"]],
+  ["task-map-data-readiness", ["map data readiness", "map save-data, migration, backup, and restore readiness", "legacy noisy data readiness task"]],
+  ["task-link-vcs-records", ["link git/svn changes", "classify and link dirty working-tree paths"]],
+]);
+
+const GENERATED_DASHBOARD_NOISE_REFS = new Set([
+  "event-000001-bootstrap",
+  "missing.service-health",
+  "missing.deployment-target",
+  "missing.database-readiness",
+  "missing.vcs-task-links",
+  "missing.agent-platform-declaration",
+]);
+
+function withoutDashboardBootstrapNoiseIds(
+  value: unknown,
+  location = "taskQueues",
+  archive: Array<Record<string, unknown>> = []
+): unknown {
+  if (!Array.isArray(value)) {
+    return value;
+  }
+
+  return value.filter((entry) => {
+    if (typeof entry !== "string" || !DASHBOARD_BOOTSTRAP_NOISE_TASK_IDS.has(entry)) {
+      return true;
+    }
+    archive.push({
+      id: entry,
+      location,
+      classification: "removed-generated-dashboard-noise",
+      replacementRef: DASHBOARD_BOOTSTRAP_TASK_REF_REPLACEMENTS.get(entry) ?? null,
+    });
+    return false;
+  });
+}
+
+function withoutDashboardBootstrapNoiseObjects(
+  value: unknown,
+  location = "dashboardProjection",
+  archive: Array<Record<string, unknown>> = []
+): unknown {
+  if (!Array.isArray(value)) {
+    return value;
+  }
+
+  return value.filter((entry) => {
+    if (
+      !isPlainObject(entry) ||
+      typeof entry.id !== "string" ||
+      !DASHBOARD_BOOTSTRAP_NOISE_TASK_IDS.has(entry.id) ||
+      !looksLikeGeneratedDashboardNoiseEntry(entry)
+    ) {
+      return true;
+    }
+    archive.push({
+      id: entry.id,
+      location,
+      classification: "removed-generated-dashboard-noise",
+      title: entry.title,
+      replacementRef: DASHBOARD_BOOTSTRAP_TASK_REF_REPLACEMENTS.get(entry.id) ?? null,
+    });
+    return false;
+  });
+}
+
+function looksLikeGeneratedDashboardNoiseEntry(entry: Record<string, unknown>): boolean {
+  const id = String(entry.id || "");
+  const title = String(entry.title || "").toLowerCase();
+  const knownTitleFragments = GENERATED_DASHBOARD_NOISE_TITLES.get(id) ?? [];
+  const titleLooksGenerated = title === "" || knownTitleFragments.some((fragment) => title.includes(fragment));
+  const evidenceRefs = Array.isArray(entry.evidenceRefs)
+    ? entry.evidenceRefs.map((value) => String(value))
+    : [];
+  const blockerRefs = [
+    ...(Array.isArray(entry.blockingClaimIds) ? entry.blockingClaimIds.map((value) => String(value)) : []),
+    ...(Array.isArray(entry.blocksClaimIds) ? entry.blocksClaimIds.map((value) => String(value)) : []),
+  ];
+  const generatedOnlyRefs = [...evidenceRefs, ...blockerRefs].every(
+    (ref) => ref === "" || GENERATED_DASHBOARD_NOISE_REFS.has(ref) || ref.startsWith("claim.")
+  );
+  const status = String(entry.status || "").toLowerCase();
+  const statusLooksGenerated = ["", "waiting", "blocked", "pending"].includes(status);
+  const explicitUserSignals = [entry.notes, entry.description, entry.completedAt, entry.startedAt, entry.updatedAt, entry.exitCriteria]
+    .some((value) => value != null && String(value).trim() !== "");
+  const explicitEvidenceSignals = [...evidenceRefs, ...blockerRefs].length > 0 && !generatedOnlyRefs;
+  const explicitStatusSignal = !statusLooksGenerated;
+  const provenance = String(entry.provenance || entry.source || entry.createdBy || "").toLowerCase();
+  const explicitUserProvenance = provenance.includes("user") || provenance.includes("manual");
+  return titleLooksGenerated && !explicitUserSignals && !explicitEvidenceSignals && !explicitStatusSignal && !explicitUserProvenance;
+}
+
+function markMissingEvidenceAsEvidenceOnly(value: unknown): unknown {
+  if (!Array.isArray(value)) {
+    return value;
+  }
+
+  return value.map((entry) => {
+    if (!isPlainObject(entry)) {
+      return entry;
+    }
+    if (entry.queueVisibility != null || entry.surfaceAsTask === true) {
+      return entry;
+    }
+    const provenance = String(entry.provenance || entry.source || entry.createdBy || "").toLowerCase();
+    const userAuthored =
+      provenance.includes("user") ||
+      provenance.includes("manual") ||
+      [entry.notes, entry.description, entry.status, entry.acceptanceCriteria]
+        .some((item) => item != null && String(item).trim() !== "");
+    if (userAuthored) {
+      return {
+        ...entry,
+        queueVisibility: "task",
+        surfaceAsTask: true,
+      };
+    }
+    return {
+      ...entry,
+      queueVisibility: "evidence-only",
+    };
+  });
+}
+
+function rewriteDashboardBootstrapTaskRefs(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(rewriteDashboardBootstrapTaskRefs);
+  }
+  if (!isPlainObject(value)) {
+    return value;
+  }
+
+  const rewritten: Record<string, unknown> = {};
+  for (const [key, entryValue] of Object.entries(value)) {
+    if (
+      typeof entryValue === "string" &&
+      (key === "nextActionRef" || key === "resolutionTaskId") &&
+      DASHBOARD_BOOTSTRAP_TASK_REF_REPLACEMENTS.has(entryValue)
+    ) {
+      rewritten[key] = DASHBOARD_BOOTSTRAP_TASK_REF_REPLACEMENTS.get(entryValue);
+    } else {
+      rewritten[key] = rewriteDashboardBootstrapTaskRefs(entryValue);
+    }
+  }
+  return rewritten;
+}
+
+function normalizeMergedDashboardState(value: unknown): unknown {
+  if (!isPlainObject(value)) {
+    return value;
+  }
+
+  const state = rewriteDashboardBootstrapTaskRefs({ ...value }) as Record<string, unknown>;
+  const reconcileClassifications: Array<Record<string, unknown>> = [];
+  if (isPlainObject(state.taskQueues)) {
+    const queues = { ...state.taskQueues };
+    for (const key of ["waiting", "inProgress", "completed", "blocked", "needsUser", "realWorld", "failed"]) {
+      queues[key] = withoutDashboardBootstrapNoiseIds(
+        queues[key],
+        `taskQueues.${key}`,
+        reconcileClassifications
+      );
+    }
+    if (Array.isArray(queues.needsUser)) {
+      queues.needsUser = queues.needsUser.filter(
+        (entry) => entry !== "decision-agent-platform-selection"
+      );
+    }
+    state.taskQueues = queues;
+  }
+
+  for (const key of ["agile", "agileCadence"]) {
+    const cadence = state[key];
+    if (isPlainObject(cadence)) {
+      state[key] = {
+        ...cadence,
+        backlog: withoutDashboardBootstrapNoiseObjects(
+          cadence.backlog,
+          `${key}.backlog`,
+          reconcileClassifications
+        ),
+      };
+    }
+  }
+
+  if (isPlainObject(state.workTimeline)) {
+    state.workTimeline = {
+      ...state.workTimeline,
+      items: withoutDashboardBootstrapNoiseObjects(
+        state.workTimeline.items,
+        "workTimeline.items",
+        reconcileClassifications
+      ),
+    };
+  }
+
+  if (isPlainObject(state.workReadinessMap)) {
+    state.workReadinessMap = {
+      ...state.workReadinessMap,
+      rows: withoutDashboardBootstrapNoiseObjects(
+        state.workReadinessMap.rows,
+        "workReadinessMap.rows",
+        reconcileClassifications
+      ),
+    };
+  }
+
+  if (isPlainObject(state.agentResumeBrief)) {
+    state.agentResumeBrief = {
+      ...state.agentResumeBrief,
+      openDecisions: Array.isArray(state.agentResumeBrief.openDecisions)
+        ? state.agentResumeBrief.openDecisions.filter(
+            (entry) => entry !== "decision-agent-platform-selection"
+          )
+        : state.agentResumeBrief.openDecisions,
+      blockers: Array.isArray(state.agentResumeBrief.blockers)
+        ? state.agentResumeBrief.blockers.filter(
+            (entry) => entry !== "agent-platform-declaration-needed"
+          )
+        : state.agentResumeBrief.blockers,
+    };
+  }
+
+  if (isPlainObject(state.governanceEvidenceBrief)) {
+    state.governanceEvidenceBrief = {
+      ...state.governanceEvidenceBrief,
+      unresolvedDecisions: state.governanceEvidenceBrief.unresolvedDecisions,
+    };
+  }
+
+  if (
+    isPlainObject(state.claimEvidenceMatrix) &&
+    Array.isArray(state.claimEvidenceMatrix.missingEvidenceItems)
+  ) {
+    state.claimEvidenceMatrix = {
+      ...state.claimEvidenceMatrix,
+      claims: Array.isArray(state.claimEvidenceMatrix.claims)
+        ? state.claimEvidenceMatrix.claims.filter(
+            (entry) =>
+              !isPlainObject(entry) ||
+              entry.claimId !== "claim.data.save-integrity"
+          )
+        : state.claimEvidenceMatrix.claims,
+      missingEvidenceItems: markMissingEvidenceAsEvidenceOnly(
+        state.claimEvidenceMatrix.missingEvidenceItems
+      ),
+    };
+  }
+
+  if (reconcileClassifications.length > 0) {
+    const existingClassifications = Array.isArray(state.reconcileClassifications)
+      ? state.reconcileClassifications.filter(isPlainObject)
+      : [];
+    state.reconcileClassifications = [
+      ...existingClassifications,
+      ...reconcileClassifications.map((entry) => ({
+        ...entry,
+        recordedAt: new Date().toISOString(),
+      })),
+    ];
+  }
+
+  return state;
 }
 
 function archiveManagedFile(
@@ -1562,7 +1864,16 @@ function resolveWorkspaceConfig(
     tokenBudget:
       options.tokenBudget ??
       manifestConfig.tokenBudget ??
+      dashboardConfig.tokenBudget ??
       "balanced",
+    domainStressProfile:
+      options.domainStressProfile ??
+      manifestConfig.domainStressProfile ??
+      dashboardConfig.domainStressProfile,
+    legacyAdoptionProfile:
+      options.legacyAdoptionProfile ??
+      manifestConfig.legacyAdoptionProfile ??
+      dashboardConfig.legacyAdoptionProfile,
     primaryDomains: primaryDomains.length > 0 ? primaryDomains : [projectType ?? "other"],
   };
 }
@@ -1843,7 +2154,12 @@ export function reconcileWorkspaceInitialization(
       try {
         const generatedJson = JSON.parse(file.content) as unknown;
         const existingJson = JSON.parse(existingContent) as unknown;
-        const mergedJson = mergeGeneratedState(generatedJson, existingJson);
+        const mergedJson =
+          file.relativePath === "docs/ai-harness/dashboard/state/dashboard-state.json"
+            ? normalizeMergedDashboardState(
+                mergeGeneratedState(generatedJson, existingJson)
+              )
+            : mergeGeneratedState(generatedJson, existingJson);
         const mergedContent = `${JSON.stringify(mergedJson, null, 2)}\n`;
         if (mergedContent === existingContent) {
           unchangedFiles.push(file.relativePath);

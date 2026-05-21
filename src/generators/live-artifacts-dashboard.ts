@@ -2566,7 +2566,7 @@ npm --prefix live-artifacts-dashboard start
 
 ## Boundary With Admin Dashboard
 
-- Harness Dashboard 4.6: \`docs/ai-harness/dashboard/\` owns the canonical Project World Model projections, stakeholder and agent briefs, VCS evidence, and read-only local API.
+- Harness Dashboard 4.6.1: \`docs/ai-harness/dashboard/\` owns the canonical Project World Model projections, stakeholder and agent briefs, VCS evidence, and read-only local API.
 - Optional live artifacts dashboard: \`live-artifacts-dashboard/\` is a non-default legacy/opt-in localhost workboard for artifact discovery, user-confirmation tasks, real-world action tracking, archived unchecked visibility, and sanitized markdown previews by generated artifact id.
 - Governance intake: \`.governance/\` is a live-dashboard staging surface. Canonical durable ledgers remain in \`docs/plans/\`, \`docs/reviews/\`, \`docs/contracts/\`, \`docs/evaluations/\`, and \`docs/handovers/\`.
 - Default ports are intentionally separate: admin serve uses \`43110\`, live artifacts uses \`${DEFAULT_LIVE_ARTIFACTS_PORT}\`.

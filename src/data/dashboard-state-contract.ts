@@ -4,6 +4,8 @@ export const DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS = [
   "agentPlatformGovernance",
   "audienceLens",
   "projectWorldModel",
+  "domainStress",
+  "domainOperations",
   "worldModelFacts",
   "serviceRegistry",
   "serviceCreationContract",
@@ -63,4 +65,4 @@ export type DashboardStateTopLevelKey =
   (typeof DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS)[number];
 
 export const DASHBOARD_STATE_CONTRACT_DESCRIPTION =
-  "Harness Dashboard 4.6 Hypertext Project World Model state contract shared by schema generation, generated dashboard operations, and runtime validation.";
+  "Harness Dashboard 4.6.1 Hypertext Project World Model state contract shared by schema generation, generated dashboard operations, and runtime validation.";

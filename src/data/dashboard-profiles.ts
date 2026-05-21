@@ -16,6 +16,7 @@ export interface DashboardKpiDefinition {
   perspectives: string[];
   appliesToModes: DashboardDomainMode[];
   relevantProjectTypes?: ProjectType[];
+  relevantPrimaryDomains?: string[];
 }
 
 export interface DashboardKpiProfile {
@@ -221,6 +222,84 @@ export const DASHBOARD_KPI_DEFINITIONS: DashboardKpiDefinition[] = [
     relevantProjectTypes: ["api", "web-app", "saas", "devops", "monorepo", "iot"],
   },
   {
+    id: "commerce-payment-integrity",
+    label: "Commerce / Payment Integrity",
+    target: "Orders, payment attempts, provider callbacks, refunds, and reversals are idempotent and auditable",
+    defaultValue: "contract-needed",
+    defaultStatus: "risk",
+    defaultInterpretation:
+      "Commerce-critical state machines need explicit evidence before any payment or order claim is trusted.",
+    perspectives: ["Product", "Payments", "QA"],
+    appliesToModes: ["software-delivery"],
+    relevantProjectTypes: ["ecommerce", "fintech"],
+    relevantPrimaryDomains: ["commerce", "payments", "checkout", "settlement"],
+  },
+  {
+    id: "account-benefit-ledger",
+    label: "Account Benefit Ledger",
+    target: "Account identity, credentials, benefits, entitlements, and reversals are traceable per subject",
+    defaultValue: "ledger-not-proven",
+    defaultStatus: "risk",
+    defaultInterpretation:
+      "Benefit and entitlement features need a ledger contract before product readiness can be claimed.",
+    perspectives: ["Product", "Data", "Customer Ops"],
+    appliesToModes: ["software-delivery"],
+    relevantProjectTypes: ["ecommerce", "saas"],
+    relevantPrimaryDomains: ["identity", "membership", "benefits", "entitlements", "rewards"],
+  },
+  {
+    id: "device-flow-readiness",
+    label: "Device Flow Readiness",
+    target: "Device credentials, scanners, deep links, and permission flows have denial, spoof, and offline tests",
+    defaultValue: "device-tests-missing",
+    defaultStatus: "risk",
+    defaultInterpretation:
+      "Device-mediated flows can break or be spoofed unless the harness tracks permission, retry, and resource-binding evidence.",
+    perspectives: ["Mobile", "Security", "QA"],
+    appliesToModes: ["software-delivery"],
+    relevantProjectTypes: ["mobile", "iot"],
+    relevantPrimaryDomains: ["device-auth", "device-binding", "credential-flow", "scanner", "deep-link"],
+  },
+  {
+    id: "collaboration-health",
+    label: "Collaboration Health",
+    target: "Activation, contribution, participation, record continuity, and moderation load are visible",
+    defaultValue: "collaboration-map-needed",
+    defaultStatus: "warning",
+    defaultInterpretation:
+      "Collaboration modernization needs product-health signals beyond CRUD completion.",
+    perspectives: ["Collaboration", "Product", "Moderation"],
+    appliesToModes: ["software-delivery"],
+    relevantProjectTypes: ["saas"],
+    relevantPrimaryDomains: ["collaboration", "social", "participation", "moderation", "records"],
+  },
+  {
+    id: "organization-governance-readiness",
+    label: "Organization Governance Readiness",
+    target: "Groups, roles, proposals, votes, approvals, escalation, and organization transitions are modeled",
+    defaultValue: "governance-model-needed",
+    defaultStatus: "warning",
+    defaultInterpretation:
+      "A collaborative product that can become an organization needs governance primitives before monetization or scaling claims.",
+    perspectives: ["Governance", "Product", "Operations"],
+    appliesToModes: ["software-delivery", "generic-governance"],
+    relevantProjectTypes: ["saas", "consulting"],
+    relevantPrimaryDomains: ["collaboration", "organization", "governance", "org-transition"],
+  },
+  {
+    id: "monetization-readiness",
+    label: "Monetization Readiness",
+    target: "Plans, entitlements, payments, sponsorship, settlement, and tax/accounting assumptions are explicit",
+    defaultValue: "monetization-contract-needed",
+    defaultStatus: "warning",
+    defaultInterpretation:
+      "Revenue features need product, legal, payment, and operations evidence before being treated as ready.",
+    perspectives: ["Product", "Finance", "Operations"],
+    appliesToModes: ["software-delivery"],
+    relevantProjectTypes: ["saas", "ecommerce", "fintech"],
+    relevantPrimaryDomains: ["monetization", "subscription", "marketplace", "entitlements"],
+  },
+  {
     id: "story-continuity-integrity",
     label: "Story Continuity Integrity",
     target: "Timeline, events, and narrative state stay coherent across sessions",
@@ -241,6 +320,45 @@ export const DASHBOARD_KPI_DEFINITIONS: DashboardKpiDefinition[] = [
       "Entity tracking exists, but it still needs to be updated as the story evolves.",
     perspectives: ["Creative"],
     appliesToModes: ["creative-narrative"],
+  },
+  {
+    id: "message-consistency",
+    label: "Message Consistency",
+    target: "Every primary and derivative content item supports or intentionally challenges the central message",
+    defaultValue: "message-map-needed",
+    defaultStatus: "warning",
+    defaultInterpretation:
+      "Creative work needs a message graph, counterargument map, and contradiction checks before completion claims.",
+    perspectives: ["Creative", "Editorial", "Research"],
+    appliesToModes: ["creative-narrative"],
+    relevantProjectTypes: ["creative"],
+    relevantPrimaryDomains: ["content", "editorial", "message-map", "canonical-content"],
+  },
+  {
+    id: "content-pipeline-throughput",
+    label: "Content Pipeline Throughput",
+    target: "Canonical content, channel assets, derivative assets, release decisions, feedback, and reintegration are traceable",
+    defaultValue: "pipeline-not-started",
+    defaultStatus: "warning",
+    defaultInterpretation:
+      "Release momentum should be visible without letting derivative assets drift away from canonical content.",
+    perspectives: ["Creative", "Release", "Marketing"],
+    appliesToModes: ["creative-narrative"],
+    relevantProjectTypes: ["creative"],
+    relevantPrimaryDomains: ["content", "editorial", "channel-assets", "derivative-assets", "content-release"],
+  },
+  {
+    id: "visual-asset-governance",
+    label: "Visual Asset Governance",
+    target: "Visual prompts, style rules, layout constraints, typography safe zones, alt text, and provenance are reviewed",
+    defaultValue: "visual-ledger-needed",
+    defaultStatus: "warning",
+    defaultInterpretation:
+      "Visual assets need style, rights, accessibility, and message-distortion checks.",
+    perspectives: ["Creative", "Design", "Accessibility"],
+    appliesToModes: ["creative-narrative"],
+    relevantProjectTypes: ["creative"],
+    relevantPrimaryDomains: ["visual-assets", "media-assets", "asset-governance", "accessibility"],
   },
   {
     id: "evidence-quality",
@@ -295,8 +413,20 @@ export const DASHBOARD_KPI_DEFINITIONS: DashboardKpiDefinition[] = [
 
 function filterByProjectType(
   definition: DashboardKpiDefinition,
-  projectType?: ProjectType
+  projectType?: ProjectType,
+  primaryDomains: string[] = []
 ): boolean {
+  const normalizedDomains = new Set(
+    primaryDomains.map((domain) => domain.toLowerCase().replace(/[^a-z0-9]+/g, "-"))
+  );
+  if (
+    definition.relevantPrimaryDomains != null &&
+    definition.relevantPrimaryDomains.some((domain) =>
+      normalizedDomains.has(domain.toLowerCase().replace(/[^a-z0-9]+/g, "-"))
+    )
+  ) {
+    return true;
+  }
   return (
     definition.relevantProjectTypes == null ||
     (projectType != null && definition.relevantProjectTypes.includes(projectType))
@@ -306,11 +436,12 @@ function filterByProjectType(
 export function getRequiredDashboardKpis(options: {
   domainMode: DashboardDomainMode;
   projectType?: ProjectType;
+  primaryDomains?: string[];
 }): DashboardKpiDefinition[] {
   return DASHBOARD_KPI_DEFINITIONS.filter(
     (definition) =>
       definition.appliesToModes.includes(options.domainMode) &&
-      filterByProjectType(definition, options.projectType)
+      filterByProjectType(definition, options.projectType, options.primaryDomains)
   );
 }
 
@@ -321,6 +452,7 @@ export function listDashboardKpiDefinitions(): DashboardKpiDefinition[] {
 export function getDashboardKpiProfile(options: {
   domainMode: DashboardDomainMode;
   projectType?: ProjectType;
+  primaryDomains?: string[];
 }): DashboardKpiProfile {
   const definitions = getRequiredDashboardKpis(options);
 
@@ -333,7 +465,7 @@ export function getDashboardKpiProfile(options: {
         perspectives: ["AX/DX", "Creative Operations"],
         rationale: [
           "Narrative continuity, character state, and editorial progress must remain visible across sessions.",
-          "Stakeholders should be able to assess story momentum without reading manuscript diffs or chat transcripts.",
+          "Stakeholders should be able to assess story momentum without reading draft diffs or chat transcripts.",
         ],
       };
     case "knowledge-work":

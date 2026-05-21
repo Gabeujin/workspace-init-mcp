@@ -14,7 +14,7 @@ import {
 
 export const MANAGED_FILE_INVENTORY_PATH = ".github/ai-harness/managed-file-inventory.json";
 export const MANAGED_INVENTORY_SCHEMA_VERSION = "1.0.0";
-const TOOL_VERSION = "4.6.0";
+const TOOL_VERSION = "4.6.1";
 
 export const MANAGED_JSON_MERGE_PATHS = new Set([
   "docs/ai-harness/dashboard/state/dashboard-state.json",

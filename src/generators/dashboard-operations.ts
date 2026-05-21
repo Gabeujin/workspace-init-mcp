@@ -7,7 +7,7 @@ import { DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS } from "../data/dashboard-state
 function buildDashboardOpsReadme(): string {
   return `# Harness Dashboard Operations
 
-The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6 Hypertext Project World Model.
+The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6.1 Hypertext Project World Model.
 It treats the JSONL event ledger as canonical, the JSON state files as disposable projections,
 and the HTML file as a portable stakeholder projection.
 
@@ -27,18 +27,22 @@ and the HTML file as a portable stakeholder projection.
   Record the user's active AI-agent platforms, mark stale generated instruction files as \`unused-instruction\`, and rebuild projections.
 - \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs append-event --event path/to/event.json --expected-last-sequence 12\`
   Append a strict event-envelope JSON file only if the ledger still ends at the expected sequence.
+- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs record-domain-evidence --gate domain.profile.evidence.01.foo --status resolved --evidence docs/path.md\`
+  Mark a domain stress gate as resolved, waived, not-applicable, or blocked while keeping queues, timeline, readiness rows, and reports in sync.
 - \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs rebuild-projections\`
   Rebuild projection files from the embedded dashboard snapshot when projection files were deleted.
 - \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections\`
   Validate required Project World Model fields and reference integrity.
 - \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs export-static --out docs/ai-harness/dashboard/exports/latest --public\`
   Export a single-file stakeholder snapshot with local paths, usernames, tokens, private URLs, and secret references redacted.
+- \`node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs export-report --out docs/ai-harness/dashboard/exports/latest-report --audience maintainer --focus today --public\`
+  Export a report pack with \`briefing.md\`, \`speaker-notes.md\`, \`evidence-appendix.json\`, and \`report-manifest.json\` for HTML deck/report reconstruction.
 
 ## API
 
 The listener exposes read-only v1 routes under \`/api/harness-dashboard/v1/\`:
 \`snapshot\`, \`index\`, \`tasks\`, \`sessions\`, \`dictionary\`, \`version-control\`,
-\`runtime\`, \`health\`, \`events\`, and deterministic \`query\`.
+\`runtime\`, \`briefing\`, \`health\`, \`events\`, and deterministic \`query\`.
 
 Default protections: local token required, loopback Host/Origin only, CORS disabled,
 DNS rebinding protection, strict CSP for served HTML, and no shell/file-write/LLM calls from \`query\`.
@@ -61,8 +65,8 @@ import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const API_VERSION = "v1";
-const SCHEMA_VERSION = "4.6.0";
-const PROJECTION_VERSION = "4.6.0";
+const SCHEMA_VERSION = "4.6.1";
+const PROJECTION_VERSION = "4.6.1";
 const REQUIRED_TOP_LEVEL_KEYS = ${requiredTopLevelKeys};
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -297,6 +301,7 @@ function envelope(payload, extra = {}) {
       "dictionary",
       "version-control",
       "runtime",
+      "briefing",
       "sse",
       "deterministic-query"
     ],
@@ -305,17 +310,218 @@ function envelope(payload, extra = {}) {
   }, extra);
 }
 
+function isPlainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+
+function pushValidationTypeError(errors, fieldPath, expected, actual) {
+  const actualType = actual === null ? "null" : Array.isArray(actual) ? "array" : typeof actual;
+  errors.push(fieldPath + " must be " + expected + "; received " + actualType);
+}
+
+function requireValidationObject(errors, fieldPath, value) {
+  if (!isPlainObject(value)) {
+    pushValidationTypeError(errors, fieldPath, "an object", value);
+    return null;
+  }
+  return value;
+}
+
+function requireValidationArray(errors, fieldPath, value) {
+  if (!Array.isArray(value)) {
+    pushValidationTypeError(errors, fieldPath, "an array", value);
+    return null;
+  }
+  return value;
+}
+
+function requireValidationString(errors, fieldPath, value) {
+  if (typeof value !== "string") {
+    pushValidationTypeError(errors, fieldPath, "a string", value);
+  }
+}
+
+function requireValidationNumber(errors, fieldPath, value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    pushValidationTypeError(errors, fieldPath, "a finite number", value);
+  }
+}
+
+function requireValidationStringArray(errors, fieldPath, value) {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    pushValidationTypeError(errors, fieldPath, "an array of strings", value);
+  }
+}
+
+function qaStatusAllowsTargetScore(status) {
+  return ["verified", "passed", "browser-verified", "current-browser-verified"].includes(String(status || "").toLowerCase());
+}
+
 function validateState(state) {
   const errors = [];
+  if (!isPlainObject(state)) {
+    return ["dashboardState must be an object"];
+  }
   for (const key of REQUIRED_TOP_LEVEL_KEYS) {
     if (!(key in state)) {
       errors.push("Missing required top-level dashboard key: " + key);
     }
   }
-  const queues = state.taskQueues || {};
-  for (const key of ["waiting", "inProgress", "completed", "blocked"]) {
+  const queues = requireValidationObject(errors, "dashboardState.taskQueues", state.taskQueues) || {};
+  for (const key of ["waiting", "inProgress", "completed", "blocked", "needsUser"]) {
     if (!Array.isArray(queues[key])) {
       errors.push("taskQueues." + key + " must be an array");
+    } else if (queues[key].some((entry) => typeof entry !== "string")) {
+      errors.push("taskQueues." + key + " must contain only string ids");
+    }
+  }
+  for (const optionalKey of ["realWorld", "failed"]) {
+    if (queues[optionalKey] != null && (!Array.isArray(queues[optionalKey]) || queues[optionalKey].some((entry) => typeof entry !== "string"))) {
+      errors.push("taskQueues." + optionalKey + " must contain only string ids when present");
+    }
+  }
+  const matrix = requireValidationObject(errors, "dashboardState.claimEvidenceMatrix", state.claimEvidenceMatrix) || {};
+  const claims = requireValidationArray(errors, "dashboardState.claimEvidenceMatrix.claims", matrix.claims) || [];
+  for (const [index, claim] of claims.entries()) {
+    const pathPrefix = "dashboardState.claimEvidenceMatrix.claims[" + index + "]";
+    const item = requireValidationObject(errors, pathPrefix, claim);
+    if (!item) continue;
+    requireValidationString(errors, pathPrefix + ".claimId", item.claimId);
+    requireValidationString(errors, pathPrefix + ".statement", item.statement);
+    requireValidationString(errors, pathPrefix + ".claimStatus", item.claimStatus);
+    requireValidationNumber(errors, pathPrefix + ".confidence", item.confidence);
+    requireValidationStringArray(errors, pathPrefix + ".evidenceRefs", item.evidenceRefs);
+  }
+  const gaps = requireValidationArray(errors, "dashboardState.claimEvidenceMatrix.missingEvidenceItems", matrix.missingEvidenceItems) || [];
+  for (const [index, gap] of gaps.entries()) {
+    const pathPrefix = "dashboardState.claimEvidenceMatrix.missingEvidenceItems[" + index + "]";
+    const item = requireValidationObject(errors, pathPrefix, gap);
+    if (!item) continue;
+    requireValidationString(errors, pathPrefix + ".id", item.id);
+    requireValidationString(errors, pathPrefix + ".label", item.label);
+    requireValidationStringArray(errors, pathPrefix + ".blocksClaimIds", item.blocksClaimIds);
+    requireValidationString(errors, pathPrefix + ".requiredEvidenceType", item.requiredEvidenceType);
+    requireValidationString(errors, pathPrefix + ".owner", item.owner);
+    requireValidationString(errors, pathPrefix + ".resolutionTaskId", item.resolutionTaskId);
+    if (item.queueVisibility != null) requireValidationString(errors, pathPrefix + ".queueVisibility", item.queueVisibility);
+  }
+  const decisions = requireValidationArray(errors, "dashboardState.decisionContracts", state.decisionContracts) || [];
+  for (const [index, decision] of decisions.entries()) {
+    const pathPrefix = "dashboardState.decisionContracts[" + index + "]";
+    const item = requireValidationObject(errors, pathPrefix, decision);
+    if (!item) continue;
+    requireValidationString(errors, pathPrefix + ".id", item.id);
+    requireValidationString(errors, pathPrefix + ".status", item.status);
+    requireValidationString(errors, pathPrefix + ".owner", item.owner);
+    requireValidationString(errors, pathPrefix + ".decision", item.decision);
+    requireValidationStringArray(errors, pathPrefix + ".evidence", item.evidence);
+  }
+  const workTimeline = requireValidationObject(errors, "dashboardState.workTimeline", state.workTimeline) || {};
+  const timelineItems = requireValidationArray(errors, "dashboardState.workTimeline.items", workTimeline.items) || [];
+  for (const [index, timelineItem] of timelineItems.entries()) {
+    const pathPrefix = "dashboardState.workTimeline.items[" + index + "]";
+    const item = requireValidationObject(errors, pathPrefix, timelineItem);
+    if (!item) continue;
+    requireValidationString(errors, pathPrefix + ".id", item.id);
+    requireValidationString(errors, pathPrefix + ".title", item.title);
+    requireValidationString(errors, pathPrefix + ".status", item.status);
+    requireValidationString(errors, pathPrefix + ".owner", item.owner);
+    requireValidationStringArray(errors, pathPrefix + ".evidenceRefs", item.evidenceRefs);
+  }
+  const domainStress = requireValidationObject(errors, "dashboardState.domainStress", state.domainStress) || {};
+  const domainOperations = requireValidationObject(errors, "dashboardState.domainOperations", state.domainOperations) || {};
+  const activeProfileIds = requireValidationStringArray(errors, "dashboardState.domainStress.activeProfileIds", domainStress.activeProfileIds) || [];
+  const domainProfiles = requireValidationArray(errors, "dashboardState.domainStress.profiles", domainStress.profiles) || [];
+  requireValidationArray(errors, "dashboardState.domainStress.claims", domainStress.claims);
+  requireValidationArray(errors, "dashboardState.domainStress.missingEvidenceItems", domainStress.missingEvidenceItems);
+  requireValidationArray(errors, "dashboardState.domainStress.workItems", domainStress.workItems);
+  requireValidationArray(errors, "dashboardState.domainStress.decisionContracts", domainStress.decisionContracts);
+  requireValidationArray(errors, "dashboardState.domainStress.hardGates", domainStress.hardGates);
+  requireValidationArray(errors, "dashboardState.domainStress.reportSections", domainStress.reportSections);
+  requireValidationStringArray(errors, "dashboardState.domainOperations.activeProfileIds", domainOperations.activeProfileIds);
+  const operationPrograms = requireValidationArray(errors, "dashboardState.domainOperations.programs", domainOperations.programs) || [];
+  const claimIds = new Set(claims.map((claim) => String((claim || {}).claimId || "")));
+  const gapIds = new Set(gaps.map((gap) => String((gap || {}).id || "")));
+  const decisionIds = new Set(decisions.map((decision) => String((decision || {}).id || "")));
+  const timelineIds = new Set(timelineItems.map((item) => String((item || {}).id || "")));
+  const workRows = ((((state.workReadinessMap || {}).rows) || []));
+  const workRowIds = new Set(workRows.map((item) => String((item || {}).id || "")));
+  const queuedIds = new Set(["waiting", "inProgress", "completed", "blocked", "needsUser"].flatMap((key) => Array.isArray(queues[key]) ? queues[key].map((item) => String(item)) : []));
+  const operationProgramIds = new Set(operationPrograms.map((program) => String((program || {}).profileId || "")));
+  for (const profileId of activeProfileIds) {
+    const profile = domainProfiles.find((item) => item && String(item.id || "") === String(profileId));
+    if (!profile) {
+      errors.push("domainStress.profiles is missing active profile: " + profileId);
+      continue;
+    }
+    const claimId = "claim.domain." + profileId + ".readiness";
+    const decisionId = "decision.domain-stress." + profileId;
+    if (!claimIds.has(claimId)) errors.push("claimEvidenceMatrix.claims is missing domain readiness claim: " + claimId);
+    if (!decisionIds.has(decisionId)) errors.push("decisionContracts is missing domain decision: " + decisionId);
+    if (!operationProgramIds.has(String(profileId))) errors.push("domainOperations.programs is missing active profile: " + profileId);
+    for (const gate of (profile.evidenceGates || [])) {
+      const gateId = String((gate || {}).id || "");
+      const taskId = "task." + gateId;
+      if (!gapIds.has(gateId)) errors.push("claimEvidenceMatrix.missingEvidenceItems is missing domain gate: " + gateId);
+      if (!timelineIds.has(taskId)) errors.push("workTimeline.items is missing domain task: " + taskId);
+      if (!workRowIds.has(taskId)) errors.push("workReadinessMap.rows is missing domain task: " + taskId);
+      if (!queuedIds.has(taskId)) errors.push("taskQueues is missing domain task: " + taskId);
+    }
+  }
+  const blockedGateIds = new Set(gaps.filter((gap) => gap && gap.blocksReadiness !== false).map((gap) => String(gap.id || "")));
+  for (const section of (domainStress.reportSections || [])) {
+    const profile = domainProfiles.find((item) => item && String(item.id || "") === String(section.profileId || ""));
+    const sectionGateIds = (((profile || {}).evidenceGates) || [])
+      .filter((gate) => String((gate || {}).reportSection || "") === String(section.section || ""))
+      .map((gate) => String((gate || {}).id || ""));
+    const expectedStatus = sectionGateIds.some((id) => blockedGateIds.has(id)) ? "blocked" : "resolved";
+    if (sectionGateIds.length > 0 && !["missing-evidence", expectedStatus].includes(String(section.status || ""))) {
+      errors.push("domainStress.reportSections has invalid status for " + String(section.profileId || "") + " / " + String(section.section || ""));
+    }
+    if (sectionGateIds.length > 0 && expectedStatus === "resolved" && String(section.status || "") !== "resolved") {
+      errors.push("domainStress.reportSections must be resolved after all section gates are resolved: " + String(section.section || ""));
+    }
+    if (sectionGateIds.length > 0 && expectedStatus === "blocked" && String(section.status || "") === "resolved") {
+      errors.push("domainStress.reportSections cannot be resolved while section gates are still blocked: " + String(section.section || ""));
+    }
+  }
+  for (const key of ["commerceOperations", "modernizationGovernance", "contentRelease"]) {
+    const program = domainOperations[key];
+    if (!program) continue;
+    for (const section of [...(program.sections || []), ...(program.domains || []), ...(program.pipelines || [])]) {
+      const sectionGateIds = section.evidenceGateIds || [];
+      if (sectionGateIds.length === 0) continue;
+      const expectedStatus = sectionGateIds.some((id) => blockedGateIds.has(String(id))) ? "blocked" : "resolved";
+      if (expectedStatus === "resolved" && String(section.status || "") !== "resolved") {
+        errors.push("domainOperations." + key + " section must be resolved after all gates are resolved: " + String(section.id || section.label || ""));
+      }
+      if (expectedStatus === "blocked" && String(section.status || "") === "resolved") {
+        errors.push("domainOperations." + key + " section cannot be resolved while gates are still blocked: " + String(section.id || section.label || ""));
+      }
+    }
+  }
+  const scorecard = requireValidationObject(errors, "dashboardState.dashboardQualityScorecard", state.dashboardQualityScorecard) || {};
+  requireValidationNumber(errors, "dashboardState.dashboardQualityScorecard.targetScore", scorecard.targetScore);
+  requireValidationNumber(errors, "dashboardState.dashboardQualityScorecard.uiUxDesignScore", scorecard.uiUxDesignScore);
+  requireValidationNumber(errors, "dashboardState.dashboardQualityScorecard.projectEvidenceScore", scorecard.projectEvidenceScore);
+  const qaEvidence = requireValidationObject(errors, "dashboardState.dashboardQualityScorecard.qaEvidence", scorecard.qaEvidence) || {};
+  requireValidationStringArray(errors, "dashboardState.dashboardQualityScorecard.qaEvidence.requiredFor95", qaEvidence.requiredFor95);
+  requireValidationString(errors, "dashboardState.dashboardQualityScorecard.qaEvidence.status", qaEvidence.status);
+  requireValidationString(errors, "dashboardState.dashboardQualityScorecard.qaEvidence.note", qaEvidence.note);
+  if (Number(scorecard.uiUxDesignScore) >= Number(scorecard.targetScore || 9.5) && !qaStatusAllowsTargetScore(qaEvidence.status)) {
+    errors.push("dashboardQualityScorecard.uiUxDesignScore must stay below targetScore until qaEvidence.status is verified or passed");
+  }
+  const dimensions = Array.isArray(scorecard.dimensions) ? scorecard.dimensions : [];
+  for (const [index, dimension] of dimensions.entries()) {
+    const pathPrefix = "dashboardState.dashboardQualityScorecard.dimensions[" + index + "]";
+    const item = requireValidationObject(errors, pathPrefix, dimension);
+    if (!item) continue;
+    requireValidationString(errors, pathPrefix + ".id", item.id);
+    requireValidationString(errors, pathPrefix + ".label", item.label);
+    requireValidationNumber(errors, pathPrefix + ".score", item.score);
+    requireValidationStringArray(errors, pathPrefix + ".evidenceRefs", item.evidenceRefs);
+    if (Number(item.score) >= Number(scorecard.targetScore || 9.5) && !qaStatusAllowsTargetScore(qaEvidence.status)) {
+      errors.push(pathPrefix + ".score must stay below targetScore until qaEvidence.status is verified or passed");
     }
   }
   const refs = new Set();
@@ -717,7 +923,7 @@ function handleRecordAgentPlatforms() {
     governanceIndexing: Object.assign({}, existing.governanceIndexing || {}, {
       factId: "fact-agent-platform-selection",
       decisionId: "decision-agent-platform-selection",
-      taskId: "task-confirm-agent-platforms",
+      actionId: "governance.agent-platform-declaration",
       evidenceRefs,
       indexedAs: "declared",
       nextAction: unusedInstructionState.length > 0
@@ -769,9 +975,15 @@ function handleRecordAgentPlatforms() {
     blockers: removeFromArray((state.agentResumeBrief || {}).blockers, "agent-platform-declaration-needed"),
     authoritativeFiles: Array.from(new Set([...(state.agentResumeBrief || {}).authoritativeFiles || [], ...evidenceRefs]))
   });
+  const existingQueues = state.taskQueues || {};
+  const hadPlatformTask = ["waiting", "inProgress", "blocked", "completed"].some((key) =>
+    Array.isArray(existingQueues[key]) && existingQueues[key].includes("task-confirm-agent-platforms")
+  );
   state.taskQueues = Object.assign({}, state.taskQueues || {}, {
     waiting: removeFromArray((state.taskQueues || {}).waiting, "task-confirm-agent-platforms"),
-    completed: Array.from(new Set([...(state.taskQueues || {}).completed || [], "task-confirm-agent-platforms"])),
+    completed: hadPlatformTask
+      ? Array.from(new Set([...(state.taskQueues || {}).completed || [], "task-confirm-agent-platforms"]))
+      : ((state.taskQueues || {}).completed || []),
     needsUser: removeFromArray((state.taskQueues || {}).needsUser, "decision-agent-platform-selection")
   });
   state.agile = updateBacklogTaskStatus(state.agile, "task-confirm-agent-platforms", {
@@ -867,6 +1079,7 @@ function deriveIndex(state) {
       "/api/harness-dashboard/v1/dictionary",
       "/api/harness-dashboard/v1/version-control",
       "/api/harness-dashboard/v1/runtime",
+      "/api/harness-dashboard/v1/briefing",
       "/api/harness-dashboard/v1/health",
       "/api/harness-dashboard/v1/events",
       "/api/harness-dashboard/v1/query"
@@ -924,22 +1137,22 @@ function ensureCoreGovernanceClaims(state) {
       "Reject release readiness if releaseReadiness.releases is empty.",
       "Reject release readiness if smoke test result or rollback command is missing."
     ],
-    nextActionRef: "task-map-deployment-target"
+    nextActionRef: "missing.deployment-target"
   });
   upsertClaim(state, {
-    claimId: "claim.data.save-integrity",
-    statement: "Player progress and data integrity risks are visible before service work proceeds.",
-    subjectRef: "value:value-save-integrity",
-    claimStatus: "partial",
-    confidence: 0.44,
-    sign: "Value hierarchy identifies save integrity, but database and backup evidence remain unknown.",
-    object: "save integrity governance",
-    interpretant: "Game work can proceed safely only when local-save, cloud-sync, migration, backup, and restore implications are visible.",
+    claimId: "claim.data.integrity",
+    statement: "Project data or state integrity risks are visible when the project has a data surface.",
+    subjectRef: "value:value-project-state-integrity",
+    claimStatus: "conditional",
+    confidence: 0.32,
+    sign: "Data readiness is conditional until project-specific data ownership is declared or observed.",
+    object: "project state integrity governance",
+    interpretant: "Data readiness should become work only when this workspace owns a database, dataset, migration path, storage layer, or other persistent state surface.",
     evidenceRefs: ["valueHierarchy", "databaseReadiness", "runningServiceContract.dataOwnership"],
     counterEvidenceRefs: ["databaseReadiness.backupFreshness", "databaseReadiness.restoreDrillEvidence"],
     falsificationTests: [
-      "Reject this claim if databaseReadiness has no migration, retention, backup, or restore evidence.",
-      "Reject this claim if service changes can overwrite progress without explicit recovery guidance."
+      "Do not queue data-readiness work if the project has no declared or observed data surface.",
+      "Reject data readiness if a declared data surface has no ownership, migration, backup, or recovery evidence."
     ],
     nextActionRef: "missing.database-readiness"
   });
@@ -986,16 +1199,32 @@ function synchronizeProjectEvidenceInventory(state) {
     });
   }
   const sqlFiles = listRelativeFiles("supabase", (relative) => /\\.sql$/i.test(relative));
+  const prismaFiles = listRelativeFiles("prisma", (relative) => /schema\\.prisma$/i.test(relative) || /migrations\\//i.test(relative));
+  const drizzleFiles = listRelativeFiles("drizzle", (relative) => /\\.(sql|ts|js|json)$/i.test(relative));
+  const migrationFiles = listRelativeFiles("migrations", (relative) => /\\.(sql|prisma|ts|js)$/i.test(relative));
+  const dbFiles = listRelativeFiles("db", (relative) => /\\.(sql|prisma|ts|js|json)$/i.test(relative));
+  const dataSurfaceFiles = Array.from(new Set([...sqlFiles, ...prismaFiles, ...drizzleFiles, ...migrationFiles, ...dbFiles]));
   for (const sql of sqlFiles) {
     addSource({
       id: "evidence.supabase." + stableHash(sql).slice(0, 8),
       path: sql,
       type: "database-schema",
-      promotesClaimIds: ["claim.data.supabase-schema-present", "claim.data.save-integrity"]
+      promotesClaimIds: ["claim.data.surface-present", "claim.data.integrity"]
     });
   }
+  for (const dataFile of dataSurfaceFiles.filter((entry) => !sqlFiles.includes(entry))) {
+    addSource({
+      id: "evidence.data-surface." + stableHash(dataFile).slice(0, 8),
+      path: dataFile,
+      type: "data-surface",
+      promotesClaimIds: ["claim.data.integrity"]
+    });
+  }
+  const supabasePlans = listRelativeFiles("docs", (relative) =>
+    /supabase.*\\.md$/i.test(relative) || /cloud[-_/ ]?save.*\\.md$/i.test(relative)
+  );
   for (const plan of [
-    "docs/012-supabase-cloud-save-plan.md",
+    ...supabasePlans,
     "docs/ai-harness/runtime/state/active-session.json",
     "docs/ai-harness/runtime/state/session-index.json"
   ]) {
@@ -1004,10 +1233,11 @@ function synchronizeProjectEvidenceInventory(state) {
         id: "evidence." + stableHash(plan).slice(0, 8),
         path: plan,
         type: plan.includes("active-session") || plan.includes("session-index") ? "runtime-session-evidence" : "service-plan",
-        promotesClaimIds: plan.includes("supabase") ? ["claim.offline.cloud-save-plan", "claim.data.save-integrity"] : ["claim.agent.safe-resume"]
+      promotesClaimIds: /supabase|cloud[-_/ ]?save/i.test(plan) ? ["claim.offline.cloud-save-plan", "claim.data.integrity"] : ["claim.agent.safe-resume"]
       });
     }
   }
+  const dataSurfaceObserved = dataSurfaceFiles.length > 0 || supabasePlans.length > 0;
   state.projectEvidenceInventory = Object.assign({}, state.projectEvidenceInventory || {}, {
     schemaVersion: SCHEMA_VERSION,
     generatedAt: now(),
@@ -1015,7 +1245,7 @@ function synchronizeProjectEvidenceInventory(state) {
     claimsPromoted: Array.from(new Set(sources.flatMap((source) => source.promotesClaimIds || []))),
     missingSourceTypes: [
       ...(workflows.length === 0 ? ["CI workflow"] : []),
-      ...(sqlFiles.length === 0 ? ["database schema"] : []),
+      ...(dataSurfaceObserved ? ["data readiness evidence for observed data surface"] : ["data surface declaration or not-applicable decision"]),
       "deployment URL",
       "smoke test result",
       "rollback command",
@@ -1038,45 +1268,45 @@ function synchronizeProjectEvidenceInventory(state) {
         "Reject deployability if no workflow file exists.",
         "Reject release readiness if no successful workflow run, deployment URL, smoke test, or rollback path is linked."
       ],
-      nextActionRef: "task-map-deployment-target"
+      nextActionRef: "missing.deployment-target"
     });
   }
-  if (sqlFiles.length > 0) {
+  if (dataSurfaceFiles.length > 0) {
     upsertClaim(state, {
-      claimId: "claim.data.supabase-schema-present",
-      statement: "Supabase/Postgres schema evidence is visible to the harness.",
+      claimId: "claim.data.surface-present",
+      statement: "Database or persistent data-surface evidence is visible to the harness.",
       subjectRef: "databaseReadiness",
       claimStatus: "partial",
       confidence: 0.56,
-      sign: "SQL file(s) observed: " + sqlFiles.join(", "),
-      object: "database schema readiness",
-      interpretant: "Schema files support data-readiness orientation, but migration status, RLS review, backup, and restore evidence are still required.",
-      evidenceRefs: sqlFiles,
+      sign: "Data-surface file(s) observed: " + dataSurfaceFiles.join(", "),
+      object: "database or persistent state readiness",
+      interpretant: "Schema, migration, or data-layer files support data-readiness orientation, but ownership, migration status, access rules, backup, and restore evidence are still required.",
+      evidenceRefs: dataSurfaceFiles,
       counterEvidenceRefs: ["databaseReadiness.migrationStatus", "databaseReadiness.restoreDrillEvidence"],
       falsificationTests: [
-        "Reject database readiness if schema files are absent.",
+        "Reject database readiness if declared data-surface files are absent.",
         "Reject production data readiness if RLS, migration, backup, and restore evidence are absent."
       ],
-      nextActionRef: "task-map-data-readiness"
+      nextActionRef: "missing.database-readiness"
     });
   }
-  if (fs.existsSync(path.join(workspaceRoot, "docs/012-supabase-cloud-save-plan.md"))) {
+  if (supabasePlans.length > 0) {
     upsertClaim(state, {
       claimId: "claim.offline.cloud-save-plan",
-      statement: "Offline-first cloud-save planning evidence is visible.",
+      statement: "Cloud data planning evidence is visible.",
       subjectRef: "runningServiceContract",
       claimStatus: "partial",
       confidence: 0.62,
-      sign: "docs/012-supabase-cloud-save-plan.md exists.",
-      object: "offline-first save/sync intent",
+      sign: "Supabase/cloud-save plan file(s) observed: " + supabasePlans.join(", "),
+      object: "cloud data intent",
       interpretant: "A durable plan supports agent resume and stakeholder review, but implementation and validation evidence remain separate gates.",
-      evidenceRefs: ["docs/012-supabase-cloud-save-plan.md"],
+      evidenceRefs: supabasePlans,
       counterEvidenceRefs: ["releaseReadiness.status", "databaseReadiness.migrationStatus"],
       falsificationTests: [
         "Reject implementation readiness if no code-level verification or smoke test is linked.",
-        "Reject cloud-save readiness if Supabase connectivity, quota, and retry behavior are untested."
+        "Reject cloud data readiness if connectivity, quota, and retry behavior are untested."
       ],
-      nextActionRef: "task-collect-service-health"
+      nextActionRef: "missing.service-health"
     });
   }
 }
@@ -1126,6 +1356,9 @@ function synchronizeActiveSessionAndWorkMap(state) {
     seen.add(String(session.id));
   }
   for (const gap of (((state.claimEvidenceMatrix || {}).missingEvidenceItems) || [])) {
+    if (!(gap && (gap.surfaceAsTask === true || gap.queueVisibility === "task"))) {
+      continue;
+    }
     const id = String(gap.id || gap.resolutionTaskId || "missing-evidence");
     const rowId = seen.has(id) ? id + "-evidence-gate" : id;
     addRow({
@@ -1255,7 +1488,7 @@ function synchronizeJudgmentModel(state) {
         "Reject handoff readiness if any dirty path remains unlinked.",
         "Reject release readiness if dirty paths exist outside a governed task."
       ],
-      nextActionRef: "task-link-vcs-records"
+      nextActionRef: "missing.vcs-task-links"
     });
     ensureTimelineItem(state, {
       id: "task-link-dirty-working-tree",
@@ -1269,7 +1502,7 @@ function synchronizeJudgmentModel(state) {
       kpiTags: ["handover-latency", "vcs-linkage"],
       evidenceRefs: ["versionControl.unlinkedChanges"],
       blockingClaimIds: ["claim.vcs.dirty-working-tree-linked", "claim.agent.safe-resume"],
-      nextActionRef: "task-link-vcs-records",
+      nextActionRef: "missing.vcs-task-links",
       exitCriteria: "Every dirty path is linked to a governed task/session/decision or documented as a warning."
     });
   }
@@ -1317,17 +1550,37 @@ function synchronizeJudgmentModel(state) {
   const evidencePenalty = dirtyCount + missingEvidenceCount + openDecisionCount;
   const observedSourceCount = Array.isArray((state.projectEvidenceInventory || {}).sources) ? state.projectEvidenceInventory.sources.length : 0;
   quality.projectEvidenceScore = Math.max(1.2, Math.min(6.8, 1.2 + observedSourceCount * 0.45 - evidencePenalty * 0.12));
-  quality.uiUxDesignScore = Math.max(9.5, Number(quality.uiUxDesignScore || 9.6));
   quality.lastEvaluatedAt = now();
+  quality.qaEvidence = Object.assign({
+    requiredFor95: ["rendered-browser-smoke", "console-clean", "keyboard-and-modal-flow", "responsive-viewport-check"],
+    status: "pending-run",
+    note: "This refresh records the QA contract; only an external browser QA run should mark it verified."
+  }, quality.qaEvidence || {});
+  const qaStatus = String((quality.qaEvidence || {}).status || "").toLowerCase();
+  const qaVerifiedForTarget = ["verified", "passed", "browser-verified", "current-browser-verified"].includes(qaStatus);
+  const proposedUiUxScore = Number(quality.uiUxDesignScore || 9.2);
+  quality.uiUxDesignScore = qaVerifiedForTarget ? proposedUiUxScore : Math.min(9.4, proposedUiUxScore);
+  quality.dimensions = Array.isArray(quality.dimensions)
+    ? quality.dimensions.map((dimension) => {
+        if (!dimension || typeof dimension !== "object") return dimension;
+        const score = Number(dimension.score || 0);
+        return Object.assign({}, dimension, {
+          score: qaVerifiedForTarget ? score : Math.min(9.4, score)
+        });
+      })
+    : quality.dimensions;
+  quality.scoringPolicy = qaVerifiedForTarget
+    ? "Current browser QA evidence may support a 9.5+ UI/UX score."
+    : "UI/UX design is capped below 9.5 until current browser QA evidence proves render, console, keyboard, and responsive checks.";
   quality.evaluatorProvenance = Array.from(new Map([
     ...((quality.evaluatorProvenance || []).map((entry) => [entry.id || entry.evaluatorRole || JSON.stringify(entry), entry])),
-    ["browser-qa", {
-      id: "browser-qa",
-      evaluatorRole: "Codex frontend QA",
-      status: "browser-verified",
+    ["browser-qa-contract", {
+      id: "browser-qa-contract",
+      evaluatorRole: "Dashboard QA contract",
+      status: "qa-run-required",
       checkedAt: now(),
-      evidenceRefs: ["Playwright: Work tab 9 rows, active bar, blocked gates, no console error/warn"],
-      confidence: "high"
+      evidenceRefs: ["Run browser QA against generated dashboard before claiming verified UI quality."],
+      confidence: "pending"
     }]
   ]).values());
   quality.whyNot95Yet = [
@@ -1649,6 +1902,197 @@ function handleAppendEvent() {
   console.log("Appended harness event sequence " + record.sequence);
 }
 
+function handleRecordDomainEvidence() {
+  const gateId = option("--gate", "");
+  const status = String(option("--status", "resolved")).toLowerCase();
+  const evidenceRef = option("--evidence", "");
+  const note = option("--note", "");
+  if (!gateId) {
+    throw new Error("record-domain-evidence requires --gate");
+  }
+  if (!["resolved", "waived", "not-applicable", "blocked"].includes(status)) {
+    throw new Error("record-domain-evidence --status must be resolved, waived, not-applicable, or blocked");
+  }
+  let normalizedEvidenceRef = evidenceRef;
+  if (status === "resolved") {
+    if (!evidenceRef) {
+      throw new Error("record-domain-evidence --status resolved requires --evidence pointing to an existing workspace file");
+    }
+    const evidencePath = path.resolve(workspaceRoot, evidenceRef);
+    const relativeEvidence = path.relative(workspaceRoot, evidencePath);
+    if (relativeEvidence.startsWith("..") || path.isAbsolute(relativeEvidence)) {
+      throw new Error("record-domain-evidence --evidence must stay inside the workspace");
+    }
+    if (!fs.existsSync(evidencePath)) {
+      throw new Error("record-domain-evidence --evidence file does not exist: " + evidenceRef);
+    }
+    normalizedEvidenceRef = relativeEvidence.replace(/\\\\/g, "/");
+  }
+  if ((status === "waived" || status === "not-applicable") && !note) {
+    throw new Error("record-domain-evidence --status " + status + " requires --note with the approval rationale");
+  }
+  const state = loadState();
+  const taskId = "task." + gateId;
+  let found = false;
+  for (const profile of (((state.domainStress || {}).profiles) || [])) {
+    for (const gate of (profile.evidenceGates || [])) {
+      if (String(gate.id || "") === gateId) {
+        found = true;
+        gate.status = status;
+        gate.resolvedAt = status === "blocked" ? null : now();
+        gate.evidenceRefs = Array.from(new Set([...(gate.evidenceRefs || []), normalizedEvidenceRef].filter(Boolean)));
+        gate.note = note || gate.note || "";
+      }
+    }
+  }
+  if (!found) {
+    throw new Error("Unknown domain evidence gate: " + gateId);
+  }
+  const matrix = state.claimEvidenceMatrix || {};
+  for (const item of (matrix.missingEvidenceItems || [])) {
+    if (String(item.id || "") === gateId) {
+      item.status = status;
+      item.blocksReadiness = status === "blocked";
+      item.queueVisibility = status === "blocked" ? "task" : "resolved";
+      item.resolvedAt = status === "blocked" ? null : now();
+      item.evidenceRefs = Array.from(new Set([...(item.evidenceRefs || []), normalizedEvidenceRef].filter(Boolean)));
+      item.resolutionNote = note || item.resolutionNote || "";
+    }
+  }
+  for (const item of (((state.workTimeline || {}).items) || [])) {
+    if (String(item.id || "") === taskId) {
+      item.status = status === "blocked" ? "blocked" : "completed";
+      item.progressPercent = status === "blocked" ? Number(item.progressPercent || 0) : 100;
+      item.endAt = status === "blocked" ? null : now();
+      item.evidenceRefs = Array.from(new Set([...(item.evidenceRefs || []), normalizedEvidenceRef].filter(Boolean)));
+      item.exitCriteria = note || item.exitCriteria || "";
+    }
+  }
+  for (const row of (((state.workReadinessMap || {}).rows) || [])) {
+    if (String(row.id || "") === taskId) {
+      row.status = status === "blocked" ? "blocked" : "completed";
+      row.evidenceRefs = Array.from(new Set([...(row.evidenceRefs || []), normalizedEvidenceRef].filter(Boolean)));
+    }
+  }
+  const queues = state.taskQueues || {};
+  for (const key of ["waiting", "inProgress", "blocked", "needsUser"]) {
+    if (Array.isArray(queues[key])) {
+      queues[key] = queues[key].filter((id) => String(id) !== taskId);
+    }
+  }
+  if (status === "blocked") {
+    queues.blocked = Array.from(new Set([...(queues.blocked || []), taskId]));
+  } else {
+    queues.completed = Array.from(new Set([...(queues.completed || []), taskId]));
+  }
+  state.taskQueues = queues;
+  const unresolved = (matrix.missingEvidenceItems || []).filter((item) => item && item.blocksReadiness !== false);
+  if (state.governanceEvidenceBrief) {
+    state.governanceEvidenceBrief.missingEvidenceClaims = unresolved.map((item) => item.label || item.id);
+  }
+  updateDomainOperationStatusFromEvidence(state);
+  applyDomainMetricOptions(state);
+  persistProjections(state);
+  console.log("Recorded domain evidence gate " + gateId + " as " + status + ".");
+}
+
+function gateBlockedSet(state) {
+  const matrix = state.claimEvidenceMatrix || {};
+  return new Set(((matrix.missingEvidenceItems || []))
+    .filter((item) => item && item.blocksReadiness !== false)
+    .map((item) => String(item.id || "")));
+}
+
+function statusFromGateIds(gateIds, blockedGateIds) {
+  if (!Array.isArray(gateIds) || gateIds.length === 0) {
+    return "not-applicable";
+  }
+  return gateIds.some((id) => blockedGateIds.has(String(id))) ? "blocked" : "resolved";
+}
+
+function updateDomainOperationStatusFromEvidence(state) {
+  const blockedGateIds = gateBlockedSet(state);
+  const stress = state.domainStress || {};
+  for (const section of (stress.reportSections || [])) {
+    const sectionGateIds = (((stress.profiles || []).find((profile) => String(profile.id || "") === String(section.profileId || "")) || {}).evidenceGates || [])
+      .filter((gate) => String(gate.reportSection || "") === String(section.section || ""))
+      .map((gate) => String(gate.id || ""));
+    section.status = statusFromGateIds(sectionGateIds, blockedGateIds);
+    section.blockerCount = sectionGateIds.filter((id) => blockedGateIds.has(String(id))).length;
+  }
+  const operations = state.domainOperations || {};
+  for (const program of (operations.programs || [])) {
+    const profile = (stress.profiles || []).find((item) => String(item.id || "") === String(program.profileId || ""));
+    const gateIds = ((profile || {}).evidenceGates || []).map((gate) => String(gate.id || ""));
+    program.status = statusFromGateIds(gateIds, blockedGateIds) === "resolved" ? "domain-evidence-resolved" : "blocked-by-mandatory-evidence";
+    program.blockedGateCount = gateIds.filter((id) => blockedGateIds.has(id)).length;
+  }
+  for (const key of ["commerceOperations", "modernizationGovernance", "contentRelease"]) {
+    const program = operations[key];
+    if (!program) continue;
+    for (const section of [...(program.sections || []), ...(program.domains || []), ...(program.pipelines || [])]) {
+      section.status = statusFromGateIds(section.evidenceGateIds || [], blockedGateIds);
+    }
+    const allGateIds = [
+      ...(program.sections || []),
+      ...(program.domains || []),
+      ...(program.pipelines || []),
+    ].flatMap((section) => section.evidenceGateIds || []);
+    program.status = statusFromGateIds(allGateIds, blockedGateIds) === "resolved" ? "domain-evidence-resolved" : program.status;
+    program.blockedGateCount = allGateIds.filter((id) => blockedGateIds.has(String(id))).length;
+    program.resolvedGateCount = allGateIds.filter((id) => !blockedGateIds.has(String(id))).length;
+    program.lastEvidenceUpdateAt = now();
+  }
+}
+
+function optionalNumberOption(name) {
+  const value = option(name, "");
+  if (value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    throw new Error(name + " must be a finite number");
+  }
+  return number;
+}
+
+function applyDomainMetricOptions(state) {
+  const operations = state.domainOperations || {};
+  if (operations.contentRelease) {
+    const content = operations.contentRelease;
+    content.contentProgress = content.contentProgress || {};
+    content.contentPipeline = content.contentPipeline || {};
+    content.visualAssetGovernance = content.visualAssetGovernance || {};
+    const draftPercent = optionalNumberOption("--draft-percent");
+    const editorialDebt = optionalNumberOption("--editorial-debt");
+    const contradictions = optionalNumberOption("--contradictions");
+    const channelReady = optionalNumberOption("--channel-ready");
+    const derivativeReady = optionalNumberOption("--derivative-ready");
+    const visualsApproved = optionalNumberOption("--visual-approved");
+    const releasePercent = optionalNumberOption("--release-percent");
+    if (draftPercent != null) content.contentProgress.overallDraftPercent = Math.max(0, Math.min(100, draftPercent));
+    if (editorialDebt != null) content.contentProgress.editorialDebtCount = Math.max(0, editorialDebt);
+    if (contradictions != null) content.contentProgress.contradictionCount = Math.max(0, contradictions);
+    if (channelReady != null) content.contentPipeline.channelAssetsReady = Math.max(0, channelReady);
+    if (derivativeReady != null) content.contentPipeline.derivativeAssetsReady = Math.max(0, derivativeReady);
+    if (visualsApproved != null) content.contentPipeline.visualAssetsApproved = Math.max(0, visualsApproved);
+    if (releasePercent != null) content.contentPipeline.releaseReadinessPercent = Math.max(0, Math.min(100, releasePercent));
+    if (option("--next-production-decision", "")) {
+      content.contentProgress.nextProductionDecision = option("--next-production-decision", "");
+    }
+    content.contentProgress.resolvedEvidenceGateCount = content.resolvedGateCount || 0;
+    content.contentProgress.blockedEvidenceGateCount = content.blockedGateCount || 0;
+    content.visualAssetGovernance.lastEvidenceUpdateAt = now();
+  }
+  if (operations.modernizationGovernance) {
+    const modernization = operations.modernizationGovernance;
+    modernization.asIsToBe = modernization.asIsToBe || {};
+    const coverage = optionalNumberOption("--coverage-percent");
+    if (coverage != null) modernization.asIsToBe.coveragePercent = Math.max(0, Math.min(100, coverage));
+    modernization.asIsToBe.resolvedEvidenceGateCount = modernization.resolvedGateCount || 0;
+    modernization.asIsToBe.blockedEvidenceGateCount = modernization.blockedGateCount || 0;
+  }
+}
+
 function ensureToken() {
   ensureDir(stateDir);
   if (fs.existsSync(tokenPath)) {
@@ -1663,12 +2107,21 @@ function ensureToken() {
 }
 
 function normalizeHost(value) {
-  return String(value || "").split(":")[0].replace(/^\\[/, "").replace(/\\]$/, "").toLowerCase();
+  const raw = String(value || "").trim();
+  if (raw.startsWith("[")) {
+    return raw.slice(1, raw.indexOf("]") >= 0 ? raw.indexOf("]") : undefined).toLowerCase();
+  }
+  return raw.split(":")[0].toLowerCase();
 }
 
 function isLoopbackHost(value) {
   const host = normalizeHost(value);
   return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+function isLoopbackAddress(value) {
+  const address = String(value || "").replace(/^::ffff:/, "");
+  return address === "127.0.0.1" || address === "::1" || address === "localhost";
 }
 
 function isLoopbackOrigin(value) {
@@ -1719,6 +2172,7 @@ function apiPayload(routeName) {
   if (routeName === "dictionary") return { dictionary: state.dictionary, ontology: state.ontology };
   if (routeName === "version-control") return { versionControl: state.versionControl, vcsChangeRecords: state.vcsChangeRecords };
   if (routeName === "runtime") return loadJsonOrFallback(runtimePath, deriveRuntime(state));
+  if (routeName === "briefing") return buildReportPack(state, { audience: "maintainer", focus: "today", public: false });
   if (routeName === "health") return { ok: true, mode: "Local Live", statePathHash: fileHash(statePath), generatedAt: now() };
   return null;
 }
@@ -1759,9 +2213,23 @@ function serveEvents(request, response, token) {
     response.write("event: " + eventName + "\\n");
     response.write("data: " + JSON.stringify(envelope(payload)) + "\\n\\n");
   }
-  send("harness.snapshot", loadState());
+  let lastStateHash = fileHash(statePath);
+  try {
+    send("harness.snapshot", loadState());
+  } catch (error) {
+    send("harness.error", { at: now(), error: String(error && error.message || error), statePathHash: lastStateHash });
+  }
   const interval = setInterval(() => {
-    send("harness.heartbeat", { at: now(), statePathHash: fileHash(statePath), tokenPath: path.relative(workspaceRoot, tokenPath).replace(/\\\\/g, "/") });
+    try {
+      const currentStateHash = fileHash(statePath);
+      if (currentStateHash !== lastStateHash) {
+        lastStateHash = currentStateHash;
+        send("harness.changed", loadState());
+      }
+      send("harness.heartbeat", { at: now(), statePathHash: currentStateHash, tokenPath: path.relative(workspaceRoot, tokenPath).replace(/\\\\/g, "/") });
+    } catch (error) {
+      send("harness.error", { at: now(), error: String(error && error.message || error), statePathHash: fileHash(statePath) });
+    }
   }, 5000);
   request.on("close", () => clearInterval(interval));
 }
@@ -1784,7 +2252,7 @@ function updateRuntimeListener(patch) {
 function makeServer(token) {
   return http.createServer((request, response) => {
     const url = new URL(request.url || "/", "http://" + String(request.headers.host || "127.0.0.1"));
-    if (!isLoopbackHost(request.headers.host) || !isLoopbackOrigin(request.headers.origin)) {
+    if (!isLoopbackAddress(request.socket && request.socket.remoteAddress) || !isLoopbackHost(request.headers.host) || !isLoopbackOrigin(request.headers.origin)) {
       sendJson(response, 403, { ok: false, error: "Loopback Host/Origin required" });
       return;
     }
@@ -1871,6 +2339,9 @@ async function requestRuntime(url, token) {
 
 async function handleListen() {
   const host = option("--host", "127.0.0.1");
+  if (!isLoopbackHost(host) && !hasFlag("--unsafe-host")) {
+    throw new Error("Dashboard listener refuses non-loopback --host without --unsafe-host.");
+  }
   const preferredPort = Number(option("--port", "43110"));
   const port = await getAvailablePort(host, preferredPort);
   const token = ensureToken();
@@ -1973,6 +2444,49 @@ function handleCleanupStale() {
   console.log("No stale listener process recorded.");
 }
 
+function publicRedactionModeForKey(key) {
+  const compact = String(key || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  if (/(token|secret|password|passwd|credential|authorization|apikey|privatekey|clientsecret|sessionkey)/.test(compact)) {
+    return "secret";
+  }
+  if (/(email|mailaddress)/.test(compact)) {
+    return "email";
+  }
+  if (/(localpath|filepath|absolutepath|path)$/.test(compact)) {
+    return "path";
+  }
+  if (/(url|uri|endpoint|origin)$/.test(compact)) {
+    return "url";
+  }
+  if (/^(user|username|userid|owneruser)$/.test(compact)) {
+    return "user";
+  }
+  return "";
+}
+
+function sanitizePublicString(value) {
+  return String(value)
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[redacted-secret]")
+    .replace(/\\bBearer\\s+[-._~+/A-Za-z0-9]+=*/gi, "Bearer [redacted-secret]")
+    .replace(/\\beyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\b/g, "[redacted-secret]")
+    .replace(/\\bAKIA[0-9A-Z]{16}\\b/g, "[redacted-secret]")
+    .replace(/\\b(?:ghp_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,}|sk-[A-Za-z0-9_]{12,}|xox[baprs]-[-A-Za-z0-9_]{12,})\\b/g, "[redacted-secret]")
+    .replace(/\\b(?:api[_-]?key|secret|password|passwd|token)\\s*[:=]\\s*[^\\s"',;]+/gi, (match) => match.replace(/[:=]\\s*[^\\s"',;]+$/, ": [redacted-secret]"))
+    .replace(/[A-Za-z]:\\\\[^\\s"']+/g, "[redacted-local-path]")
+    .replace(/\\/(Users|home|var|private|tmp)\\/[^\\s"']+/g, "[redacted-local-path]")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/gi, "[redacted-email]")
+    .replace(/https?:\\/\\/(localhost|127\\.0\\.0\\.1|10\\.\\d+\\.\\d+\\.\\d+|192\\.168\\.\\d+\\.\\d+|172\\.(1[6-9]|2\\d|3[0-1])\\.\\d+\\.\\d+|[^\\s"']*\\.internal)[^\\s"']*/g, "[redacted-private-url]");
+}
+
+function redactScalarForMode(value, mode) {
+  if (mode === "secret") return "[redacted]";
+  if (mode === "email") return "[redacted-email]";
+  if (mode === "path") return "[redacted-local-path]";
+  if (mode === "url") return "[redacted-private-url]";
+  if (mode === "user") return "[redacted-user]";
+  return sanitizePublic(value);
+}
+
 function sanitizePublic(value) {
   if (Array.isArray(value)) {
     return value.map(sanitizePublic);
@@ -1980,11 +2494,9 @@ function sanitizePublic(value) {
   if (value && typeof value === "object") {
     const output = {};
     for (const [key, item] of Object.entries(value)) {
-      const lowered = key.toLowerCase();
-      if (lowered.includes("token") || lowered.includes("secret") || lowered.includes("env")) {
-        output[key] = "[redacted]";
-      } else if (lowered.includes("path") || lowered.includes("url") || lowered.includes("user")) {
-        output[key] = "[redacted-local]";
+      const redactionMode = publicRedactionModeForKey(key);
+      if (redactionMode && (item == null || typeof item !== "object")) {
+        output[key] = redactScalarForMode(item, redactionMode);
       } else {
         output[key] = sanitizePublic(item);
       }
@@ -1992,20 +2504,253 @@ function sanitizePublic(value) {
     return output;
   }
   if (typeof value === "string") {
-    return value.replace(/[A-Za-z]:\\\\[^\\s"']+/g, "[redacted-local-path]").replace(/https?:\\/\\/(localhost|127\\.0\\.0\\.1|[^\\s"']*\\.internal)[^\\s"']*/g, "[redacted-private-url]");
+    return sanitizePublicString(value);
   }
   return value;
+}
+
+function normalizeReportFocus(value) {
+  const focus = String(value || "today").toLowerCase();
+  return ["today", "active", "blocked", "all"].includes(focus) ? focus : "today";
+}
+
+function normalizeReportAudience(value) {
+  const audience = String(value || "maintainer").toLowerCase();
+  return ["stakeholder", "agent", "maintainer"].includes(audience) ? audience : "maintainer";
+}
+
+function reportItemTouchesToday(item) {
+  const text = JSON.stringify(item || {}).toLowerCase();
+  const today = new Date().toISOString().slice(0, 10);
+  return text.includes(today) || text.includes("bootstrap") || text.includes("active") || text.includes("in-progress");
+}
+
+function reportItemsForFocus(state, focusValue) {
+  const focus = normalizeReportFocus(focusValue);
+  const workMapRows = (((state.workReadinessMap || {}).rows) || []);
+  const timelineItems = (((state.workTimeline || {}).items) || []);
+  const sourceRows = Array.isArray(workMapRows) && workMapRows.length > 0 ? workMapRows : timelineItems;
+  return sourceRows.filter((item) => {
+    const status = normalizeTimelineStatus(item && item.status);
+    if (focus === "all") return true;
+    if (focus === "active") return ["active", "in-progress", "running"].includes(status);
+    if (focus === "blocked") return status === "blocked" || ((item && item.blockingClaimIds) || []).length > 0 || ((item && item.blocksClaimIds) || []).length > 0;
+    return reportItemTouchesToday(item);
+  }).slice(0, 12);
+}
+
+function evidenceBlockersForReport(state) {
+  const matrix = state.claimEvidenceMatrix || {};
+  const items = Array.isArray(matrix.missingEvidenceItems) ? matrix.missingEvidenceItems : [];
+  return items.filter((item) => item && item.blocksReadiness !== false).slice(0, 12);
+}
+
+function domainSectionsForReport(state) {
+  const stress = state.domainStress || {};
+  const operations = state.domainOperations || {};
+  const sections = Array.isArray(stress.reportSections) ? stress.reportSections : [];
+  const programs = Array.isArray(operations.programs) ? operations.programs : [];
+  const blockers = evidenceBlockersForReport(state);
+  return sections.map((section) => {
+    const profileId = String(section.profileId || "");
+    const sectionName = String(section.section || "Domain Section");
+    const sectionBlockers = blockers.filter((item) =>
+      String(item.domainStressProfile || "") === profileId &&
+      String(item.reportSection || "") === sectionName
+    );
+    const program = programs.find((item) => item && String(item.profileId || "") === profileId) || {};
+    return {
+      profileId,
+      section: sectionName,
+      status: sectionBlockers.length > 0 ? "blocked" : String(section.status || "pending"),
+      blockerCount: sectionBlockers.length,
+      blockers: sectionBlockers,
+      operatingQuestion: program.operatingQuestion || "",
+      requiredInBriefing: section.requiredInBriefing !== false
+    };
+  });
+}
+
+function markdownBullet(items, formatter, emptyText) {
+  if (!items || items.length === 0) {
+    return "- " + emptyText;
+  }
+  return items.map((item) => "- " + formatter(item)).join("\\n");
+}
+
+function buildReportBriefingMarkdown(state, options) {
+  const audience = normalizeReportAudience(options && options.audience);
+  const focus = normalizeReportFocus(options && options.focus);
+  const items = reportItemsForFocus(state, focus);
+  const blockers = evidenceBlockersForReport(state);
+  const domainSections = domainSectionsForReport(state);
+  const queues = state.taskQueues || {};
+  const resume = state.agentResumeBrief || {};
+  const summary = state.executiveSummary || {};
+  const lines = [];
+  lines.push("# Harness Dashboard Briefing");
+  lines.push("");
+  lines.push("- Audience: " + audience);
+  lines.push("- Report focus: " + focus);
+  lines.push("- Generated at: " + now());
+  lines.push("- Source sequence: " + String(((state.meta || {}).sourceEventSequence) || 0));
+  lines.push("");
+  lines.push("## Current Read");
+  lines.push("");
+  lines.push("- Headline: " + String(summary.headline || resume.currentProjectGoal || "No headline declared"));
+  lines.push("- Current goal: " + String(resume.currentProjectGoal || summary.currentStage || "No current goal declared"));
+  lines.push("- Next operator move: " + String(resume.nextSafestAction || summary.nextDecision || "No next action declared"));
+  lines.push("- Queue posture: " + String((queues.inProgress || []).length) + " active, " + String((queues.blocked || []).length) + " blocked, " + String((queues.needsUser || []).length) + " user decisions");
+  lines.push("");
+  lines.push("## Focus Work");
+  lines.push("");
+  lines.push(markdownBullet(items, (item) => {
+    const title = item.title || item.goal || item.id || "Untitled work";
+    const status = item.status || "unknown";
+    const owner = item.owner || item.agentRole || "unassigned";
+    const nextAction = item.nextActionRef || item.nextStep || item.exitCriteria || "No next action declared";
+    return String(title) + " [" + String(status) + "] owner=" + String(owner) + " next=" + String(nextAction);
+  }, "No work rows matched this focus."));
+  lines.push("");
+  lines.push("## Evidence Blockers");
+  lines.push("");
+  lines.push(markdownBullet(blockers, (item) => {
+    return String(item.label || item.id || "Missing evidence") + " requires " + String(item.requiredEvidenceType || "evidence") + " owner=" + String(item.owner || "unassigned");
+  }, "No evidence blockers declared."));
+  lines.push("");
+  lines.push("## Domain Stress Sections");
+  lines.push("");
+  lines.push(markdownBullet(domainSections, (section) => {
+    const blockerText = section.blockers.slice(0, 3).map((item) => String(item.label || item.id)).join("; ") || "no blockers in this section";
+    return String(section.profileId) + " / " + String(section.section) + " [" + String(section.status) + "] blockers=" + String(section.blockerCount) + " :: " + blockerText;
+  }, "No active domain stress sections."));
+  lines.push("");
+  lines.push("## Report Contract");
+  lines.push("");
+  lines.push("- This briefing is derived from dashboard-state.json and does not create a second source of truth.");
+  lines.push("- Public mode redacts local paths, private URLs, usernames, emails, tokens, keys, and common secret patterns.");
+  lines.push("- Rebuild with export-report whenever the selected focus or dashboard state changes.");
+  lines.push("");
+  return lines.join("\\n");
+}
+
+function buildSpeakerNotesMarkdown(state, options) {
+  const focus = normalizeReportFocus(options && options.focus);
+  const items = reportItemsForFocus(state, focus);
+  const blockers = evidenceBlockersForReport(state);
+  const domainSections = domainSectionsForReport(state);
+  const lines = [];
+  lines.push("# Speaker Notes");
+  lines.push("");
+  lines.push("## Slide 1 - Current Operating Read");
+  lines.push("");
+  lines.push("Explain the current goal, source sequence, and why the report focus was selected.");
+  lines.push("");
+  lines.push("## Slide 2 - Work In Motion");
+  lines.push("");
+  lines.push(markdownBullet(items.slice(0, 5), (item) => String(item.title || item.id || "Untitled") + ": " + String(item.status || "unknown"), "No focus work to narrate."));
+  lines.push("");
+  lines.push("## Slide 3 - Evidence And Decisions");
+  lines.push("");
+  lines.push(markdownBullet(blockers.slice(0, 5), (item) => String(item.label || item.id || "Missing evidence") + " blocks " + ((item.blocksClaimIds || []).join(", ") || "readiness"), "No evidence blocker slide needed."));
+  lines.push("");
+  lines.push("## Slide 4 - Domain Stress Sections");
+  lines.push("");
+  lines.push(markdownBullet(domainSections.slice(0, 8), (section) => String(section.section) + " for " + String(section.profileId) + ": " + String(section.status) + " (" + String(section.blockerCount) + " blockers)", "No domain-specific slide needed."));
+  lines.push("");
+  lines.push("## Slide 5 - Next Operator Move");
+  lines.push("");
+  lines.push(String((state.agentResumeBrief || {}).nextSafestAction || "No next operator move declared."));
+  lines.push("");
+  return lines.join("\\n");
+}
+
+function buildReportPack(state, options = {}) {
+  const audience = normalizeReportAudience(options.audience);
+  const focus = normalizeReportFocus(options.focus);
+  const publicMode = Boolean(options.public);
+  const selectedItems = reportItemsForFocus(state, focus);
+  const evidenceBlockers = evidenceBlockersForReport(state);
+  const domainReportSections = domainSectionsForReport(state);
+  return {
+    manifest: {
+      schemaVersion: SCHEMA_VERSION,
+      projectionVersion: PROJECTION_VERSION,
+      generatedAt: now(),
+      audience,
+      focus,
+      public: publicMode,
+      domainProfiles: (((state.domainStress || {}).activeProfileIds) || []),
+      sourceStateHash: stableHash(state),
+      files: ["briefing.md", "speaker-notes.md", "evidence-appendix.json", "report-manifest.json"],
+      redaction: publicMode ? "public-share-redaction-applied" : "none"
+    },
+    briefingMarkdown: buildReportBriefingMarkdown(state, { audience, focus }),
+    speakerNotesMarkdown: buildSpeakerNotesMarkdown(state, { audience, focus }),
+    evidenceAppendix: {
+      schemaVersion: SCHEMA_VERSION,
+      generatedAt: now(),
+      audience,
+      focus,
+      selectedWork: selectedItems,
+      evidenceBlockers,
+      domainStress: state.domainStress || {},
+      domainOperations: state.domainOperations || {},
+      domainReportSections,
+      decisionContracts: state.decisionContracts || [],
+      criticalSignals: state.criticalSignals || [],
+      taskQueues: state.taskQueues || {},
+      workTimeline: state.workTimeline || {},
+      versionControl: state.versionControl || {},
+      qaEvidence: (state.dashboardQualityScorecard || {}).qaEvidence || null
+    }
+  };
+}
+
+function assertValidDashboardStateForExport(state) {
+  const errors = validateState(state);
+  if (errors.length > 0) {
+    throw new Error("Cannot export dashboard report pack because dashboard state validation failed:\\n" + errors.join("\\n"));
+  }
+}
+
+function writeReportPack(outDir, pack, isPublic) {
+  const writablePack = isPublic ? sanitizePublic(pack) : pack;
+  ensureDir(outDir);
+  writeTextAtomic(path.join(outDir, "briefing.md"), writablePack.briefingMarkdown);
+  writeTextAtomic(path.join(outDir, "speaker-notes.md"), writablePack.speakerNotesMarkdown);
+  writeJson(path.join(outDir, "evidence-appendix.json"), writablePack.evidenceAppendix);
+  writeJson(path.join(outDir, "report-manifest.json"), writablePack.manifest);
 }
 
 function handleExportStatic() {
   const outDir = path.resolve(workspaceRoot, option("--out", path.join(exportsDir, "latest")));
   const isPublic = hasFlag("--public");
   const state = isPublic ? sanitizePublic(loadState()) : loadState();
-  const html = fs.readFileSync(htmlPath, "utf-8").replace(/<script id="dashboard-bootstrap-data" type="application\\/json">[\\s\\S]*?<\\/script>/, "<script id=\\"dashboard-bootstrap-data\\" type=\\"application/json\\">" + JSON.stringify(state).replace(/</g, "\\\\u003c") + "</script>");
+  let html = fs.readFileSync(htmlPath, "utf-8").replace(/<script id="dashboard-bootstrap-data" type="application\\/json">[\\s\\S]*?<\\/script>/, "<script id=\\"dashboard-bootstrap-data\\" type=\\"application/json\\">" + JSON.stringify(state).replace(/</g, "\\\\u003c") + "</script>");
+  html = html.replace("const bootstrapElement =", "window.__HARNESS_STATIC_EXPORT__ = true;\\n      const bootstrapElement =");
+  if (isPublic) {
+    html = sanitizePublic(html);
+  }
   ensureDir(outDir);
   writeTextAtomic(path.join(outDir, "harness-dashboard.html"), html);
   writeJson(path.join(outDir, "dashboard-state.json"), state);
   console.log("Exported Harness Dashboard snapshot to " + outDir);
+}
+
+function handleExportReport() {
+  const outDir = path.resolve(workspaceRoot, option("--out", path.join(exportsDir, "latest-report")));
+  const isPublic = hasFlag("--public");
+  const rawState = loadState();
+  assertValidDashboardStateForExport(rawState);
+  const state = isPublic ? sanitizePublic(rawState) : rawState;
+  const pack = buildReportPack(state, {
+    audience: option("--audience", "maintainer"),
+    focus: option("--focus", "today"),
+    public: isPublic
+  });
+  writeReportPack(outDir, pack, isPublic);
+  console.log("Exported Harness Dashboard report pack to " + outDir);
 }
 
 async function main() {
@@ -2014,6 +2759,7 @@ async function main() {
   if (command === "refresh") return handleRefresh();
   if (command === "record-agent-platforms") return handleRecordAgentPlatforms();
   if (command === "append-event") return handleAppendEvent();
+  if (command === "record-domain-evidence") return handleRecordDomainEvidence();
   if (command === "validate" || command === "verify-projections") return handleValidate();
   if (command === "rebuild-projections" || command === "repair-projections") return handleRebuild();
   if (command === "listen" || command === "serve") return await handleListen();
@@ -2035,7 +2781,8 @@ async function main() {
   }
   if (command === "cleanup-stale") return handleCleanupStale();
   if (command === "export-static") return handleExportStatic();
-  console.log("Usage: dashboard-ops.mjs refresh|record-agent-platforms|append-event|validate|verify-projections|rebuild-projections|repair-projections|listen|ensure-listening|start|stop|restart|status|doctor|logs|cleanup-stale|export-static");
+  if (command === "export-report") return handleExportReport();
+  console.log("Usage: dashboard-ops.mjs refresh|record-agent-platforms|record-domain-evidence|append-event|validate|verify-projections|rebuild-projections|repair-projections|listen|ensure-listening|start|stop|restart|status|doctor|logs|cleanup-stale|export-static|export-report");
 }
 
 await main();

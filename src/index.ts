@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * workspace-init-mcp MCP Server v4.6.0
+ * workspace-init-mcp MCP Server v4.6.1
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -207,6 +207,12 @@ const PROJECT_TYPES = [
   "other",
 ] as const;
 
+const DOMAIN_STRESS_PROFILES = [
+  "identity-commerce-operations",
+  "legacy-modernization-governance",
+  "content-release-governance",
+] as const;
+
 const HARNESS_RUNTIME_ACTIONS = [
   "complete",
   "request_changes",
@@ -323,6 +329,18 @@ const BaseWorkspaceInputSchema = z.object({
     .describe(
       'Primary domains the harness must coordinate (e.g., ["product", "platform", "security"]).'
     ),
+  domainStressProfile: z
+    .enum(DOMAIN_STRESS_PROFILES)
+    .optional()
+    .describe(
+      "Optional high-risk domain profile. When set, the dashboard promotes domain evidence gates into claims, blocked work, and report sections."
+    ),
+  legacyAdoptionProfile: z
+    .string()
+    .optional()
+    .describe(
+      "For existing projects, summarize legacy entities, routes, data stores, risks, migration goals, and protected source boundaries."
+    ),
 });
 
 const InitializeWorkspaceInputSchema = BaseWorkspaceInputSchema.extend({
@@ -400,7 +418,7 @@ const ReconcileWorkspaceInputSchema = BaseWorkspaceInputSchema.partial().extend(
 
 const server = new McpServer({
   name: "workspace-init-mcp",
-  version: "4.6.0",
+  version: "4.6.1",
 });
 
 // ---------------------------------------------------------------------------
@@ -423,7 +441,7 @@ This tool creates a complete workspace setup including:
 - .github/ai-harness/reconcile-policy.json (file-level reconcile safety policy for hold / merge / replace decisions)
 - .github/ai-harness/native-executor-overrides.json (workspace-local handoff and launch tuning for GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, and similar runtimes)
 - docs/ai-harness/readiness/ (remaining-work spec, scoring model, and readiness scorecard template)
-- docs/ai-harness/dashboard/ (Harness Dashboard 4.6 Hypertext Project World Model with ledger, projections, single-file HTML, and read-only local API)
+- docs/ai-harness/dashboard/ (Harness Dashboard 4.6.1 Hypertext Project World Model with ledger, projections, single-file HTML, and read-only local API)
 - docs/ai-harness/runtime/ (planner / generator / evaluator runtime state, prompts, and session ledgers)
 - docs/ai-harness/dashboard/scripts/dashboard-ops.mjs (projection rebuild, strict validation, read-only listener, SSE, VCS collection, and public export)
 - .vscode/settings.json (Copilot custom instruction references)
@@ -439,7 +457,7 @@ Use fileEncoding to set file encoding (default: utf-8). Use lineEnding to set li
 Legacy adoption is non-destructive: generated outputs are limited to governance, documentation, IDE, and harness artifacts and must not delete or replace existing application source files.
 
 Required inputs: workspaceName, purpose, workspacePath
-Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMultiRepo, additionalContext, plannedTasks, includeAgentSkills, agentSkillsIntent, fileEncoding, targetIDEs, lineEnding`,
+Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMultiRepo, additionalContext, plannedTasks, includeAgentSkills, agentSkillsIntent, fileEncoding, targetIDEs, lineEnding, primaryDomains, domainStressProfile, legacyAdoptionProfile`,
     inputSchema: InitializeWorkspaceInputSchema,
   },
   async (params) => {
@@ -464,6 +482,8 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
         autonomyMode: params.autonomyMode,
         tokenBudget: params.tokenBudget,
         primaryDomains: params.primaryDomains,
+        domainStressProfile: params.domainStressProfile,
+        legacyAdoptionProfile: params.legacyAdoptionProfile,
         fileEncoding: params.fileEncoding as WorkspaceInitParams["fileEncoding"],
         targetIDEs: resolveWorkspaceTargetIDEs(
           params.workspacePath,
@@ -616,6 +636,8 @@ For safer upgrades, prefer requireCleanGitWhenPresent: true, keep overwriteModif
         autonomyMode: params.autonomyMode,
         tokenBudget: params.tokenBudget,
         primaryDomains: params.primaryDomains,
+        domainStressProfile: params.domainStressProfile,
+        legacyAdoptionProfile: params.legacyAdoptionProfile,
         fileEncoding: params.fileEncoding as WorkspaceInitParams["fileEncoding"],
         targetIDEs: resolveWorkspaceTargetIDEs(
           params.workspacePath,
@@ -840,6 +862,8 @@ Useful for reviewing the planned structure before committing to it.`,
         autonomyMode: params.autonomyMode,
         tokenBudget: params.tokenBudget,
         primaryDomains: params.primaryDomains,
+        domainStressProfile: params.domainStressProfile,
+        legacyAdoptionProfile: params.legacyAdoptionProfile,
         fileEncoding: params.fileEncoding as WorkspaceInitParams["fileEncoding"],
         targetIDEs: resolveWorkspaceTargetIDEs(
           params.workspacePath,
@@ -1013,7 +1037,7 @@ server.registerTool(
   "get_harness_dashboard_context",
   {
     title: "Get Harness Dashboard Context",
-    description: `Read the Harness Dashboard 4.6 Hypertext Project World Model projections for AI Agent resume context.
+    description: `Read the Harness Dashboard 4.6.1 Hypertext Project World Model projections for AI Agent resume context.
 
 This tool is intentionally read-only. It never starts listeners, refreshes VCS,
 mutates dashboard state, appends ledger events, runs shell commands, or calls an LLM.
@@ -2433,6 +2457,10 @@ server.registerPrompt(
         .string()
         .optional()
         .describe("Project type: learning, web-app, api, mobile, data-science, devops, creative, library, monorepo, consulting, ecommerce, fintech, healthcare, saas, iot, other"),
+      primaryDomains: z
+        .string()
+        .optional()
+        .describe('Primary domains as a comma-separated list, for example "commerce, identity, device-auth, benefits"'),
       techStack: z
         .string()
         .optional()
@@ -2457,6 +2485,30 @@ server.registerPrompt(
         .string()
         .optional()
         .describe('Planned workflows as a comma-separated list, for example "Auth implementation, API design"'),
+      harnessProfile: z
+        .string()
+        .optional()
+        .describe("Harness profile: lean, balanced, regulated, autonomous"),
+      governanceProfile: z
+        .string()
+        .optional()
+        .describe("Governance profile: standard, strict, regulated"),
+      autonomyMode: z
+        .string()
+        .optional()
+        .describe("AI autonomy mode: guided, balanced, autonomous"),
+      tokenBudget: z
+        .string()
+        .optional()
+        .describe("Token strategy: lean, balanced, thorough"),
+      domainStressProfile: z
+        .string()
+        .optional()
+        .describe("Domain stress profile: identity-commerce-operations, legacy-modernization-governance, content-release-governance"),
+      legacyAdoptionProfile: z
+        .string()
+        .optional()
+        .describe("Existing-project modernization context: legacy entities, routes, data stores, risks, and migration goals"),
     },
   },
   (args) => {
@@ -2652,7 +2704,7 @@ server.registerResource(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("workspace-init-mcp server v4.6.0 started on stdio");
+  console.error("workspace-init-mcp server v4.6.1 started on stdio");
 }
 
 main().catch((err) => {

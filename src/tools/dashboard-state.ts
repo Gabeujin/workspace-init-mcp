@@ -154,6 +154,54 @@ export function validateDashboardStateShape(
     requireStringField(errors, "dashboardState.workspace", workspace, "governanceProfile");
     requireStringField(errors, "dashboardState.workspace", workspace, "autonomyMode");
     requireStringField(errors, "dashboardState.workspace", workspace, "tokenBudget");
+    requireStringField(errors, "dashboardState.workspace", workspace, "domainStressProfile");
+    requireStringField(errors, "dashboardState.workspace", workspace, "legacyAdoptionProfile");
+  }
+
+  const domainStress = requireObject(
+    errors,
+    "dashboardState.domainStress",
+    root.domainStress
+  );
+  if (domainStress != null) {
+    requireStringField(errors, "dashboardState.domainStress", domainStress, "schemaVersion");
+    requireStringArrayField(errors, "dashboardState.domainStress", domainStress, "activeProfileIds");
+    requireArray(errors, "dashboardState.domainStress.profiles", domainStress.profiles);
+    requireArray(errors, "dashboardState.domainStress.claims", domainStress.claims);
+    requireArray(
+      errors,
+      "dashboardState.domainStress.missingEvidenceItems",
+      domainStress.missingEvidenceItems
+    );
+    requireArray(errors, "dashboardState.domainStress.workItems", domainStress.workItems);
+    requireArray(
+      errors,
+      "dashboardState.domainStress.decisionContracts",
+      domainStress.decisionContracts
+    );
+    requireArray(errors, "dashboardState.domainStress.hardGates", domainStress.hardGates);
+    requireArray(
+      errors,
+      "dashboardState.domainStress.reportSections",
+      domainStress.reportSections
+    );
+  }
+
+  const domainOperations = requireObject(
+    errors,
+    "dashboardState.domainOperations",
+    root.domainOperations
+  );
+  if (domainOperations != null) {
+    requireStringField(errors, "dashboardState.domainOperations", domainOperations, "schemaVersion");
+    requireStringArrayField(
+      errors,
+      "dashboardState.domainOperations",
+      domainOperations,
+      "activeProfileIds"
+    );
+    requireStringField(errors, "dashboardState.domainOperations", domainOperations, "status");
+    requireArray(errors, "dashboardState.domainOperations.programs", domainOperations.programs);
   }
 
   const executiveSummary = requireObject(
@@ -1396,12 +1444,217 @@ export function validateDashboardStateShape(
     }
   }
 
+  const taskQueues = requireObject(errors, "dashboardState.taskQueues", root.taskQueues);
+  if (taskQueues != null) {
+    for (const field of ["waiting", "inProgress", "completed", "blocked", "needsUser"]) {
+      requireStringArrayField(errors, "dashboardState.taskQueues", taskQueues, field);
+    }
+    for (const field of ["realWorld", "failed"]) {
+      if (taskQueues[field] != null) {
+        requireStringArrayField(errors, "dashboardState.taskQueues", taskQueues, field);
+      }
+    }
+  }
+
+  const claimEvidenceMatrix = requireObject(
+    errors,
+    "dashboardState.claimEvidenceMatrix",
+    root.claimEvidenceMatrix
+  );
+  if (claimEvidenceMatrix != null) {
+    const claims = requireArray(
+      errors,
+      "dashboardState.claimEvidenceMatrix.claims",
+      claimEvidenceMatrix.claims
+    );
+    if (claims != null) {
+      for (const [index, item] of claims.entries()) {
+        const claim = requireObject(
+          errors,
+          `dashboardState.claimEvidenceMatrix.claims[${index}]`,
+          item
+        );
+        if (claim == null) {
+          continue;
+        }
+        requireStringField(errors, `dashboardState.claimEvidenceMatrix.claims[${index}]`, claim, "claimId");
+        requireStringField(errors, `dashboardState.claimEvidenceMatrix.claims[${index}]`, claim, "statement");
+        requireStringField(errors, `dashboardState.claimEvidenceMatrix.claims[${index}]`, claim, "claimStatus");
+        requireNumberField(errors, `dashboardState.claimEvidenceMatrix.claims[${index}]`, claim, "confidence");
+        requireStringArrayField(errors, `dashboardState.claimEvidenceMatrix.claims[${index}]`, claim, "evidenceRefs");
+      }
+    }
+
+    const missingEvidenceItems = requireArray(
+      errors,
+      "dashboardState.claimEvidenceMatrix.missingEvidenceItems",
+      claimEvidenceMatrix.missingEvidenceItems
+    );
+    if (missingEvidenceItems != null) {
+      for (const [index, item] of missingEvidenceItems.entries()) {
+        const missing = requireObject(
+          errors,
+          `dashboardState.claimEvidenceMatrix.missingEvidenceItems[${index}]`,
+          item
+        );
+        if (missing == null) {
+          continue;
+        }
+        requireStringField(errors, `dashboardState.claimEvidenceMatrix.missingEvidenceItems[${index}]`, missing, "id");
+        requireStringField(errors, `dashboardState.claimEvidenceMatrix.missingEvidenceItems[${index}]`, missing, "label");
+        requireStringArrayField(errors, `dashboardState.claimEvidenceMatrix.missingEvidenceItems[${index}]`, missing, "blocksClaimIds");
+        requireStringField(errors, `dashboardState.claimEvidenceMatrix.missingEvidenceItems[${index}]`, missing, "requiredEvidenceType");
+        requireStringField(errors, `dashboardState.claimEvidenceMatrix.missingEvidenceItems[${index}]`, missing, "owner");
+        requireStringField(errors, `dashboardState.claimEvidenceMatrix.missingEvidenceItems[${index}]`, missing, "resolutionTaskId");
+        if (missing.queueVisibility != null && !isString(missing.queueVisibility)) {
+          pushTypeError(
+            errors,
+            `dashboardState.claimEvidenceMatrix.missingEvidenceItems[${index}].queueVisibility`,
+            "a string",
+            missing.queueVisibility
+          );
+        }
+      }
+    }
+  }
+
+  const decisionContracts = requireArray(
+    errors,
+    "dashboardState.decisionContracts",
+    root.decisionContracts
+  );
+  if (decisionContracts != null) {
+    for (const [index, item] of decisionContracts.entries()) {
+      const decision = requireObject(
+        errors,
+        `dashboardState.decisionContracts[${index}]`,
+        item
+      );
+      if (decision == null) {
+        continue;
+      }
+      requireStringField(errors, `dashboardState.decisionContracts[${index}]`, decision, "id");
+      requireStringField(errors, `dashboardState.decisionContracts[${index}]`, decision, "status");
+      requireStringField(errors, `dashboardState.decisionContracts[${index}]`, decision, "owner");
+      requireStringField(errors, `dashboardState.decisionContracts[${index}]`, decision, "decision");
+      requireStringArrayField(errors, `dashboardState.decisionContracts[${index}]`, decision, "evidence");
+    }
+  }
+
+  const workTimeline = requireObject(errors, "dashboardState.workTimeline", root.workTimeline);
+  if (workTimeline != null) {
+    const items = requireArray(errors, "dashboardState.workTimeline.items", workTimeline.items);
+    if (items != null) {
+      for (const [index, item] of items.entries()) {
+        const timelineItem = requireObject(
+          errors,
+          `dashboardState.workTimeline.items[${index}]`,
+          item
+        );
+        if (timelineItem == null) {
+          continue;
+        }
+        requireStringField(errors, `dashboardState.workTimeline.items[${index}]`, timelineItem, "id");
+        requireStringField(errors, `dashboardState.workTimeline.items[${index}]`, timelineItem, "title");
+        requireStringField(errors, `dashboardState.workTimeline.items[${index}]`, timelineItem, "status");
+        requireStringField(errors, `dashboardState.workTimeline.items[${index}]`, timelineItem, "owner");
+        requireStringArrayField(errors, `dashboardState.workTimeline.items[${index}]`, timelineItem, "evidenceRefs");
+      }
+    }
+  }
+
+  const dashboardQualityScorecard = requireObject(
+    errors,
+    "dashboardState.dashboardQualityScorecard",
+    root.dashboardQualityScorecard
+  );
+  if (dashboardQualityScorecard != null) {
+    requireNumberField(errors, "dashboardState.dashboardQualityScorecard", dashboardQualityScorecard, "targetScore");
+    requireNumberField(errors, "dashboardState.dashboardQualityScorecard", dashboardQualityScorecard, "uiUxDesignScore");
+    requireNumberField(errors, "dashboardState.dashboardQualityScorecard", dashboardQualityScorecard, "projectEvidenceScore");
+    const qaEvidence = requireObject(
+      errors,
+      "dashboardState.dashboardQualityScorecard.qaEvidence",
+      dashboardQualityScorecard.qaEvidence
+    );
+    if (qaEvidence != null) {
+      requireStringArrayField(
+        errors,
+        "dashboardState.dashboardQualityScorecard.qaEvidence",
+        qaEvidence,
+        "requiredFor95"
+      );
+      requireStringField(errors, "dashboardState.dashboardQualityScorecard.qaEvidence", qaEvidence, "status");
+      requireStringField(errors, "dashboardState.dashboardQualityScorecard.qaEvidence", qaEvidence, "note");
+      const verifiedQaStatuses = new Set([
+        "verified",
+        "passed",
+        "browser-verified",
+        "current-browser-verified",
+      ]);
+      if (
+        isFiniteNumber(dashboardQualityScorecard.uiUxDesignScore) &&
+        isFiniteNumber(dashboardQualityScorecard.targetScore) &&
+        dashboardQualityScorecard.uiUxDesignScore >= dashboardQualityScorecard.targetScore &&
+        !verifiedQaStatuses.has(String(qaEvidence.status || "").toLowerCase())
+      ) {
+        errors.push(
+          "dashboardState.dashboardQualityScorecard.uiUxDesignScore must stay below targetScore until qaEvidence.status is verified or passed"
+        );
+      }
+    }
+
+    const dimensions = requireArray(
+      errors,
+      "dashboardState.dashboardQualityScorecard.dimensions",
+      dashboardQualityScorecard.dimensions
+    );
+    if (dimensions != null) {
+      for (const [index, item] of dimensions.entries()) {
+        const dimension = requireObject(
+          errors,
+          `dashboardState.dashboardQualityScorecard.dimensions[${index}]`,
+          item
+        );
+        if (dimension == null) {
+          continue;
+        }
+        requireStringField(errors, `dashboardState.dashboardQualityScorecard.dimensions[${index}]`, dimension, "id");
+        requireStringField(errors, `dashboardState.dashboardQualityScorecard.dimensions[${index}]`, dimension, "label");
+        requireNumberField(errors, `dashboardState.dashboardQualityScorecard.dimensions[${index}]`, dimension, "score");
+        requireStringArrayField(errors, `dashboardState.dashboardQualityScorecard.dimensions[${index}]`, dimension, "evidenceRefs");
+        if (
+          qaEvidence != null &&
+          isFiniteNumber(dashboardQualityScorecard.targetScore) &&
+          isFiniteNumber(dimension.score) &&
+          dimension.score >= dashboardQualityScorecard.targetScore
+        ) {
+          const verifiedQaStatuses = new Set([
+            "verified",
+            "passed",
+            "browser-verified",
+            "current-browser-verified",
+          ]);
+          if (!verifiedQaStatuses.has(String(qaEvidence.status || "").toLowerCase())) {
+            errors.push(
+              `dashboardState.dashboardQualityScorecard.dimensions[${index}].score must stay below targetScore until qaEvidence.status is verified or passed`
+            );
+          }
+        }
+      }
+    }
+  }
+
   if (workspace != null && kpiProfile != null && kpis != null) {
     const projectType = workspace.projectType as ProjectType | undefined;
+    const primaryDomains = Array.isArray(workspace.primaryDomains)
+      ? workspace.primaryDomains.map((item) => String(item))
+      : [];
     const domainMode = inferDashboardDomainMode(projectType);
     const expectedProfile = getDashboardKpiProfile({
       domainMode,
       projectType,
+      primaryDomains,
     });
     const actualKpiIds = new Set(
       kpis
@@ -1431,6 +1684,161 @@ export function validateDashboardStateShape(
         if (!governanceRequiredKpis.has(requiredKpiId)) {
           errors.push(
             `dashboardState.governanceState.requiredKpiIds is missing required KPI "${requiredKpiId}"`
+          );
+        }
+      }
+    }
+  }
+
+  if (domainStress != null) {
+    const activeProfileIds = Array.isArray(domainStress.activeProfileIds)
+      ? domainStress.activeProfileIds.map((item) => String(item))
+      : [];
+    const profiles = Array.isArray(domainStress.profiles)
+      ? domainStress.profiles.filter((item): item is Record<string, unknown> => isPlainObject(item))
+      : [];
+    const matrix = isPlainObject(root.claimEvidenceMatrix) ? root.claimEvidenceMatrix : {};
+    const claims = Array.isArray(matrix.claims)
+      ? matrix.claims.filter((item): item is Record<string, unknown> => isPlainObject(item))
+      : [];
+    const gaps = Array.isArray(matrix.missingEvidenceItems)
+      ? matrix.missingEvidenceItems.filter((item): item is Record<string, unknown> => isPlainObject(item))
+      : [];
+    const decisions = Array.isArray(root.decisionContracts)
+      ? root.decisionContracts.filter((item): item is Record<string, unknown> => isPlainObject(item))
+      : [];
+    const timelineObject = isPlainObject(root.workTimeline) ? root.workTimeline : {};
+    const timelineItems = Array.isArray(timelineObject.items)
+      ? timelineObject.items.filter((item): item is Record<string, unknown> => isPlainObject(item))
+      : [];
+    const workMap = isPlainObject(root.workReadinessMap) ? root.workReadinessMap : {};
+    const workRows = Array.isArray(workMap.rows)
+      ? workMap.rows.filter((item): item is Record<string, unknown> => isPlainObject(item))
+      : [];
+    const queues = isPlainObject(root.taskQueues) ? root.taskQueues : {};
+    const queuedIds = new Set(
+      ["waiting", "inProgress", "completed", "blocked", "needsUser"]
+        .flatMap((key) => Array.isArray(queues[key]) ? queues[key].map((item) => String(item)) : [])
+    );
+    const claimIds = new Set(claims.map((claim) => String(claim.claimId)));
+    const gapIds = new Set(gaps.map((gap) => String(gap.id)));
+    const decisionIds = new Set(decisions.map((decision) => String(decision.id)));
+    const timelineIds = new Set(timelineItems.map((item) => String(item.id)));
+    const workRowIds = new Set(workRows.map((item) => String(item.id)));
+    const operationPrograms = domainOperations != null && Array.isArray(domainOperations.programs)
+      ? domainOperations.programs.filter((item): item is Record<string, unknown> => isPlainObject(item))
+      : [];
+    const operationProgramIds = new Set(operationPrograms.map((program) => String(program.profileId)));
+
+    for (const profileId of activeProfileIds) {
+      const profile = profiles.find((item) => String(item.id) === profileId);
+      if (profile == null) {
+        errors.push(`dashboardState.domainStress.profiles is missing active profile "${profileId}"`);
+        continue;
+      }
+      const claimId = `claim.domain.${profileId}.readiness`;
+      const decisionId = `decision.domain-stress.${profileId}`;
+      if (!claimIds.has(claimId)) {
+        errors.push(`dashboardState.claimEvidenceMatrix.claims is missing domain readiness claim "${claimId}"`);
+      }
+      if (!decisionIds.has(decisionId)) {
+        errors.push(`dashboardState.decisionContracts is missing domain decision "${decisionId}"`);
+      }
+      if (!operationProgramIds.has(profileId)) {
+        errors.push(`dashboardState.domainOperations.programs is missing active profile "${profileId}"`);
+      }
+      const evidenceGates = Array.isArray(profile.evidenceGates)
+        ? profile.evidenceGates.filter((item): item is Record<string, unknown> => isPlainObject(item))
+        : [];
+      for (const gate of evidenceGates) {
+        const gateId = String(gate.id);
+        const taskId = `task.${gateId}`;
+        if (!gapIds.has(gateId)) {
+          errors.push(`dashboardState.claimEvidenceMatrix.missingEvidenceItems is missing domain gate "${gateId}"`);
+        }
+        if (!timelineIds.has(taskId)) {
+          errors.push(`dashboardState.workTimeline.items is missing domain task "${taskId}"`);
+        }
+        if (!workRowIds.has(taskId)) {
+          errors.push(`dashboardState.workReadinessMap.rows is missing domain task "${taskId}"`);
+        }
+        if (!queuedIds.has(taskId)) {
+          errors.push(`dashboardState.taskQueues is missing domain task "${taskId}"`);
+        }
+      }
+    }
+    const blockedGateIds = new Set(
+      gaps
+        .filter((gap) => gap.blocksReadiness !== false)
+        .map((gap) => String(gap.id))
+    );
+    const reportSections = Array.isArray(domainStress.reportSections)
+      ? domainStress.reportSections.filter((item): item is Record<string, unknown> => isPlainObject(item))
+      : [];
+    for (const section of reportSections) {
+      const profile = profiles.find((item) => String(item.id) === String(section.profileId));
+      const evidenceGates = profile != null && Array.isArray(profile.evidenceGates)
+        ? profile.evidenceGates.filter((item): item is Record<string, unknown> => isPlainObject(item))
+        : [];
+      const sectionGateIds = evidenceGates
+        .filter((gate) => String(gate.reportSection) === String(section.section))
+        .map((gate) => String(gate.id));
+      const expectedStatus = sectionGateIds.some((id) => blockedGateIds.has(id)) ? "blocked" : "resolved";
+      if (
+        sectionGateIds.length > 0 &&
+        expectedStatus === "resolved" &&
+        String(section.status) !== "resolved"
+      ) {
+        errors.push(
+          `dashboardState.domainStress.reportSections section "${String(
+            section.section
+          )}" must be resolved after all section gates are resolved`
+        );
+      }
+      if (
+        sectionGateIds.length > 0 &&
+        expectedStatus === "blocked" &&
+        String(section.status) === "resolved"
+      ) {
+        errors.push(
+          `dashboardState.domainStress.reportSections section "${String(
+            section.section
+          )}" cannot be resolved while section gates are still blocked`
+        );
+      }
+    }
+    for (const programKey of ["commerceOperations", "modernizationGovernance", "contentRelease"]) {
+      const program = domainOperations != null && isPlainObject(domainOperations[programKey])
+        ? domainOperations[programKey] as Record<string, unknown>
+        : null;
+      if (program == null) {
+        continue;
+      }
+      const operationSections = [
+        ...(Array.isArray(program.sections) ? program.sections : []),
+        ...(Array.isArray(program.domains) ? program.domains : []),
+        ...(Array.isArray(program.pipelines) ? program.pipelines : []),
+      ].filter((item): item is Record<string, unknown> => isPlainObject(item));
+      for (const section of operationSections) {
+        const gateIds = Array.isArray(section.evidenceGateIds)
+          ? section.evidenceGateIds.map((item) => String(item))
+          : [];
+        if (gateIds.length === 0) {
+          continue;
+        }
+        const expectedStatus = gateIds.some((id) => blockedGateIds.has(id)) ? "blocked" : "resolved";
+        if (expectedStatus === "resolved" && String(section.status) !== "resolved") {
+          errors.push(
+            `dashboardState.domainOperations.${programKey} section "${String(
+              section.id ?? section.label
+            )}" must be resolved after all section gates are resolved`
+          );
+        }
+        if (expectedStatus === "blocked" && String(section.status) === "resolved") {
+          errors.push(
+            `dashboardState.domainOperations.${programKey} section "${String(
+              section.id ?? section.label
+            )}" cannot be resolved while section gates are still blocked`
           );
         }
       }

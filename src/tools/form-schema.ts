@@ -119,9 +119,47 @@ export function buildInitFormSchema(): FormSchema {
       type: "tags",
       required: false,
       description:
-        "Domains the AI harness must coordinate across, such as product, platform, security, data, or operations.",
-      placeholder: "product, platform, security, data, operations",
+        "Domains the AI harness must coordinate across, such as product, platform, security, data, operations, commerce, identity, collaboration, or content.",
+      placeholder: "product, platform, security, data, operations, commerce",
       default: [],
+    },
+    {
+      name: "domainStressProfile",
+      label: "Domain stress profile",
+      type: "select",
+      required: false,
+      description:
+        "Optional high-risk domain profile that agents should copy into plans, contracts, dashboard events, and evaluator prompts.",
+      options: [
+        {
+          value: "identity-commerce-operations",
+          label: "Identity commerce operations",
+          description:
+            "Identity, device-assisted access, commerce, payments, benefits, and operator audit",
+        },
+        {
+          value: "legacy-modernization-governance",
+          label: "Legacy modernization governance",
+          description:
+            "Existing system adopted into a governed, role-aware, monetizable product surface",
+        },
+        {
+          value: "content-release-governance",
+          label: "Content release governance",
+          description:
+            "Canonical content, derivative assets, visual governance, release cadence, and feedback loops",
+        },
+      ],
+    },
+    {
+      name: "legacyAdoptionProfile",
+      label: "Legacy adoption profile",
+      type: "textarea",
+      required: false,
+      description:
+        "For existing projects, summarize legacy entities, routes, data stores, risks, target product archetype, migration horizon, and modernization intent.",
+      placeholder:
+        "Legacy CRUD: records/users/roles/routes/storage. Target: collaboration, governance, organizations, monetization. Preserve legacy routes until migration wave 3.",
     },
     {
       name: "docLanguage",

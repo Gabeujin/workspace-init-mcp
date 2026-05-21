@@ -5,7 +5,7 @@
 
 `workspace-init-mcp` is an MCP server that installs an AI-native governance harness into a project without taking ownership of application source code.
 
-Version `4.6.0` introduces the Hypertext Harness Dashboard: a single-file HTML Project World Model backed by JSONL events, JSON projections, a read-only local API, and stakeholder-friendly interactive views. The main shift is from Markdown/JSON-only reporting to a durable hypertext dashboard that can be shared, served locally, inspected by AI agents, and used as a project continuity layer.
+Version `4.6.1` ships the Hypertext Harness Dashboard as a single-file HTML Project World Model backed by JSONL events, JSON projections, a read-only local API, stakeholder-friendly interactive views, and domain-specific evidence gates. The main shift is from Markdown/JSON-only reporting to a durable hypertext dashboard that can be shared, served locally, inspected by AI agents, and used as a project continuity layer.
 
 ---
 
@@ -24,12 +24,13 @@ It generates:
 | Local listener | Token-protected, loopback-only, read-only dashboard API with SSE and deterministic query support. |
 | Reconcile tools | Non-destructive refresh of managed harness files while protecting application source roots. |
 | Parallel orchestration | Expected read/write path contracts, chunk conflict audits, worker assignment, and evaluator loops. |
+| Domain operations | Optional stress profiles for identity/commerce, legacy modernization, and content-release governance with evidence gates and report sections. |
 
 The harness is designed for both new services and existing production-adjacent projects that already have source code, history, and team conventions.
 
 ---
 
-## 4.6.0 Highlights
+## 4.6.1 Highlights
 
 ### Hypertext Dashboard First
 
@@ -62,7 +63,7 @@ Every generated status claim is expected to carry provenance: sequence, source, 
 
 The generated HTML dashboard includes:
 
-- Executive Worldview landing view.
+- Executive Overview landing view.
 - Work tab with open work, progress, blockers, Kanban, and Gantt timeline.
 - Evidence tab for claim-to-proof traceability.
 - Governance tab for decisions, gates, retros, and platform intake.
@@ -71,6 +72,17 @@ The generated HTML dashboard includes:
 - Korean/English language switching.
 - Stakeholder slide-show mode for clean briefing and report conversations.
 - WCAG-oriented keyboard, focus, ARIA, reduced-motion, and non-color-only status patterns.
+
+### Domain Stress And Briefing Packs
+
+4.6.1 adds domain stress profiles that make the dashboard more useful for real service work instead of generic project tracking.
+
+- `identity-commerce-operations`: credential/auth, payment, refund, fulfillment, and operational evidence gates.
+- `legacy-modernization-governance`: AS-IS/TO-BE mapping, migration, rollback, ownership, and compatibility evidence gates.
+- `content-release-governance`: message map, approval, localization, publishing, and post-release evidence gates.
+- `record-domain-evidence` updates the matching work queue, readiness rows, operations timeline, report sections, and missing-evidence signals.
+- `export-report` produces `briefing.md`, `speaker-notes.md`, `evidence-appendix.json`, and `report-manifest.json` from the dashboard state.
+- `/api/harness-dashboard/v1/briefing` exposes the same report pack through the read-only local listener.
 
 ### Read-Only Local Listener
 
@@ -224,7 +236,9 @@ Common commands:
 | `ensure-listening` | Restore the read-only local listener on an available port. |
 | `restart` | Stop and restart the listener for the current workspace. |
 | `record-agent-platforms` | Persist the user's active AI-agent platforms into governance state. |
+| `record-domain-evidence` | Resolve, waive, or re-block a domain stress evidence gate while syncing queues, timeline, readiness rows, and reports. |
 | `export-static --public` | Export a redacted single-file stakeholder snapshot. |
+| `export-report --focus today --public` | Export a dashboard-derived briefing pack with speaker notes, evidence appendix, and report manifest. |
 
 The listener exposes read-only routes under:
 
@@ -236,6 +250,7 @@ The listener exposes read-only routes under:
 /api/harness-dashboard/v1/dictionary
 /api/harness-dashboard/v1/version-control
 /api/harness-dashboard/v1/runtime
+/api/harness-dashboard/v1/briefing
 /api/harness-dashboard/v1/health
 /api/harness-dashboard/v1/events
 /api/harness-dashboard/v1/query
@@ -313,7 +328,7 @@ Main MCP tools include:
 
 ## Quality And Safety Baseline
 
-Version `4.6.0` includes these guardrails:
+Version `4.6.1` includes these guardrails:
 
 - Absolute `workspacePath` enforcement.
 - Non-destructive adoption for legacy projects.
@@ -357,13 +372,17 @@ npm pack --dry-run
 
 ---
 
-## 4.6.0 Release Notes
+## 4.6.1 Release Notes
 
 Major changes:
 
 - Reframed the Harness Dashboard as a hypertext Project World Model.
 - Moved stakeholder communication from Markdown-centric reports to a single-file HTML dashboard.
 - Added audience lenses, slide-show briefing mode, multilingual UI, Tech Stack view, Gantt/Kanban work visualization, and clearer tab purposes.
+- Added domain stress profiles for identity/commerce operations, legacy modernization governance, and content-release governance.
+- Added domain evidence gates that keep missing evidence, work queues, readiness rows, report sections, and operations timelines synchronized.
+- Added dashboard-derived briefing/report export with speaker notes, evidence appendix, report manifest, and read-only `/briefing` API support.
+- Extended initialization inputs for primary domains, governance profile, autonomy mode, token budget, domain stress profile, and legacy adoption posture.
 - Added dashboard context APIs and read-only listener behavior for AI-agent resume.
 - Added agent platform detection, user declaration flow, and instruction surface indexing.
 - Strengthened parallel-agent chunk conflict guidance and expected write-path governance.

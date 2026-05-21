@@ -57,7 +57,7 @@ export const HARNESS_RUNTIME_ADAPTER_IDS = [
 type HarnessRuntimeAdapterId = (typeof HARNESS_RUNTIME_ADAPTER_IDS)[number];
 const NATIVE_EXECUTOR_OVERRIDES_PATH =
   ".github/ai-harness/native-executor-overrides.json";
-const HARNESS_RUNTIME_VERSION = "4.6.0";
+const HARNESS_RUNTIME_VERSION = "4.6.1";
 const HARNESS_VERSION_INDEX_PATH = "docs/ai-harness/runtime/version-index.json";
 const HARNESS_COMPATIBILITY_MATRIX_PATH =
   "docs/ai-harness/runtime/compatibility-matrix.json";
