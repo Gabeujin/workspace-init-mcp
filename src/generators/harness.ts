@@ -84,6 +84,10 @@ export function generateHarnessFiles(
       content: buildContextReadme(params, domains),
     },
     {
+      relativePath: "docs/context/context-index.md",
+      content: buildContextIndex(params, domains),
+    },
+    {
       relativePath: "docs/reviews/README.md",
       content: buildReviewReadme(params),
     },
@@ -570,7 +574,7 @@ This workspace uses the **${profileId}** harness profile to keep long-running AI
 - Every completed implementation chunk must pass the code maturity gate or report uncertainty before closure.
 - Keep commits atomic: one logical chunk/remediation per commit with traceable session or chunk references.
 - After implementation, run verification, code review, remediation, and a final governance refresh before closure.
-- Refresh the admin dashboard state at governance open, after each meaningful chunk, and at governance close.
+- Refresh the Project World Model dashboard state at governance open, after each meaningful chunk, and at governance close.
 
 ## Three-Plan / Three-Review Loop
 
@@ -767,7 +771,7 @@ This directory family defines how AI work is governed for **${params.workspaceNa
 7. Write a chunk contract and agree on evaluator thresholds before coding
 8. Execute one chunk or independent chunk set, validate it, review it, remediate it, and update the review ledger
 9. Run the maturity gate: static analysis, boundary tests, version compatibility, dependency audit, maintainability review, self-correction, and atomic commit traceability
-10. Refresh server health in the admin dashboard and harness work status in the live artifacts dashboard
+10. Refresh realityModel, goalCompass, contextRotMonitor, evidence, runtime, and operations status in the Project World Model dashboard
 11. Close governance artifacts last: work log, review state, handover, contracts, evaluations, and dashboard state
 
 ## Profile
@@ -1142,6 +1146,53 @@ Use this directory to store the minimum durable context needed to continue work 
 ## Owner
 
 The current workspace agents and reviewers are jointly responsible for keeping this ledger useful and current for ${params.workspaceName}.
+`;
+}
+
+function buildContextIndex(
+  params: WorkspaceInitParams,
+  domains: string[]
+): string {
+  return `# Context Index
+
+This index is the durable intake surface for facts that keep AI Agents oriented to
+the same project reality after chat history, context windows, or runtime sessions
+change.
+
+## Workspace
+
+- Workspace: ${params.workspaceName}
+- Mission: ${params.purpose}
+- Primary domains: ${domains.join(", ")}
+
+## Required Fact Record
+
+Every project-specific fact promoted into this ledger should include:
+
+- id
+- status: observed, declared, planned, stale, contradicted, or retired
+- owner
+- lastVerifiedAt
+- ttl
+- evidenceRef
+- reversalCondition
+- relatedGoalRef
+- relatedRealityRef
+
+## Bootstrap Records
+
+| Fact | Status | Owner | TTL | Evidence | Reversal condition |
+| --- | --- | --- | --- | --- | --- |
+| Mission statement | declared | stakeholder-product-owner | until-first-governed-session | docs/ai-harness/dashboard/events/harness-events.jsonl | Stakeholder changes purpose or lifecycle mode |
+| Project reality map | planned | harness-dashboard-operator | until-first-refresh | docs/ai-harness/dashboard/entities/reality-model.json | Real topology evidence contradicts bootstrap model |
+| Goal compass | planned | harness-dashboard-operator | until-first-goal-freeze | docs/ai-harness/dashboard/entities/goal-compass.json | First governed goal is revised |
+
+## Maintenance Rule
+
+When a session learns a real relationship, stale assumption, owner, external
+dependency, environment, data surface, or goal change, update this index or link
+the exact governed artifact that updates \`realityModel\`, \`goalCompass\`, or
+\`contextRotMonitor\`.
 `;
 }
 

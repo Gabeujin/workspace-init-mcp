@@ -193,6 +193,12 @@ const EXPECTED_FILES: Omit<ValidationItem, "status">[] = [
     severity: "required",
   },
   {
+    path: "docs/context/context-index.md",
+    label: "Durable context fact index",
+    category: "docs",
+    severity: "required",
+  },
+  {
     path: "docs/reviews/README.md",
     label: "Review ledger docs",
     category: "docs",
@@ -357,6 +363,30 @@ const EXPECTED_FILES: Omit<ValidationItem, "status">[] = [
   {
     path: "docs/ai-harness/dashboard/entities/project-world-model.json",
     label: "Project World Model entity snapshot",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/entities/reality-model.json",
+    label: "Reality model entity snapshot",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/entities/goal-compass.json",
+    label: "Goal compass entity snapshot",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/entities/context-rot-monitor.json",
+    label: "Context rot monitor entity snapshot",
+    category: "dashboard",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/dashboard/evaluations/harness-evaluation.json",
+    label: "Harness evaluation score artifact",
     category: "dashboard",
     severity: "required",
   },

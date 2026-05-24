@@ -74,12 +74,19 @@ const dashboardDir = path.resolve(__dirname, "..");
 const workspaceRoot = path.resolve(dashboardDir, "../../..");
 const stateDir = path.join(dashboardDir, "state");
 const eventDir = path.join(dashboardDir, "events");
+const entitiesDir = path.join(dashboardDir, "entities");
+const evaluationsDir = path.join(dashboardDir, "evaluations");
 const logDir = path.join(dashboardDir, "logs");
 const exportsDir = path.join(dashboardDir, "exports");
 const statePath = path.join(stateDir, "dashboard-state.json");
 const indexPath = path.join(stateDir, "dashboard-index.json");
 const runtimePath = path.join(stateDir, "dashboard-runtime.json");
 const embeddingPath = path.join(stateDir, "embedding-documents.json");
+const projectWorldModelPath = path.join(entitiesDir, "project-world-model.json");
+const realityModelPath = path.join(entitiesDir, "reality-model.json");
+const goalCompassPath = path.join(entitiesDir, "goal-compass.json");
+const contextRotMonitorPath = path.join(entitiesDir, "context-rot-monitor.json");
+const harnessEvaluationPath = path.join(evaluationsDir, "harness-evaluation.json");
 const ledgerPath = path.join(eventDir, "harness-events.jsonl");
 const manifestPath = path.join(eventDir, "ledger-manifest.json");
 const htmlPath = path.join(dashboardDir, "index.html");
@@ -197,6 +204,108 @@ function normalizeDashboardStateForValidation(state) {
         summary: String(entity.note || entity.label || entity.path || entity.id || "No summary recorded.")
       });
     });
+  }
+  const meta = state.meta || {};
+  const workspace = state.workspace || {};
+  const workspaceId = String(meta.workspaceId || workspace.id || "workspace");
+  const workspaceName = String(workspace.name || workspaceId);
+  const purpose = String(workspace.purpose || "Recover legacy dashboard projection.");
+  const services = Array.isArray((state.projectWorldModel || {}).services) ? state.projectWorldModel.services : [];
+  const products = Array.isArray((state.projectWorldModel || {}).products) ? state.projectWorldModel.products : [];
+  const serviceId = String(((services[0] || {}).id) || "service-primary");
+  const productId = String(((products[0] || {}).id) || "product-primary");
+  if (!isPlainObject(state.realityModel)) {
+    state.realityModel = {
+      schemaVersion: SCHEMA_VERSION,
+      purpose: "Backfilled reality model for a legacy dashboard state; refresh evidence before trusting operational claims.",
+      nodes: [
+        { id: workspaceId, label: workspaceName, type: "workspace", state: "declared", confidence: "low", owner: "maintainer", evidenceRefs: ["legacy-dashboard-state"], freshness: "backfilled" },
+        { id: productId, label: workspaceName, type: "product-or-work-output", state: "declared", confidence: "low", owner: "maintainer", evidenceRefs: ["legacy-dashboard-state"], freshness: "backfilled" },
+        { id: serviceId, label: workspaceName, type: "service-or-work-system", state: "assessment-required", confidence: "low", owner: "maintainer", evidenceRefs: ["legacy-dashboard-state"], freshness: "backfilled" }
+      ],
+      edges: [
+        { id: "edge-backfill-workspace-product", from: workspaceId, to: productId, relation: "governs-purpose", status: "backfilled", confidence: "low", owner: "maintainer", evidenceRefs: ["legacy-dashboard-state"], freshness: "backfilled" },
+        { id: "edge-backfill-product-service", from: productId, to: serviceId, relation: "realized-by", status: "backfilled", confidence: "low", owner: "maintainer", evidenceRefs: ["legacy-dashboard-state"], freshness: "backfilled" }
+      ],
+      missingRelationEvidence: [
+        { id: "missing.backfill-real-topology", label: "Refresh legacy reality topology", relation: "workspace-to-real-system", owner: "maintainer", requiredEvidenceType: "VCS, service, environment, owner, and data-surface evidence", nextActionRef: "dashboard-ops refresh" }
+      ],
+      updateRule: "Backfilled states must be refreshed with owner, evidenceRefs, confidence, freshness, and reversal conditions before operational claims are trusted."
+    };
+  }
+  if (!isPlainObject(state.goalCompass)) {
+    state.goalCompass = {
+      schemaVersion: SCHEMA_VERSION,
+      purpose: "Backfilled goal compass for a legacy dashboard state.",
+      currentReality: "Legacy dashboard state loaded; reality, goal, and context-rot projections need refresh.",
+      goalState: "A future Agent resumes from durable reality, goal, evidence, decisions, risks, owners, and next actions.",
+      northStar: purpose,
+      goalGraph: [
+        { id: "mission", parentId: null, type: "mission", statement: purpose, status: "declared", owner: "stakeholder-product-owner", evidenceRefs: ["legacy-dashboard-state"] },
+        { id: "strategic.world-model-continuity", parentId: "mission", type: "strategic-goal", statement: "Refresh legacy state into a truthful Project World Model.", status: "active", owner: "harness-dashboard-operator", evidenceRefs: ["legacy-dashboard-state"] }
+      ],
+      topGaps: [
+        { id: "gap.legacy-refresh", label: "Legacy state needs reality, goal, and context refresh", status: "open", blocks: ["ready-to-build"], owner: "harness-dashboard-operator", evidenceNeeded: ["dashboard refresh", "active platform declaration", "first governed goal"], nextActionRef: "dashboard-ops refresh" }
+      ],
+      nextSafeMove: "Run dashboard-ops refresh, verify projections, and record the first governed goal.",
+      phaseGate: {
+        id: "gate.goal-alignment.before-implementation",
+        status: "blocked-for-application-change",
+        thresholdScore: 9.8,
+        canPlan: true,
+        canImplementApplicationChange: false,
+        goalTraceRequired: true,
+        rotWarningsBlockImplementation: true,
+        staleRequiredFactsBlockCloseout: true,
+        requiredChecks: ["Goal traces to goalGraph.", "Critical context-rot warnings are resolved."],
+        failurePolicy: "Fail closed until legacy projection is refreshed."
+      },
+      forbiddenDrift: ["Do not implement from backfilled legacy context without refresh."],
+      alignmentChecks: ["Session goal names a parent goal in goalGraph."]
+    };
+  }
+  if (!isPlainObject(state.contextRotMonitor)) {
+    state.contextRotMonitor = {
+      schemaVersion: SCHEMA_VERSION,
+      status: "legacy-refresh-required",
+      purpose: "Backfilled context-rot monitor for a legacy dashboard state.",
+      rotWarnings: [
+        { id: "rot.legacy-backfill", severity: "critical", status: "open", summary: "Legacy dashboard state was backfilled and must be refreshed before implementation.", owner: "harness-dashboard-operator", evidenceRefs: ["legacy-dashboard-state"], nextAction: "Run dashboard-ops refresh and verify-projections.", openedAt: now(), expiresAt: "after-successful-refresh", blocksImplementation: true }
+      ],
+      factRecords: [
+        { id: "fact-legacy-backfill", status: "stale", owner: "harness-dashboard-operator", lastVerifiedAt: now(), ttl: "until-refresh", evidenceRef: "legacy-dashboard-state", reversalCondition: "dashboard-ops refresh rebuilds reality, goal, and context projections.", relatedGoalRef: "strategic.world-model-continuity", relatedRealityRef: workspaceId }
+      ],
+      expiredFacts: ["fact-legacy-backfill"],
+      contradictionRisks: ["Legacy state may omit reality, goal, and context-rot contracts."],
+      staleProjectionPolicy: "Trust ledger-backed events and refresh projections before continuing.",
+      contextLedger: { canonicalPath: "docs/context/context-index.md", requiredFactFields: ["id", "status", "owner", "lastVerifiedAt", "ttl", "evidenceRef", "reversalCondition"] },
+      nextEvidenceToCollect: ["active AI platform declaration", "first governed goal", "VCS refresh"]
+    };
+  }
+  if (!isPlainObject(state.harnessEvaluation)) {
+    state.harnessEvaluation = {
+      schemaVersion: SCHEMA_VERSION,
+      scope: "legacy-backfill-harness-contract",
+      status: "refresh-required",
+      score: 8.2,
+      thresholdScore: 9.8,
+      sourceStateHash: String(meta.sourceStateHash || "legacy-backfill"),
+      evaluatedAt: now(),
+      evaluator: "dashboard-ops legacy backfill evaluator",
+      scoreMeaning: "Backfill contract exists so refresh can proceed safely; it cannot claim a 9.8 pass until refreshed evidence and gates are verified.",
+      gates: {
+        goalTraceRequired: true,
+        criticalRotBlocksImplementation: true,
+        staleFactsBlockCloseout: true,
+        brokenRealityRefsBlockProjection: true,
+        openCriticalWarningCount: 1,
+        canImplementApplicationChange: false
+      },
+      metrics: [
+        { id: "legacy-backfill-contract", label: "Legacy backfill contract", status: "refresh-required", score: 8.2, thresholdScore: 9.8, evidenceRefs: ["legacy-dashboard-state"], failClosedRule: "Implementation remains blocked until refresh resolves backfill warnings." }
+      ],
+      regressionChecks: ["Legacy states receive fail-closed reality, goal, context, and evaluation contracts."]
+    };
   }
   return state;
 }
@@ -347,10 +456,51 @@ function requireValidationNumber(errors, fieldPath, value) {
   }
 }
 
+function requireValidationBoolean(errors, fieldPath, value) {
+  if (typeof value !== "boolean") {
+    pushValidationTypeError(errors, fieldPath, "a boolean", value);
+  }
+}
+
 function requireValidationStringArray(errors, fieldPath, value) {
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
     pushValidationTypeError(errors, fieldPath, "an array of strings", value);
   }
+}
+
+function readValidationStringArray(errors, fieldPath, value) {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    pushValidationTypeError(errors, fieldPath, "an array of strings", value);
+    return [];
+  }
+  return value;
+}
+
+function requireValidationNonEmptyStringArray(errors, fieldPath, value) {
+  const values = readValidationStringArray(errors, fieldPath, value);
+  if (values.length === 0) {
+    errors.push(fieldPath + " must contain at least one entry");
+  }
+  return values;
+}
+
+function requireValidationAllowedString(errors, fieldPath, value, allowedValues) {
+  requireValidationString(errors, fieldPath, value);
+  if (typeof value === "string" && !allowedValues.includes(value)) {
+    errors.push(fieldPath + " must be one of " + allowedValues.join(", ") + "; received " + value);
+  }
+}
+
+function requireValidationUniqueId(errors, seenIds, fieldPath, value) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    pushValidationTypeError(errors, fieldPath, "a non-empty string", value);
+    return null;
+  }
+  if (seenIds.has(value)) {
+    errors.push(fieldPath + " must be unique; duplicate id " + value);
+  }
+  seenIds.add(value);
+  return value;
 }
 
 function qaStatusAllowsTargetScore(status) {
@@ -440,6 +590,190 @@ function validateState(state) {
   requireValidationArray(errors, "dashboardState.domainStress.reportSections", domainStress.reportSections);
   requireValidationStringArray(errors, "dashboardState.domainOperations.activeProfileIds", domainOperations.activeProfileIds);
   const operationPrograms = requireValidationArray(errors, "dashboardState.domainOperations.programs", domainOperations.programs) || [];
+  const realityModel = requireValidationObject(errors, "dashboardState.realityModel", state.realityModel) || {};
+  requireValidationString(errors, "dashboardState.realityModel.schemaVersion", realityModel.schemaVersion);
+  requireValidationString(errors, "dashboardState.realityModel.purpose", realityModel.purpose);
+  const realityNodeIds = new Set();
+  for (const [index, node] of (requireValidationArray(errors, "dashboardState.realityModel.nodes", realityModel.nodes) || []).entries()) {
+    const pathPrefix = "dashboardState.realityModel.nodes[" + index + "]";
+    const item = requireValidationObject(errors, pathPrefix, node);
+    if (!item) continue;
+    requireValidationUniqueId(errors, realityNodeIds, pathPrefix + ".id", item.id);
+    requireValidationString(errors, pathPrefix + ".label", item.label);
+    requireValidationString(errors, pathPrefix + ".type", item.type);
+    requireValidationString(errors, pathPrefix + ".state", item.state);
+    requireValidationAllowedString(errors, pathPrefix + ".confidence", item.confidence, ["low", "medium", "high"]);
+    requireValidationString(errors, pathPrefix + ".owner", item.owner);
+    requireValidationNonEmptyStringArray(errors, pathPrefix + ".evidenceRefs", item.evidenceRefs);
+    requireValidationString(errors, pathPrefix + ".freshness", item.freshness);
+  }
+  const realityEdgeIds = new Set();
+  for (const [index, edge] of (requireValidationArray(errors, "dashboardState.realityModel.edges", realityModel.edges) || []).entries()) {
+    const pathPrefix = "dashboardState.realityModel.edges[" + index + "]";
+    const item = requireValidationObject(errors, pathPrefix, edge);
+    if (!item) continue;
+    requireValidationUniqueId(errors, realityEdgeIds, pathPrefix + ".id", item.id);
+    requireValidationString(errors, pathPrefix + ".from", item.from);
+    requireValidationString(errors, pathPrefix + ".to", item.to);
+    requireValidationString(errors, pathPrefix + ".relation", item.relation);
+    requireValidationString(errors, pathPrefix + ".status", item.status);
+    requireValidationAllowedString(errors, pathPrefix + ".confidence", item.confidence, ["low", "medium", "high"]);
+    requireValidationString(errors, pathPrefix + ".owner", item.owner);
+    requireValidationNonEmptyStringArray(errors, pathPrefix + ".evidenceRefs", item.evidenceRefs);
+    requireValidationString(errors, pathPrefix + ".freshness", item.freshness);
+    if (typeof item.from === "string" && !realityNodeIds.has(item.from)) errors.push(pathPrefix + ".from must reference an existing realityModel node");
+    if (typeof item.to === "string" && !realityNodeIds.has(item.to)) errors.push(pathPrefix + ".to must reference an existing realityModel node");
+  }
+  const missingRelationIds = new Set();
+  for (const [index, missing] of (requireValidationArray(errors, "dashboardState.realityModel.missingRelationEvidence", realityModel.missingRelationEvidence) || []).entries()) {
+    const pathPrefix = "dashboardState.realityModel.missingRelationEvidence[" + index + "]";
+    const item = requireValidationObject(errors, pathPrefix, missing);
+    if (!item) continue;
+    requireValidationUniqueId(errors, missingRelationIds, pathPrefix + ".id", item.id);
+    requireValidationString(errors, pathPrefix + ".label", item.label);
+    requireValidationString(errors, pathPrefix + ".relation", item.relation);
+    requireValidationString(errors, pathPrefix + ".owner", item.owner);
+    requireValidationString(errors, pathPrefix + ".requiredEvidenceType", item.requiredEvidenceType);
+    requireValidationString(errors, pathPrefix + ".nextActionRef", item.nextActionRef);
+  }
+  requireValidationString(errors, "dashboardState.realityModel.updateRule", realityModel.updateRule);
+  const goalCompass = requireValidationObject(errors, "dashboardState.goalCompass", state.goalCompass) || {};
+  requireValidationString(errors, "dashboardState.goalCompass.schemaVersion", goalCompass.schemaVersion);
+  requireValidationString(errors, "dashboardState.goalCompass.currentReality", goalCompass.currentReality);
+  requireValidationString(errors, "dashboardState.goalCompass.goalState", goalCompass.goalState);
+  requireValidationStringArray(errors, "dashboardState.goalCompass.alignmentChecks", goalCompass.alignmentChecks);
+  const goalIds = new Set();
+  const parentRefs = [];
+  for (const [index, goal] of (requireValidationArray(errors, "dashboardState.goalCompass.goalGraph", goalCompass.goalGraph) || []).entries()) {
+    const pathPrefix = "dashboardState.goalCompass.goalGraph[" + index + "]";
+    const item = requireValidationObject(errors, pathPrefix, goal);
+    if (!item) continue;
+    requireValidationUniqueId(errors, goalIds, pathPrefix + ".id", item.id);
+    if (item.parentId !== null) {
+      requireValidationString(errors, pathPrefix + ".parentId", item.parentId);
+      if (typeof item.parentId === "string") parentRefs.push({ path: pathPrefix + ".parentId", parentId: item.parentId });
+    }
+    requireValidationString(errors, pathPrefix + ".type", item.type);
+    requireValidationString(errors, pathPrefix + ".statement", item.statement);
+    requireValidationString(errors, pathPrefix + ".status", item.status);
+    requireValidationString(errors, pathPrefix + ".owner", item.owner);
+    requireValidationNonEmptyStringArray(errors, pathPrefix + ".evidenceRefs", item.evidenceRefs);
+  }
+  for (const ref of parentRefs) {
+    if (!goalIds.has(ref.parentId)) errors.push(ref.path + " must reference an existing goalCompass.goalGraph id");
+  }
+  if (!goalIds.has("mission")) errors.push("dashboardState.goalCompass.goalGraph must include the mission root goal");
+  const goalGapIds = new Set();
+  for (const [index, gap] of (requireValidationArray(errors, "dashboardState.goalCompass.topGaps", goalCompass.topGaps) || []).entries()) {
+    const pathPrefix = "dashboardState.goalCompass.topGaps[" + index + "]";
+    const item = requireValidationObject(errors, pathPrefix, gap);
+    if (!item) continue;
+    requireValidationUniqueId(errors, goalGapIds, pathPrefix + ".id", item.id);
+    requireValidationString(errors, pathPrefix + ".label", item.label);
+    requireValidationString(errors, pathPrefix + ".status", item.status);
+    requireValidationString(errors, pathPrefix + ".owner", item.owner);
+    requireValidationString(errors, pathPrefix + ".nextActionRef", item.nextActionRef);
+    requireValidationNonEmptyStringArray(errors, pathPrefix + ".blocks", item.blocks);
+    requireValidationNonEmptyStringArray(errors, pathPrefix + ".evidenceNeeded", item.evidenceNeeded);
+  }
+  requireValidationString(errors, "dashboardState.goalCompass.nextSafeMove", goalCompass.nextSafeMove);
+  const phaseGate = requireValidationObject(errors, "dashboardState.goalCompass.phaseGate", goalCompass.phaseGate) || {};
+  requireValidationString(errors, "dashboardState.goalCompass.phaseGate.id", phaseGate.id);
+  requireValidationString(errors, "dashboardState.goalCompass.phaseGate.status", phaseGate.status);
+  requireValidationString(errors, "dashboardState.goalCompass.phaseGate.failurePolicy", phaseGate.failurePolicy);
+  requireValidationNumber(errors, "dashboardState.goalCompass.phaseGate.thresholdScore", phaseGate.thresholdScore);
+  requireValidationBoolean(errors, "dashboardState.goalCompass.phaseGate.canPlan", phaseGate.canPlan);
+  requireValidationBoolean(errors, "dashboardState.goalCompass.phaseGate.canImplementApplicationChange", phaseGate.canImplementApplicationChange);
+  requireValidationBoolean(errors, "dashboardState.goalCompass.phaseGate.goalTraceRequired", phaseGate.goalTraceRequired);
+  requireValidationBoolean(errors, "dashboardState.goalCompass.phaseGate.rotWarningsBlockImplementation", phaseGate.rotWarningsBlockImplementation);
+  requireValidationBoolean(errors, "dashboardState.goalCompass.phaseGate.staleRequiredFactsBlockCloseout", phaseGate.staleRequiredFactsBlockCloseout);
+  requireValidationNonEmptyStringArray(errors, "dashboardState.goalCompass.phaseGate.requiredChecks", phaseGate.requiredChecks);
+  const contextRotMonitor = requireValidationObject(errors, "dashboardState.contextRotMonitor", state.contextRotMonitor) || {};
+  requireValidationString(errors, "dashboardState.contextRotMonitor.schemaVersion", contextRotMonitor.schemaVersion);
+  requireValidationString(errors, "dashboardState.contextRotMonitor.status", contextRotMonitor.status);
+  let openCriticalRotWarningCount = 0;
+  const rotWarningIds = new Set();
+  for (const [index, warning] of (requireValidationArray(errors, "dashboardState.contextRotMonitor.rotWarnings", contextRotMonitor.rotWarnings) || []).entries()) {
+    const pathPrefix = "dashboardState.contextRotMonitor.rotWarnings[" + index + "]";
+    const item = requireValidationObject(errors, pathPrefix, warning);
+    if (!item) continue;
+    requireValidationUniqueId(errors, rotWarningIds, pathPrefix + ".id", item.id);
+    requireValidationAllowedString(errors, pathPrefix + ".severity", item.severity, ["info", "warning", "critical"]);
+    requireValidationString(errors, pathPrefix + ".status", item.status);
+    requireValidationString(errors, pathPrefix + ".summary", item.summary);
+    requireValidationString(errors, pathPrefix + ".owner", item.owner);
+    requireValidationNonEmptyStringArray(errors, pathPrefix + ".evidenceRefs", item.evidenceRefs);
+    requireValidationString(errors, pathPrefix + ".nextAction", item.nextAction);
+    requireValidationString(errors, pathPrefix + ".openedAt", item.openedAt);
+    requireValidationString(errors, pathPrefix + ".expiresAt", item.expiresAt);
+    requireValidationBoolean(errors, pathPrefix + ".blocksImplementation", item.blocksImplementation);
+    if (item.severity === "critical" && item.status === "open" && item.blocksImplementation === true) openCriticalRotWarningCount += 1;
+  }
+  const factIds = new Set();
+  for (const [index, fact] of (requireValidationArray(errors, "dashboardState.contextRotMonitor.factRecords", contextRotMonitor.factRecords) || []).entries()) {
+    const pathPrefix = "dashboardState.contextRotMonitor.factRecords[" + index + "]";
+    const item = requireValidationObject(errors, pathPrefix, fact);
+    if (!item) continue;
+    requireValidationUniqueId(errors, factIds, pathPrefix + ".id", item.id);
+    requireValidationAllowedString(errors, pathPrefix + ".status", item.status, ["observed", "declared", "planned", "stale", "contradicted", "retired"]);
+    requireValidationString(errors, pathPrefix + ".owner", item.owner);
+    requireValidationString(errors, pathPrefix + ".lastVerifiedAt", item.lastVerifiedAt);
+    requireValidationString(errors, pathPrefix + ".ttl", item.ttl);
+    requireValidationString(errors, pathPrefix + ".evidenceRef", item.evidenceRef);
+    requireValidationString(errors, pathPrefix + ".reversalCondition", item.reversalCondition);
+    requireValidationString(errors, pathPrefix + ".relatedGoalRef", item.relatedGoalRef);
+    requireValidationString(errors, pathPrefix + ".relatedRealityRef", item.relatedRealityRef);
+  }
+  for (const expiredFactId of readValidationStringArray(errors, "dashboardState.contextRotMonitor.expiredFacts", contextRotMonitor.expiredFacts)) {
+    if (!factIds.has(expiredFactId)) errors.push("dashboardState.contextRotMonitor.expiredFacts contains unknown fact id " + expiredFactId);
+  }
+  requireValidationStringArray(errors, "dashboardState.contextRotMonitor.nextEvidenceToCollect", contextRotMonitor.nextEvidenceToCollect);
+  if (openCriticalRotWarningCount > 0 && phaseGate.canImplementApplicationChange === true) {
+    errors.push("dashboardState.goalCompass.phaseGate.canImplementApplicationChange must be false while critical context rot warnings are open");
+  }
+  const harnessEvaluation = requireValidationObject(errors, "dashboardState.harnessEvaluation", state.harnessEvaluation) || {};
+  requireValidationString(errors, "dashboardState.harnessEvaluation.schemaVersion", harnessEvaluation.schemaVersion);
+  requireValidationString(errors, "dashboardState.harnessEvaluation.scope", harnessEvaluation.scope);
+  requireValidationString(errors, "dashboardState.harnessEvaluation.status", harnessEvaluation.status);
+  requireValidationNumber(errors, "dashboardState.harnessEvaluation.score", harnessEvaluation.score);
+  requireValidationNumber(errors, "dashboardState.harnessEvaluation.thresholdScore", harnessEvaluation.thresholdScore);
+  requireValidationString(errors, "dashboardState.harnessEvaluation.sourceStateHash", harnessEvaluation.sourceStateHash);
+  requireValidationString(errors, "dashboardState.harnessEvaluation.evaluatedAt", harnessEvaluation.evaluatedAt);
+  requireValidationString(errors, "dashboardState.harnessEvaluation.evaluator", harnessEvaluation.evaluator);
+  let failingHarnessMetricCount = 0;
+  const harnessMetricIds = new Set();
+  for (const [index, metric] of (requireValidationArray(errors, "dashboardState.harnessEvaluation.metrics", harnessEvaluation.metrics) || []).entries()) {
+    const pathPrefix = "dashboardState.harnessEvaluation.metrics[" + index + "]";
+    const item = requireValidationObject(errors, pathPrefix, metric);
+    if (!item) continue;
+    requireValidationUniqueId(errors, harnessMetricIds, pathPrefix + ".id", item.id);
+    requireValidationString(errors, pathPrefix + ".label", item.label);
+    requireValidationString(errors, pathPrefix + ".status", item.status);
+    requireValidationNumber(errors, pathPrefix + ".score", item.score);
+    requireValidationNumber(errors, pathPrefix + ".thresholdScore", item.thresholdScore);
+    requireValidationNonEmptyStringArray(errors, pathPrefix + ".evidenceRefs", item.evidenceRefs);
+    requireValidationString(errors, pathPrefix + ".failClosedRule", item.failClosedRule);
+    if (item.status !== "pass" || (Number.isFinite(item.score) && Number.isFinite(item.thresholdScore) && item.score < item.thresholdScore)) {
+      failingHarnessMetricCount += 1;
+    }
+  }
+  const evaluationGates = requireValidationObject(errors, "dashboardState.harnessEvaluation.gates", harnessEvaluation.gates) || {};
+  requireValidationBoolean(errors, "dashboardState.harnessEvaluation.gates.goalTraceRequired", evaluationGates.goalTraceRequired);
+  requireValidationBoolean(errors, "dashboardState.harnessEvaluation.gates.criticalRotBlocksImplementation", evaluationGates.criticalRotBlocksImplementation);
+  requireValidationBoolean(errors, "dashboardState.harnessEvaluation.gates.staleFactsBlockCloseout", evaluationGates.staleFactsBlockCloseout);
+  requireValidationBoolean(errors, "dashboardState.harnessEvaluation.gates.brokenRealityRefsBlockProjection", evaluationGates.brokenRealityRefsBlockProjection);
+  if (Number.isFinite(harnessEvaluation.score) && Number.isFinite(harnessEvaluation.thresholdScore) && harnessEvaluation.score >= harnessEvaluation.thresholdScore && harnessEvaluation.status !== "pass") {
+    errors.push("dashboardState.harnessEvaluation.status must be pass when score meets thresholdScore");
+  }
+  if (harnessEvaluation.status === "pass" && Number.isFinite(harnessEvaluation.score) && Number.isFinite(harnessEvaluation.thresholdScore) && harnessEvaluation.score < harnessEvaluation.thresholdScore) {
+    errors.push("dashboardState.harnessEvaluation.score must meet thresholdScore when status is pass");
+  }
+  if (harnessEvaluation.status === "pass" && failingHarnessMetricCount > 0) {
+    errors.push("dashboardState.harnessEvaluation cannot pass while any metric is below threshold or not pass");
+  }
+  if (harnessEvaluation.status === "pass" && openCriticalRotWarningCount > 0) {
+    errors.push("dashboardState.harnessEvaluation cannot pass while critical context rot warnings are open");
+  }
   const claimIds = new Set(claims.map((claim) => String((claim || {}).claimId || "")));
   const gapIds = new Set(gaps.map((gap) => String((gap || {}).id || "")));
   const decisionIds = new Set(decisions.map((decision) => String((decision || {}).id || "")));
@@ -508,6 +842,11 @@ function validateState(state) {
   requireValidationStringArray(errors, "dashboardState.dashboardQualityScorecard.qaEvidence.requiredFor95", qaEvidence.requiredFor95);
   requireValidationString(errors, "dashboardState.dashboardQualityScorecard.qaEvidence.status", qaEvidence.status);
   requireValidationString(errors, "dashboardState.dashboardQualityScorecard.qaEvidence.note", qaEvidence.note);
+  const modernWebUiPolicy = requireValidationObject(errors, "dashboardState.dashboardQualityScorecard.modernWebUiPolicy", scorecard.modernWebUiPolicy) || {};
+  requireValidationString(errors, "dashboardState.dashboardQualityScorecard.modernWebUiPolicy.sourceBaseline", modernWebUiPolicy.sourceBaseline);
+  requireValidationString(errors, "dashboardState.dashboardQualityScorecard.modernWebUiPolicy.liveRequirement", modernWebUiPolicy.liveRequirement);
+  requireValidationString(errors, "dashboardState.dashboardQualityScorecard.modernWebUiPolicy.htmlInCanvasPolicy", modernWebUiPolicy.htmlInCanvasPolicy);
+  requireValidationString(errors, "dashboardState.dashboardQualityScorecard.modernWebUiPolicy.qaGate", modernWebUiPolicy.qaGate);
   if (Number(scorecard.uiUxDesignScore) >= Number(scorecard.targetScore || 9.5) && !qaStatusAllowsTargetScore(qaEvidence.status)) {
     errors.push("dashboardQualityScorecard.uiUxDesignScore must stay below targetScore until qaEvidence.status is verified or passed");
   }
@@ -1058,6 +1397,10 @@ function deriveIndex(state) {
     governanceActionabilityScore: state.governanceActionabilityScore || null,
     agentPlatformGovernance: state.agentPlatformGovernance || null,
     audienceLens: state.audienceLens || null,
+    realityModel: state.realityModel || null,
+    goalCompass: state.goalCompass || null,
+    contextRotMonitor: state.contextRotMonitor || null,
+    harnessEvaluation: state.harnessEvaluation || null,
     workReadinessMap: state.workReadinessMap || null,
     projectEvidenceInventory: state.projectEvidenceInventory || null,
     claimSummary: {
@@ -1552,10 +1895,37 @@ function synchronizeJudgmentModel(state) {
   quality.projectEvidenceScore = Math.max(1.2, Math.min(6.8, 1.2 + observedSourceCount * 0.45 - evidencePenalty * 0.12));
   quality.lastEvaluatedAt = now();
   quality.qaEvidence = Object.assign({
-    requiredFor95: ["rendered-browser-smoke", "console-clean", "keyboard-and-modal-flow", "responsive-viewport-check"],
+    requiredFor95: [
+      "rendered-browser-smoke",
+      "console-clean",
+      "keyboard-and-modal-flow",
+      "responsive-viewport-check",
+      "live-sse-or-refresh-path-check",
+      "accessibility-tree-check",
+      "modern-ui-progressive-enhancement-check"
+    ],
     status: "pending-run",
-    note: "This refresh records the QA contract; only an external browser QA run should mark it verified."
+    note: "This refresh records the live, interactive, accessible QA contract; only an external browser QA run should mark it verified."
   }, quality.qaEvidence || {});
+  quality.modernWebUiPolicy = Object.assign({
+    schemaVersion: SCHEMA_VERSION,
+    sourceBaseline: "Google I/O 2026 Chrome UI and HTML-in-Canvas guidance",
+    liveRequirement: "World Model Harness Dashboard screens must keep a live local listener, SSE or refresh path, keyboard navigation, and projection freshness cues.",
+    htmlInCanvasPolicy: "HTML-in-Canvas is allowed only as progressive enhancement for canvas/WebGL/WebGPU scenes when semantic DOM fallback, accessibility, find-in-page, translation, and Playwright checks pass.",
+    userPreferenceRules: [
+      "Respect color-scheme, contrast, reduced motion, text scaling, and platform font preferences.",
+      "Prefer native CSS primitives such as light-dark(), accent-color, contrast-aware tokens, and responsive sizing with stable fallbacks."
+    ],
+    interactionRules: [
+      "Prefer native dialog, popover, inert, View Transitions, element-scoped transitions, and scroll-driven animations when browser support and QA allow.",
+      "Every live panel needs a clear purpose, filter or focus control, copy/export action where useful, and visible local API or SSE status."
+    ],
+    noiseReductionRules: [
+      "Reduce repeated panels, use container queries, stable dimensions, and details or hidden-until-found patterns for dense evidence.",
+      "Do not add decorative dashboard chrome that obscures world model status, goals, risks, or next actions."
+    ],
+    qaGate: "If Playwright, accessibility, keyboard, console, responsive, or canvas fallback checks fail, ship the stable semantic DOM/CSS version instead of the experimental enhancement."
+  }, quality.modernWebUiPolicy || {});
   const qaStatus = String((quality.qaEvidence || {}).status || "").toLowerCase();
   const qaVerifiedForTarget = ["verified", "passed", "browser-verified", "current-browser-verified"].includes(qaStatus);
   const proposedUiUxScore = Number(quality.uiUxDesignScore || 9.2);
@@ -1570,8 +1940,8 @@ function synchronizeJudgmentModel(state) {
       })
     : quality.dimensions;
   quality.scoringPolicy = qaVerifiedForTarget
-    ? "Current browser QA evidence may support a 9.5+ UI/UX score."
-    : "UI/UX design is capped below 9.5 until current browser QA evidence proves render, console, keyboard, and responsive checks.";
+    ? "Current browser QA evidence may support a 9.5+ UI/UX score when live, accessible, interactive behavior is verified."
+    : "UI/UX design is capped below 9.5 until current browser QA evidence proves live data, render, console, keyboard, responsive, accessibility, and interactive checks.";
   quality.evaluatorProvenance = Array.from(new Map([
     ...((quality.evaluatorProvenance || []).map((entry) => [entry.id || entry.evaluatorRole || JSON.stringify(entry), entry])),
     ["browser-qa-contract", {
@@ -1586,7 +1956,8 @@ function synchronizeJudgmentModel(state) {
   quality.whyNot95Yet = [
     "Overall actionability is capped by project evidence, not UI polish.",
     "Unclassified dirty VCS paths and missing release/data/service evidence block release and handoff.",
-    "Claims with partial or missing evidence need source events, evaluated falsification results, and owner-approved closure."
+    "Claims with partial or missing evidence need source events, evaluated falsification results, and owner-approved closure.",
+    "Modern UI enhancements must prove live, accessible, interactive behavior through current browser QA before raising the UI score."
   ];
   state.dashboardQualityScorecard = quality;
   const activeRows = Number(((state.workReadinessMap || {}).summary || {}).activeRows || 0);
@@ -1816,6 +2187,9 @@ function persistProjections(state, options = {}) {
     completeness: state.worldModelCompleteness || "partial",
     sourceStateHash: stableHash({
       projectWorldModel: state.projectWorldModel,
+      realityModel: state.realityModel,
+      goalCompass: state.goalCompass,
+      contextRotMonitor: state.contextRotMonitor,
       audienceLens: state.audienceLens,
       taskQueues: state.taskQueues,
       workTimeline: state.workTimeline,
@@ -1840,6 +2214,9 @@ function persistProjections(state, options = {}) {
   normalizeDashboardStateForValidation(state);
   state.meta.sourceStateHash = stableHash({
     projectWorldModel: state.projectWorldModel,
+    realityModel: state.realityModel,
+    goalCompass: state.goalCompass,
+    contextRotMonitor: state.contextRotMonitor,
     worldJudgment: state.worldJudgment,
     criticalSignals: state.criticalSignals,
     claimEvidenceMatrix: state.claimEvidenceMatrix,
@@ -1856,11 +2233,57 @@ function persistProjections(state, options = {}) {
     decisionContracts: state.decisionContracts,
     versionControl: state.versionControl
   });
+  if (state.harnessEvaluation && typeof state.harnessEvaluation === "object" && !Array.isArray(state.harnessEvaluation)) {
+    const openCriticalWarningCount = Array.isArray((state.contextRotMonitor || {}).rotWarnings)
+      ? (state.contextRotMonitor.rotWarnings || []).filter((warning) =>
+          warning &&
+          warning.severity === "critical" &&
+          warning.status === "open" &&
+          warning.blocksImplementation === true
+        ).length
+      : 0;
+    state.harnessEvaluation = Object.assign({}, state.harnessEvaluation, {
+      sourceStateHash: state.meta.sourceStateHash,
+      evaluatedAt: generatedAt,
+      gates: Object.assign({}, state.harnessEvaluation.gates || {}, {
+        openCriticalWarningCount,
+        canImplementApplicationChange: Boolean(((state.goalCompass || {}).phaseGate || {}).canImplementApplicationChange)
+      })
+    });
+    const metrics = Array.isArray(state.harnessEvaluation.metrics) ? state.harnessEvaluation.metrics : [];
+    const allMetricsPass = metrics.length > 0 && metrics.every((metric) =>
+      metric &&
+      metric.status === "pass" &&
+      Number.isFinite(metric.score) &&
+      Number.isFinite(metric.thresholdScore) &&
+      metric.score >= metric.thresholdScore
+    );
+    if (state.harnessEvaluation.status === "pass" && (!allMetricsPass || openCriticalWarningCount > 0)) {
+      state.harnessEvaluation.status = "blocked";
+      state.harnessEvaluation.score = Math.min(Number(state.harnessEvaluation.score || 0), 9.4);
+      state.harnessEvaluation.scoreMeaning = "Evaluation was downgraded because current refresh evidence does not satisfy every metric and critical context-rot gate.";
+    }
+  }
   if (!options.skipLedger) {
     recordProjectionRefreshEvent(state);
   }
   if (state.embeddingProjection) {
     writeJson(embeddingPath, state.embeddingProjection);
+  }
+  if (state.projectWorldModel) {
+    writeJson(projectWorldModelPath, state.projectWorldModel);
+  }
+  if (state.realityModel) {
+    writeJson(realityModelPath, state.realityModel);
+  }
+  if (state.goalCompass) {
+    writeJson(goalCompassPath, state.goalCompass);
+  }
+  if (state.contextRotMonitor) {
+    writeJson(contextRotMonitorPath, state.contextRotMonitor);
+  }
+  if (state.harnessEvaluation) {
+    writeJson(harnessEvaluationPath, state.harnessEvaluation);
   }
   writeJson(statePath, state);
   writeJson(indexPath, deriveIndex(state));
@@ -2726,7 +3149,12 @@ function writeReportPack(outDir, pack, isPublic) {
 function handleExportStatic() {
   const outDir = path.resolve(workspaceRoot, option("--out", path.join(exportsDir, "latest")));
   const isPublic = hasFlag("--public");
-  const state = isPublic ? sanitizePublic(loadState()) : loadState();
+  const rawState = loadState();
+  const errors = validateState(rawState);
+  if (errors.length > 0) {
+    throw new Error("Cannot export static dashboard because dashboard state validation failed:\\n" + errors.join("\\n"));
+  }
+  const state = isPublic ? sanitizePublic(rawState) : rawState;
   let html = fs.readFileSync(htmlPath, "utf-8").replace(/<script id="dashboard-bootstrap-data" type="application\\/json">[\\s\\S]*?<\\/script>/, "<script id=\\"dashboard-bootstrap-data\\" type=\\"application/json\\">" + JSON.stringify(state).replace(/</g, "\\\\u003c") + "</script>");
   html = html.replace("const bootstrapElement =", "window.__HARNESS_STATIC_EXPORT__ = true;\\n      const bootstrapElement =");
   if (isPublic) {

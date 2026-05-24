@@ -49,7 +49,7 @@ ${renderAdditionalContext(params)}
 - Do not start coding until the goal is explicit, review-backed, and frozen.
 - If work is too large for one safe session, split it into resumable chunks before coding.
 - Every chunk must end with updated review, verification, and handover state.
-- Keep the admin dashboard JSON current for server health, and use the live artifacts dashboard for harness work status, artifacts, user confirmation, and real-world action tracking.
+- Keep the Harness Dashboard Project World Model current for reality relationships, goal direction, evidence, decisions, runtime status, and next safe action.
 
 ## Harness World Model Dashboard
 
@@ -59,6 +59,10 @@ ${renderAdditionalContext(params)}
 - Improve \`governanceActionabilityScore.operationalEvidenceScore\` gradually by linking real VCS, CI, release, service-health, incident, SLO/SLI, database, telemetry, and runbook evidence.
 - Never improve a score by hiding warnings, deleting missing evidence, or treating declared/tacit context as observed fact.
 - Use \`worldModelImprovementContract\` as the standing contract for maturity loops, tacit-context intake, score improvement, tab ownership, and non-duplication.
+- For dashboard, UI component, and screen work, follow \`dashboardQualityScorecard.modernWebUiPolicy\`: live local updates, accessible semantic DOM, responsive layouts, user-preference respect, and progressive enhancement for experimental APIs.
+- Use \`realityModel\` to keep real-world project relationships explicit: product, repository, service or work system, environments, data surfaces, external systems, human owners, and evidence freshness.
+- Use \`goalCompass\` to align the next task with the mission, current reality, target state, top gaps, and next safe move.
+- Use \`contextRotMonitor\` to catch stale, contradictory, projection-only, or missing context before implementation drifts.
 - Use \`agentPlatformGovernance\` to confirm the real active AI platforms; record user-declared platforms with \`dashboard-ops.mjs record-agent-platforms\` and treat non-active platform files as \`unused-instruction\`.
 - If repository artifacts do not explain stakeholder intent, operational constraints, domain vocabulary, release windows, external account state, or support expectations, ask for that tacit context and record it as declared context with owner, timestamp, confidence, and reversal condition.
 - Keep dashboard tabs non-duplicative: Overview summarizes, Work sequences, Evidence proves, Governance decides, Operations runs, and Tech Stack explains project composition.
@@ -126,7 +130,7 @@ Use repo artifacts as durable operational memory rather than relying on chat his
 - Changelog: \`docs/changelog/\`
 - Architectural decisions: \`docs/adr/\`
 - AI harness policy: \`.github/ai-harness/\`
-- Admin dashboard: \`docs/ai-harness/dashboard/\`
+- Project World Model dashboard: \`docs/ai-harness/dashboard/\`
 
 ### Minimum Documentation Expectations
 

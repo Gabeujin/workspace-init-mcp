@@ -7,7 +7,7 @@ const GENERATED_CONTROL_PREFIXES = [
   ".claude/",
   ".agents/",
   ".governance/",
-  "live-artifacts-dashboard/",
+  "server-flow-dashboard/",
   "docs/",
 ] as const;
 

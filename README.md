@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/workspace-init-mcp)](https://www.npmjs.com/package/workspace-init-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-`workspace-init-mcp` is an MCP server that installs an AI-native governance harness into a project without taking ownership of application source code.
+`workspace-init-mcp` installs a non-destructive AI Work Harness that lets humans and agents plan, resume, verify, and hand off project work from durable evidence instead of chat history.
 
 Version `4.6.1` ships the Hypertext Harness Dashboard as a single-file HTML Project World Model backed by JSONL events, JSON projections, a read-only local API, stakeholder-friendly interactive views, and domain-specific evidence gates. The main shift is from Markdown/JSON-only reporting to a durable hypertext dashboard that can be shared, served locally, inspected by AI agents, and used as a project continuity layer.
 
@@ -19,7 +19,7 @@ It generates:
 | --- | --- |
 | Agent instructions | Platform-specific guidance for Codex, Copilot, Cursor, Claude Code, Antigravity, OpenHands, and portable MCP clients. |
 | Harness governance | Planning, review, work-packet, evidence, handoff, decision, and reconciliation contracts. |
-| Hypertext dashboard | A single-file `index.html` Project World Model with tabs, charts, Gantt/Kanban work views, audience lenses, multilingual UI, and slide-show briefing mode. |
+| Hypertext dashboard | A single-file `index.html` Project World Model with reality map, goal compass, context-rot monitor, operational command queue, audience lenses, multilingual UI, and slide-show briefing mode. |
 | Ledger and projections | Canonical JSONL events plus rebuildable JSON state, index, runtime, entity, and embedding projections. |
 | Local listener | Token-protected, loopback-only, read-only dashboard API with SSE and deterministic query support. |
 | Reconcile tools | Non-destructive refresh of managed harness files while protecting application source roots. |
@@ -59,12 +59,18 @@ docs/ai-harness/dashboard/schemas/
 
 Every generated status claim is expected to carry provenance: sequence, source, timestamp, freshness, confidence, owner, and evidence.
 
+The generated state now promotes three project-agnostic continuity contracts:
+
+- `realityModel`: product, repository, service/work-system, environment, data, owner, and external dependency relationships with evidence freshness.
+- `goalCompass`: current reality, goal state, top gaps, parent goal graph, next safe move, and forbidden drift.
+- `contextRotMonitor`: stale facts, contradiction risks, projection freshness, and the next evidence an agent should collect before implementation.
+
 ### Stakeholder-Friendly UI
 
 The generated HTML dashboard includes:
 
 - Executive Overview landing view.
-- Work tab with open work, progress, blockers, Kanban, and Gantt timeline.
+- Work tab with an operational command queue, open work, progress, blockers, and timeline views.
 - Evidence tab for claim-to-proof traceability.
 - Governance tab for decisions, gates, retros, and platform intake.
 - System and Tech Stack views for runtime, listener, architecture, infrastructure, and integration surfaces.
@@ -72,6 +78,8 @@ The generated HTML dashboard includes:
 - Korean/English language switching.
 - Stakeholder slide-show mode for clean briefing and report conversations.
 - WCAG-oriented keyboard, focus, ARIA, reduced-motion, and non-color-only status patterns.
+
+UI work follows current Chrome/Google I/O modern web guidance as progressive enhancement: live local updates, semantic DOM, user preference support, View Transitions or scroll-driven motion when useful, and HTML-in-Canvas only when accessible/searchable DOM fallback and browser QA remain intact.
 
 ### Domain Stress And Briefing Packs
 
@@ -378,7 +386,7 @@ Major changes:
 
 - Reframed the Harness Dashboard as a hypertext Project World Model.
 - Moved stakeholder communication from Markdown-centric reports to a single-file HTML dashboard.
-- Added audience lenses, slide-show briefing mode, multilingual UI, Tech Stack view, Gantt/Kanban work visualization, and clearer tab purposes.
+- Added audience lenses, slide-show briefing mode, multilingual UI, Tech Stack view, status-lane/timeline work visualization, and clearer tab purposes.
 - Added domain stress profiles for identity/commerce operations, legacy modernization governance, and content-release governance.
 - Added domain evidence gates that keep missing evidence, work queues, readiness rows, report sections, and operations timelines synchronized.
 - Added dashboard-derived briefing/report export with speaker notes, evidence appendix, report manifest, and read-only `/briefing` API support.

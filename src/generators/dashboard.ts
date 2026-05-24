@@ -483,6 +483,509 @@ function buildServiceContracts(params: WorkspaceInitParams) {
   };
 }
 
+function buildRealityModel(
+  params: WorkspaceInitParams,
+  workspaceId: string,
+  projectWorldModel: ReturnType<typeof buildProjectWorldModel>
+) {
+  const serviceId = projectWorldModel.services[0].id;
+  const productId = projectWorldModel.products[0].id;
+  const environmentNodes = projectWorldModel.environments.map((environment) => ({
+    id: environment.id,
+    label: environment.label,
+    type: "environment",
+    state: environment.status,
+    confidence: environment.status === "unknown" ? "low" : "medium",
+    owner: environment.status === "unknown" ? "maintainer" : "harness-dashboard-operator",
+    evidenceRefs: ["projectWorldModel.environments"],
+    freshness: "bootstrap",
+  }));
+
+  const nodes = [
+    {
+      id: workspaceId,
+      label: params.workspaceName,
+      type: "workspace",
+      state: "declared",
+      confidence: "medium",
+      owner: "stakeholder-product-owner",
+      evidenceRefs: ["event-000001-bootstrap"],
+      freshness: "until-first-session",
+    },
+    {
+      id: productId,
+      label: params.workspaceName,
+      type: "product-or-work-output",
+      state: "declared",
+      confidence: "medium",
+      owner: "stakeholder-product-owner",
+      evidenceRefs: ["projectWorldModel.products"],
+      freshness: "until-product-intake",
+    },
+    {
+      id: "repo-primary",
+      label: "Primary workspace repository",
+      type: "repository",
+      state: "assessment-required",
+      confidence: "low",
+      owner: "maintainer",
+      evidenceRefs: ["versionControl.collectionProvenance"],
+      freshness: "until-vcs-refresh",
+    },
+    {
+      id: serviceId,
+      label: params.workspaceName,
+      type: "service-or-work-system",
+      state: "scaffolded",
+      confidence: "medium",
+      owner: "maintainer",
+      evidenceRefs: ["serviceRegistry", "runningServiceContract"],
+      freshness: "until-service-evidence",
+    },
+    {
+      id: "harness-dashboard",
+      label: "Project World Model projection",
+      type: "harness-surface",
+      state: "generated",
+      confidence: "high",
+      owner: "harness-dashboard-operator",
+      evidenceRefs: ["docs/ai-harness/dashboard/index.html"],
+      freshness: "after-next-refresh",
+    },
+    {
+      id: "context-ledger",
+      label: "Durable context ledger",
+      type: "memory-ledger",
+      state: "generated",
+      confidence: "medium",
+      owner: "harness-memory-curator",
+      evidenceRefs: ["docs/context/README.md", "docs/context/context-index.md"],
+      freshness: "until-first-real-context-update",
+    },
+    ...environmentNodes,
+  ];
+
+  const edges = [
+    {
+      id: "edge-workspace-governs-product",
+      from: workspaceId,
+      to: productId,
+      relation: "governs-purpose",
+      status: "declared",
+      confidence: "medium",
+      owner: "stakeholder-product-owner",
+      evidenceRefs: ["workspace.purpose"],
+      freshness: "until-first-session",
+    },
+    {
+      id: "edge-product-realized-by-service",
+      from: productId,
+      to: serviceId,
+      relation: "realized-by",
+      status: "declared",
+      confidence: "medium",
+      owner: "maintainer",
+      evidenceRefs: ["projectWorldModel.services"],
+      freshness: "until-service-evidence",
+    },
+    {
+      id: "edge-repo-contains-service",
+      from: "repo-primary",
+      to: serviceId,
+      relation: "contains-or-documents",
+      status: "assessment-required",
+      confidence: "low",
+      owner: "maintainer",
+      evidenceRefs: ["versionControl"],
+      freshness: "until-vcs-refresh",
+    },
+    {
+      id: "edge-dashboard-projects-world",
+      from: "harness-dashboard",
+      to: workspaceId,
+      relation: "projects-world-model",
+      status: "supported",
+      confidence: "high",
+      owner: "harness-dashboard-operator",
+      evidenceRefs: [
+        "docs/ai-harness/dashboard/events/harness-events.jsonl",
+        "docs/ai-harness/dashboard/state/dashboard-state.json",
+      ],
+      freshness: "after-next-refresh",
+    },
+    {
+      id: "edge-context-stabilizes-goal",
+      from: "context-ledger",
+      to: workspaceId,
+      relation: "stabilizes-context",
+      status: "generated",
+      confidence: "medium",
+      owner: "harness-memory-curator",
+      evidenceRefs: ["docs/context/context-index.md"],
+      freshness: "until-first-real-context-update",
+    },
+    ...projectWorldModel.environments.map((environment) => ({
+      id: `edge-service-targets-${environment.id}`,
+      from: serviceId,
+      to: environment.id,
+      relation: "targets-environment",
+      status: environment.status === "unknown" ? "unknown" : "planned",
+      confidence: environment.status === "unknown" ? "low" : "medium",
+      owner: "maintainer",
+      evidenceRefs: ["projectWorldModel.environments"],
+      freshness: "until-environment-evidence",
+    })),
+  ];
+
+  return {
+    schemaVersion: DASHBOARD_SCHEMA_VERSION,
+    purpose:
+      "Map the project as a real work system: people, goals, repositories, services, environments, data surfaces, external dependencies, evidence, and freshness.",
+    stateClasses: ["observed", "declared", "planned", "unknown", "stale"],
+    canonicalNodeTypes: [
+      "workspace",
+      "product-or-work-output",
+      "repository",
+      "service-or-work-system",
+      "environment",
+      "data-surface",
+      "external-system",
+      "human-owner",
+      "memory-ledger",
+      "harness-surface",
+    ],
+    nodes,
+    edges,
+    missingRelationEvidence: [
+      {
+        id: "missing.real-repository-linkage",
+        label: "Repository-to-work-system linkage",
+        relation: "repo-primary contains-or-documents primary service/work system",
+        owner: "maintainer",
+        requiredEvidenceType: "VCS refresh plus linked service or project artifact paths",
+        nextActionRef: "missing.vcs-task-links",
+      },
+      {
+        id: "missing.real-environment-topology",
+        label: "Environment topology evidence",
+        relation: "primary service/work system targets real execution environments",
+        owner: "maintainer",
+        requiredEvidenceType: "environment URLs, accounts, deployment target, or not-applicable decision",
+        nextActionRef: "missing.deployment-target",
+      },
+    ],
+    updateRule:
+      "Every new real-world relationship must name owner, status, evidenceRefs, confidence, freshness, and a reversal condition when it affects decisions.",
+  };
+}
+
+function buildGoalCompass(params: WorkspaceInitParams, domainStress: ReturnType<typeof buildDomainStressState>) {
+  const domainGate =
+    domainStress.activeProfileIds.length > 0
+      ? `Resolve active domain stress gates for ${domainStress.activeProfileIds.join(", ")}.`
+      : "Open the first governed session and connect real evidence.";
+
+  return {
+    schemaVersion: DASHBOARD_SCHEMA_VERSION,
+    purpose:
+      "Keep humans and AI Agents oriented from current reality to goal state without relying on chat history.",
+    currentReality:
+      "Bootstrap harness is installed; real project evidence, active platform declaration, service/runtime state, and VCS linkage still need confirmation.",
+    goalState:
+      "A future Agent can resume from durable reality, goal, evidence, decisions, risks, owners, and next actions without reconstructing hidden context.",
+    northStar: params.purpose,
+    goalGraph: [
+      {
+        id: "mission",
+        parentId: null,
+        type: "mission",
+        statement: params.purpose,
+        status: "declared",
+        owner: "stakeholder-product-owner",
+        evidenceRefs: ["workspace.purpose", "event-000001-bootstrap"],
+      },
+      {
+        id: "strategic.world-model-continuity",
+        parentId: "mission",
+        type: "strategic-goal",
+        statement:
+          "Maintain a truthful Project World Model with reality relationships, evidence, decisions, and next safe action.",
+        status: "active",
+        owner: "harness-dashboard-operator",
+        evidenceRefs: ["worldModelImprovementContract", "realityModel"],
+      },
+      {
+        id: "session.first-governed-goal",
+        parentId: "strategic.world-model-continuity",
+        type: "session-goal",
+        statement: "Confirm the first governed goal and service/work lifecycle mode.",
+        status: "pending-decision",
+        owner: "stakeholder-product-owner",
+        evidenceRefs: ["decision-first-governed-goal"],
+      },
+    ],
+    topGaps: [
+      {
+        id: "gap.first-governed-goal",
+        label: "First governed goal is not frozen",
+        status: "open",
+        blocks: ["ready-to-build", "claim.agent.safe-resume"],
+        owner: "stakeholder-product-owner",
+        evidenceNeeded: ["approved first governed goal", "service/work lifecycle mode"],
+        nextActionRef: "decision-first-governed-goal",
+      },
+      {
+        id: "gap.real-world-topology",
+        label: "Physical/project relationship map is still bootstrap-level",
+        status: "open",
+        blocks: ["claim.service.operational-readiness", "claim.data.integrity"],
+        owner: "maintainer",
+        evidenceNeeded: ["repository/service linkage", "environment topology", "data-surface decision"],
+        nextActionRef: "missing.real-environment-topology",
+      },
+      {
+        id: "gap.evidence-linkage",
+        label: "VCS, service, release, data, and operations evidence are not linked",
+        status: "open",
+        blocks: ["ready-to-release", "ready-to-operate", "ready-to-handoff"],
+        owner: "harness-dashboard-operator",
+        evidenceNeeded: ["VCS refresh", "validation records", "release and operations evidence"],
+        nextActionRef: "missing.vcs-task-links",
+      },
+    ],
+    nextSafeMove: domainGate,
+    phaseGate: {
+      id: "gate.goal-alignment.before-implementation",
+      status: "blocked-for-application-change",
+      thresholdScore: 9.8,
+      canPlan: true,
+      canImplementApplicationChange: false,
+      goalTraceRequired: true,
+      rotWarningsBlockImplementation: true,
+      staleRequiredFactsBlockCloseout: true,
+      requiredChecks: [
+        "Chunk goal traces to an existing goalCompass.goalGraph id.",
+        "Open critical contextRotMonitor warnings are resolved, waived, or marked not-applicable with evidence.",
+        "Top gap blockers are either outside the chunk scope or explicitly carried into the chunk contract.",
+        "Newly learned facts update contextRotMonitor.factRecords or a linked governed artifact.",
+      ],
+      failurePolicy:
+        "Fail closed: planning and evidence collection may continue, but application-source implementation waits until goal trace and critical context-rot checks pass.",
+    },
+    forbiddenDrift: [
+      "Do not optimize a local task while the parent mission or first governed goal is unresolved.",
+      "Do not treat declared or tacit context as observed reality without evidence and owner.",
+      "Do not close a session without updating realityModel, goalCompass, or contextRotMonitor when new facts were learned.",
+    ],
+    alignmentChecks: [
+      "Session goal names a parent goal in goalGraph.",
+      "Chunk goal has expected write paths and verification commands.",
+      "Evidence gaps are visible before readiness scores rise.",
+      "Next safe move is specific enough for a new Agent to start without chat history.",
+    ],
+  };
+}
+
+function buildContextRotMonitor(
+  domainStress: ReturnType<typeof buildDomainStressState>
+) {
+  return {
+    schemaVersion: DASHBOARD_SCHEMA_VERSION,
+    status: "watching",
+    purpose:
+      "Detect stale, contradictory, projection-only, or missing context before an Agent drifts away from the real goal.",
+    rotWarnings: [
+      {
+        id: "rot.bootstrap-expiry",
+        severity: "warning",
+        status: "open",
+        summary: "Bootstrap context expires after the first real governed session or service evidence update.",
+        owner: "harness-dashboard-operator",
+        evidenceRefs: ["agentResumeBrief.staleStateWarning"],
+        nextAction: "Run verify-projections, refresh, then start or resume a governed session.",
+        openedAt: BOOTSTRAP_TIME,
+        expiresAt: "after-first-governed-session",
+        blocksImplementation: false,
+      },
+      {
+        id: "rot.unconfirmed-platforms",
+        severity: "warning",
+        status: "open",
+        summary: "AI platform instructions remain inferred until the user records the active platform set.",
+        owner: "stakeholder-product-owner",
+        evidenceRefs: ["agentPlatformGovernance"],
+        nextAction: "Record active platforms with dashboard-ops.mjs record-agent-platforms.",
+        openedAt: BOOTSTRAP_TIME,
+        expiresAt: "after-agent-platform-declaration",
+        blocksImplementation: false,
+      },
+      ...domainStress.activeProfileIds.map((profileId) => ({
+        id: `rot.domain-stress.${profileId}`,
+        severity: "critical",
+        status: "open",
+        summary: `Domain stress profile ${profileId} has unresolved mandatory evidence gates.`,
+        owner: "domain-orchestrator",
+        evidenceRefs: ["domainStress", "claimEvidenceMatrix.missingEvidenceItems"],
+        nextAction: "Resolve, waive, or mark not-applicable each mandatory evidence gate with a durable artifact.",
+        openedAt: BOOTSTRAP_TIME,
+        expiresAt: "before-domain-readiness-claim",
+        blocksImplementation: true,
+      })),
+    ],
+    factRecords: [
+      {
+        id: "fact-bootstrap-purpose",
+        status: "declared",
+        owner: "stakeholder-product-owner",
+        lastVerifiedAt: BOOTSTRAP_TIME,
+        ttl: "until-first-governed-session",
+        evidenceRef: "workspace.purpose",
+        reversalCondition: "Stakeholder changes the mission, lifecycle mode, or product boundary.",
+        relatedGoalRef: "mission",
+        relatedRealityRef: "workspace",
+      },
+      {
+        id: "fact-agent-platforms-inferred",
+        status: "declared",
+        owner: "harness-dashboard-operator",
+        lastVerifiedAt: BOOTSTRAP_TIME,
+        ttl: "until-agent-platform-declaration",
+        evidenceRef: "agentPlatformGovernance",
+        reversalCondition: "User records active AI platforms or marks generated platform overlays unused.",
+        relatedGoalRef: "strategic.world-model-continuity",
+        relatedRealityRef: "harness-dashboard",
+      },
+      {
+        id: "fact-real-topology-bootstrap",
+        status: "planned",
+        owner: "maintainer",
+        lastVerifiedAt: BOOTSTRAP_TIME,
+        ttl: "until-first-vcs-and-service-refresh",
+        evidenceRef: "realityModel",
+        reversalCondition: "Repository, service, environment, data, or external-system evidence updates the topology.",
+        relatedGoalRef: "strategic.world-model-continuity",
+        relatedRealityRef: "repo-primary",
+      },
+    ],
+    expiredFacts: ["fact-bootstrap-purpose"],
+    contradictionRisks: [
+      "Dashboard projection may claim orientation readiness while VCS evidence is still uncollected.",
+      "Declared platform instructions may not match the AI tools actually used by the project.",
+      "A service/work system can appear scaffolded while no real environment, owner, or health evidence exists.",
+    ],
+    staleProjectionPolicy:
+      "If dashboard-state.json, dashboard-index.json, runtime state, or handoff artifacts disagree, trust ledger-backed events and refresh projections before continuing.",
+    contextLedger: {
+      canonicalPath: "docs/context/context-index.md",
+      requiredFactFields: [
+        "id",
+        "status",
+        "owner",
+        "lastVerifiedAt",
+        "ttl",
+        "evidenceRef",
+        "reversalCondition",
+      ],
+    },
+    nextEvidenceToCollect: [
+      "active AI platform declaration",
+      "first governed goal and lifecycle mode",
+      "VCS refresh and dirty/unlinked change classification",
+      "service/work-system owner and real environment evidence",
+      "domain stress evidence gates when a profile is active",
+    ],
+  };
+}
+
+function buildHarnessEvaluation(
+  sourceStateHash: string,
+  realityModel: ReturnType<typeof buildRealityModel>,
+  goalCompass: ReturnType<typeof buildGoalCompass>,
+  contextRotMonitor: ReturnType<typeof buildContextRotMonitor>
+) {
+  const openCriticalWarnings = contextRotMonitor.rotWarnings.filter(
+    (warning) =>
+      warning.severity === "critical" &&
+      warning.status === "open" &&
+      warning.blocksImplementation
+  ).length;
+  const metricThreshold = 9.8;
+  const metrics = [
+    {
+      id: "reality-graph-integrity",
+      label: "Reality graph integrity",
+      status: "pass",
+      score: 9.9,
+      thresholdScore: metricThreshold,
+      evidenceRefs: ["realityModel.nodes", "realityModel.edges", "realityModel.missingRelationEvidence"],
+      failClosedRule:
+        "Projection validation fails when a reality edge points at a missing node or a relationship lacks owner, confidence, freshness, or evidence.",
+    },
+    {
+      id: "goal-trace-gate",
+      label: "Goal trace gate",
+      status: "needs-runtime-evidence",
+      score: 8.8,
+      thresholdScore: metricThreshold,
+      evidenceRefs: ["goalCompass.goalGraph", "goalCompass.phaseGate", "goalCompass.topGaps"],
+      failClosedRule:
+        "Application-source implementation is blocked when a chunk goal cannot trace to goalCompass.goalGraph.",
+    },
+    {
+      id: "context-rot-gate",
+      label: "Context rot gate",
+      status: openCriticalWarnings > 0 ? "blocked" : "needs-runtime-evidence",
+      score: openCriticalWarnings > 0 ? 8.4 : 8.9,
+      thresholdScore: metricThreshold,
+      evidenceRefs: ["contextRotMonitor.rotWarnings", "contextRotMonitor.factRecords"],
+      failClosedRule:
+        "Open critical context-rot warnings block implementation and stale required facts block closeout.",
+    },
+    {
+      id: "evaluation-artifact",
+      label: "Deterministic evaluation artifact",
+      status: "needs-evidence",
+      score: 8.7,
+      thresholdScore: metricThreshold,
+      evidenceRefs: [
+        "docs/ai-harness/dashboard/evaluations/harness-evaluation.json",
+        "dashboard-ops.mjs verify-projections",
+      ],
+      failClosedRule:
+        "A score at or above threshold is invalid unless every metric is pass and the sourceStateHash is recorded.",
+    },
+  ];
+
+  return {
+    schemaVersion: DASHBOARD_SCHEMA_VERSION,
+    scope: "bootstrap-harness-contract",
+    status: "needs-evidence",
+    score: 8.9,
+    thresholdScore: metricThreshold,
+    sourceStateHash,
+    evaluatedAt: BOOTSTRAP_TIME,
+    evaluator: "workspace-init-mcp deterministic harness evaluator",
+    scoreMeaning:
+      "This is the harness contract score target for reality/goal/context enforcement. Bootstrap starts below 9.8 until current validation, runtime evidence, browser QA, and critical context-rot gates prove the contract.",
+    gates: {
+      goalTraceRequired: goalCompass.phaseGate.goalTraceRequired,
+      criticalRotBlocksImplementation: goalCompass.phaseGate.rotWarningsBlockImplementation,
+      staleFactsBlockCloseout: goalCompass.phaseGate.staleRequiredFactsBlockCloseout,
+      brokenRealityRefsBlockProjection: true,
+      openCriticalWarningCount: openCriticalWarnings,
+      canImplementApplicationChange: goalCompass.phaseGate.canImplementApplicationChange,
+    },
+    metrics,
+    regressionChecks: [
+      "Broken realityModel edge references fail validation.",
+      "Dangling goalGraph parent references fail validation.",
+      "Open critical contextRotMonitor warnings cannot coexist with canImplementApplicationChange=true.",
+      "A passing harnessEvaluation cannot contain failed or below-threshold metrics.",
+      "Bootstrap evaluation cannot claim pass or 9.8 until runtime evidence and current QA gates are verified.",
+    ],
+  };
+}
+
 const DOMAIN_STRESS_DEFINITIONS = [
   {
     id: "identity-commerce-operations",
@@ -1043,6 +1546,9 @@ function buildDashboardState(params: WorkspaceInitParams) {
   const domainStress = buildDomainStressState(params);
   const domainOperations = buildDomainOperations(domainStress);
   const projectWorldModel = buildProjectWorldModel(params, workspaceId);
+  const realityModel = buildRealityModel(params, workspaceId, projectWorldModel);
+  const goalCompass = buildGoalCompass(params, domainStress);
+  const contextRotMonitor = buildContextRotMonitor(domainStress);
   const contracts = buildServiceContracts(params);
   const stateHashSeed = {
     workspaceId,
@@ -1050,6 +1556,12 @@ function buildDashboardState(params: WorkspaceInitParams) {
     purpose: params.purpose,
   };
   const sourceStateHash = stableHash(stateHashSeed);
+  const harnessEvaluation = buildHarnessEvaluation(
+    sourceStateHash,
+    realityModel,
+    goalCompass,
+    contextRotMonitor
+  );
   const commonProjection = {
     sourceEventSequence: BOOTSTRAP_SEQUENCE,
     sourceStateHash,
@@ -1076,6 +1588,10 @@ function buildDashboardState(params: WorkspaceInitParams) {
   const authoritativeFiles = [
     "docs/ai-harness/dashboard/events/harness-events.jsonl",
     "docs/ai-harness/dashboard/events/ledger-manifest.json",
+    "docs/ai-harness/dashboard/entities/reality-model.json",
+    "docs/ai-harness/dashboard/entities/goal-compass.json",
+    "docs/ai-harness/dashboard/entities/context-rot-monitor.json",
+    "docs/ai-harness/dashboard/evaluations/harness-evaluation.json",
     "docs/ai-harness/dashboard/state/dashboard-state.json",
     "docs/ai-harness/dashboard/state/dashboard-index.json",
     "docs/ai-harness/runtime/state/session-index.json",
@@ -1182,6 +1698,10 @@ function buildDashboardState(params: WorkspaceInitParams) {
     agentPlatformGovernance,
     audienceLens: buildAudienceLensContract(),
     projectWorldModel,
+    realityModel,
+    goalCompass,
+    contextRotMonitor,
+    harnessEvaluation,
     domainStress,
     domainOperations,
     worldModelFacts: [
@@ -1660,11 +2180,42 @@ function buildDashboardState(params: WorkspaceInitParams) {
       uiUxDesignScore: 9.2,
       projectEvidenceScore: 1.2,
       scoringPolicy:
-        "UI/UX design is capped below 9.5 until current browser QA evidence proves render, console, keyboard, and responsive checks.",
+        "UI/UX design is capped below 9.5 until current browser QA evidence proves live data, render, console, keyboard, responsive, accessibility, and interactive checks.",
       qaEvidence: {
-        requiredFor95: ["rendered-browser-smoke", "console-clean", "keyboard-and-modal-flow", "responsive-viewport-check"],
+        requiredFor95: [
+          "rendered-browser-smoke",
+          "console-clean",
+          "keyboard-and-modal-flow",
+          "responsive-viewport-check",
+          "live-sse-or-refresh-path-check",
+          "accessibility-tree-check",
+          "modern-ui-progressive-enhancement-check",
+        ],
         status: "pending-run",
-        note: "No generated dashboard may self-certify above the 9.5 target until a current browser QA artifact is linked.",
+        note: "No generated dashboard may self-certify above the 9.5 target until a current browser QA artifact proves live, interactive, accessible, responsive behavior.",
+      },
+      modernWebUiPolicy: {
+        schemaVersion: DASHBOARD_SCHEMA_VERSION,
+        sourceBaseline: "Google I/O 2026 Chrome UI and HTML-in-Canvas guidance",
+        liveRequirement:
+          "World Model Harness Dashboard work must preserve the live local listener, SSE/runtime refresh path, keyboard navigation, and projection freshness cues.",
+        htmlInCanvasPolicy:
+          "HTML-in-Canvas may be used only as progressive enhancement for canvas/WebGL/WebGPU surfaces; semantic DOM fallback, accessibility, find-in-page, translation, and Playwright verification are mandatory.",
+        userPreferenceRules: [
+          "Respect color-scheme, prefers-color-scheme, prefers-contrast, prefers-reduced-motion, and user text scaling.",
+          "Use light-dark(), accent-color, contrast-aware tokens, and responsive container-aware sizing where supported with fallback CSS.",
+        ],
+        interactionRules: [
+          "Use View Transitions, element-scoped transitions, scroll-driven animations, popover/dialog/inert, and move-before only when they improve orientation and do not break QA.",
+          "Prefer native HTML controls and semantic DOM before canvas-only UI.",
+          "Keep dashboard interactions live: tab purpose updates, filters, copy/export actions, local API health, and SSE events must remain visible and testable.",
+        ],
+        noiseReductionRules: [
+          "Reduce repeated panels and visual clutter before adding motion.",
+          "Use container queries, scroll-state affordances, details/hidden-until-found, and stable component dimensions to keep dense dashboards scannable.",
+        ],
+        qaGate:
+          "If Playwright, accessibility, keyboard, console, responsive, or canvas fallback checks fail, prefer stable DOM/CSS over experimental API usage.",
       },
       dimensions: [
         {
@@ -1676,8 +2227,8 @@ function buildDashboardState(params: WorkspaceInitParams) {
             "First-screen panels answer trust, blocked actions, required decision, owner, and value at risk.",
         },
         {
-          id: "gantt-readiness-map",
-          label: "Gantt as readiness map",
+          id: "timeline-readiness-map",
+          label: "Timeline as readiness map",
           score: 9.3,
           evidenceRefs: ["workTimeline", "readinessJudgments", "claimEvidenceMatrix"],
           rationale:
@@ -1722,6 +2273,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         "Project evidence is intentionally low until service, VCS, release, and operations claims are linked to real artifacts.",
         "Dirty or unclassified working-tree paths cap handoff and release readiness.",
         "Operational trust cannot exceed evidence coverage even when the UI design is strong.",
+        "Modern UI enhancements must prove live, accessible, interactive behavior through current browser QA before raising the UI score.",
       ],
     },
     governanceActionabilityScore: {
@@ -1773,6 +2325,9 @@ function buildDashboardState(params: WorkspaceInitParams) {
         "Read dashboard-index.json or call get_harness_dashboard_context before meaningful work.",
         "Confirm or record active AI agent platforms so platform-specific instruction files match the real toolchain.",
         "Analyze repository artifacts, governance records, runtime files, VCS state, and project-specific conventions.",
+        "Update realityModel when a real product, repository, service, environment, data surface, owner, or external dependency relationship is learned.",
+        "Update goalCompass when the current reality, target state, gap list, or next safe move changes.",
+        "Review contextRotMonitor before implementation and clear only warnings that have durable evidence.",
         "Ask for or record tacit real-world context when repository evidence is insufficient.",
         "Convert unknowns into decisions, risks, evidence tasks, dictionary terms, or explicit stale facts.",
         "Refresh and verify projections after material decisions, evidence, VCS, service, or operations changes.",
@@ -1791,7 +2346,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         Overview:
           "Executive orientation only: what changed, what matters, trust, next decision, and score meaning.",
         Work:
-          "Open work, progress, Kanban/Gantt, blockers, remaining effort, and KPI timing inputs.",
+          "Open work, progress, status lanes, timeline readiness, blockers, remaining effort, and KPI timing inputs.",
         Evidence:
           "Claim-to-proof matrix, missing evidence, VCS linkage, validation, and falsification status.",
         Governance:
@@ -1861,6 +2416,10 @@ function buildDashboardState(params: WorkspaceInitParams) {
         primaryQuestion: "What is the next safest action and what assumptions are forbidden?",
         mustRead: [
           "agentResumeBrief",
+          "goalCompass",
+          "realityModel",
+          "contextRotMonitor",
+          "harnessEvaluation",
           "governanceActionabilityScore",
           "worldModelImprovementContract",
           "agentPlatformGovernance",
@@ -1876,6 +2435,9 @@ function buildDashboardState(params: WorkspaceInitParams) {
           "Do not treat pending decisions as approved.",
           "Do not assume the generated platform instruction files are all active until agentPlatformGovernance is declared.",
           "Do not treat tacit stakeholder context as observed fact until it has evidence or an owner-approved declaration.",
+          "Do not start implementation when the proposed chunk goal cannot be traced to goalCompass.goalGraph.",
+          "Do not ignore contextRotMonitor.rotWarnings even when a local task looks straightforward.",
+          "Do not report a 9.8+ harness score unless harnessEvaluation.status is pass and every metric meets its threshold.",
         ],
       },
       maintainer: {
@@ -2725,6 +3287,10 @@ function buildDashboardIndex(state: Record<string, unknown>) {
     governanceActionabilityScore: state.governanceActionabilityScore,
     agentPlatformGovernance: state.agentPlatformGovernance,
     audienceLens: state.audienceLens,
+    realityModel: state.realityModel,
+    goalCompass: state.goalCompass,
+    contextRotMonitor: state.contextRotMonitor,
+    harnessEvaluation: state.harnessEvaluation,
     worldModelImprovementContract: state.worldModelImprovementContract,
     workReadinessMap: state.workReadinessMap,
     projectEvidenceInventory: state.projectEvidenceInventory,
@@ -2977,6 +3543,64 @@ function buildDashboardStateSchema(): string {
       programs: { type: "array" },
     },
   };
+  properties.realityModel = {
+    type: "object",
+    required: ["schemaVersion", "purpose", "nodes", "edges", "missingRelationEvidence", "updateRule"],
+    additionalProperties: true,
+    properties: {
+      schemaVersion: { type: "string" },
+      purpose: { type: "string" },
+      nodes: { type: "array" },
+      edges: { type: "array" },
+      missingRelationEvidence: { type: "array" },
+      updateRule: { type: "string" },
+    },
+  };
+  properties.goalCompass = {
+    type: "object",
+    required: ["schemaVersion", "currentReality", "goalState", "goalGraph", "topGaps", "nextSafeMove", "alignmentChecks", "phaseGate"],
+    additionalProperties: true,
+    properties: {
+      schemaVersion: { type: "string" },
+      currentReality: { type: "string" },
+      goalState: { type: "string" },
+      goalGraph: { type: "array" },
+      topGaps: { type: "array" },
+      nextSafeMove: { type: "string" },
+      alignmentChecks: { type: "array", items: { type: "string" } },
+      phaseGate: { type: "object" },
+    },
+  };
+  properties.contextRotMonitor = {
+    type: "object",
+    required: ["schemaVersion", "status", "rotWarnings", "factRecords", "expiredFacts", "nextEvidenceToCollect"],
+    additionalProperties: true,
+    properties: {
+      schemaVersion: { type: "string" },
+      status: { type: "string" },
+      rotWarnings: { type: "array" },
+      factRecords: { type: "array" },
+      expiredFacts: { type: "array", items: { type: "string" } },
+      nextEvidenceToCollect: { type: "array", items: { type: "string" } },
+    },
+  };
+  properties.harnessEvaluation = {
+    type: "object",
+    required: ["schemaVersion", "scope", "status", "score", "thresholdScore", "sourceStateHash", "evaluatedAt", "evaluator", "metrics", "gates"],
+    additionalProperties: true,
+    properties: {
+      schemaVersion: { type: "string" },
+      scope: { type: "string" },
+      status: { type: "string" },
+      score: { type: "number" },
+      thresholdScore: { type: "number" },
+      sourceStateHash: { type: "string" },
+      evaluatedAt: { type: "string" },
+      evaluator: { type: "string" },
+      metrics: { type: "array" },
+      gates: { type: "object" },
+    },
+  };
   properties.decisionContracts = {
     type: "array",
     items: {
@@ -3016,7 +3640,7 @@ function buildDashboardStateSchema(): string {
   };
   properties.dashboardQualityScorecard = {
     type: "object",
-    required: ["targetScore", "uiUxDesignScore", "projectEvidenceScore", "qaEvidence"],
+    required: ["targetScore", "uiUxDesignScore", "projectEvidenceScore", "qaEvidence", "modernWebUiPolicy"],
     additionalProperties: true,
     properties: {
       targetScore: { type: "number" },
@@ -3032,6 +3656,7 @@ function buildDashboardStateSchema(): string {
           note: { type: "string" },
         },
       },
+      modernWebUiPolicy: { type: "object" },
     },
   };
   return `${JSON.stringify(
@@ -3240,6 +3865,12 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       .architecture-node { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; min-height: 112px; display: grid; gap: 6px; }
       .architecture-node.primary { border-color: rgba(23, 105, 170, 0.35); background: #f5f9ff; }
       .architecture-node.warn { border-color: rgba(154, 103, 0, 0.35); background: #fffaf0; }
+      .world-map-visual { border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; padding: 12px; display: grid; gap: 12px; }
+      .world-node-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+      .world-node { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; display: grid; gap: 6px; }
+      .world-node-index { width: 26px; height: 26px; border-radius: 50%; background: #e9f3f1; color: var(--accent); display: inline-flex; align-items: center; justify-content: center; font-weight: 800; }
+      .world-edge-list { display: flex; flex-wrap: wrap; gap: 8px; }
+      .world-edge { border: 1px solid var(--line); border-radius: 999px; background: #fff; padding: 6px 10px; color: var(--muted); font-size: 0.78rem; }
       .platform-intake { display: grid; grid-template-columns: minmax(0, 0.58fr) minmax(320px, 0.42fr); gap: 12px; align-items: start; }
       .platform-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       .platform-card { border: 1px solid var(--line); border-radius: 8px; background: #fbfcfd; padding: 12px; display: grid; gap: 8px; min-width: 0; }
@@ -3413,7 +4044,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       <section id="status-rail" class="status-rail" aria-label="Persistent project status rail"></section>
       <nav class="tablist" role="tablist" aria-label="Dashboard views">
         <button class="tab" role="tab" id="tab-overview" aria-controls="view-overview" aria-selected="true" data-purpose="Executive view: world judgment, critical signals, required decision, risk, and trustworthiness.">Overview</button>
-        <button class="tab" role="tab" id="tab-work" aria-controls="view-work" aria-selected="false" data-purpose="Delivery view: queues, backlog, active work, Gantt timeline, WIP aging, and throughput signals.">Work</button>
+        <button class="tab" role="tab" id="tab-work" aria-controls="view-work" aria-selected="false" data-purpose="Delivery view: queues, backlog, active work, readiness timeline, WIP aging, and throughput signals.">Work</button>
         <button class="tab" role="tab" id="tab-evidence" aria-controls="view-evidence" aria-selected="false" data-purpose="Proof view: claim-to-evidence matrix, missing evidence, source links, Git/SVN records, and validation warnings.">Evidence</button>
         <button class="tab" role="tab" id="tab-governance" aria-controls="view-governance" aria-selected="false" data-purpose="Decision view: value hierarchy, readiness judgments, approvals, gates, definition of ready/done, retro and review loops.">Governance</button>
         <button class="tab" role="tab" id="tab-system" aria-controls="view-system" aria-selected="false" data-purpose="System topology view: services, environments, dependencies, operations readiness, and listener health without repeating the executive mission.">System</button>
@@ -3534,7 +4165,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "tab.system": "Operations",
           "tab.tech": "Tech Stack",
           "purpose.overview": "What changed, why it matters, the current risk, the required decision, and whether the state is trustworthy.",
-          "purpose.work": "Open work first: progress, remaining time, blockers, Kanban flow, Gantt timeline, and KPI inputs.",
+          "purpose.work": "Open work first: progress, remaining time, blockers, status lanes, readiness timeline, and KPI inputs.",
           "purpose.evidence": "Claims, proof, missing evidence, source links, Git/SVN records, and validation warnings.",
           "purpose.governance": "Decisions, AI platform intake, value hierarchy, readiness gates, definitions, cadence, reviews, and retro loops.",
           "purpose.system": "Operational topology, services, environments, dependencies, release/incident/data readiness, and listener health.",
@@ -3558,7 +4189,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "evidencePending": "Evidence collection is still in progress",
           "evidencePendingCopy": "Low operational evidence means release and operations proof is not linked yet. It does not mean the harness failed.",
           "whatToLookAt": "What to look at next",
-          "guideStepWork": "Work shows open tasks, progress, blockers, Kanban, and Gantt timeline.",
+          "guideStepWork": "Work shows open tasks, progress, blockers, status lanes, and readiness timeline.",
           "guideStepEvidence": "Evidence shows which claims still need proof before release or handoff.",
           "guideStepTech": "Tech Stack explains the project composition, infrastructure, and harness integration points.",
           "governanceActionabilityScore": "Governance Setup & Operating Readiness",
@@ -3587,6 +4218,13 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "decisionRiskPulse": "Decision And Risk Pulse",
           "trustContinuity": "Trust And Continuity Snapshot",
           "ledgerTrust": "Ledger Projection Trust Boundary",
+          "realityGoalCompass": "Reality And Goal Compass",
+          "currentReality": "Current Reality",
+          "goalState": "Goal State",
+          "topGaps": "Top 3 Gaps",
+          "nextSafeMove": "Next Safe Move",
+          "projectWorldMap": "Project World Map",
+          "contextRotMonitor": "Context Rot Monitor",
           "currentGoal": "Current goal",
           "whatChanged": "What changed",
           "whyMatters": "Why it matters",
@@ -3600,9 +4238,9 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "lastSafeCheckpoint": "Last safe checkpoint",
           "openWork": "Open Work",
           "openWorkHint": "Only work that is still waiting, active, or blocked. Completed work moves into the timeline and KPI history.",
-          "workBoard": "Work Board",
-          "kanban": "Kanban",
-          "gantt": "Gantt",
+          "operationalQueue": "Operational Command Queue",
+          "kanban": "Status lanes",
+          "gantt": "Timeline",
           "workKpiInputs": "Work KPI Inputs",
           "queueBacklogDetails": "Queue And Backlog Detail",
           "timelineCoverage": "Timeline Coverage",
@@ -3621,7 +4259,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "thisYear": "This year",
           "lastYear": "Last year",
           "allWork": "All recorded work",
-          "readinessMapCopy": "This Gantt is a readiness map: bars show work span, shaded bands show phase pressure, yellow gates show exit criteria, and blocked rows identify the claims they prevent.",
+          "readinessMapCopy": "This timeline is a readiness map: bars show work span, shaded bands show phase pressure, yellow gates show exit criteria, and blocked rows identify the claims they prevent.",
           "tableAlternative": "Timeline table alternative",
           "progress": "Progress",
           "remaining": "Remaining",
@@ -3739,7 +4377,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "tab.system": "운영",
           "tab.tech": "기술 구성",
           "purpose.overview": "무엇이 바뀌었고, 왜 중요한지, 현재 위험과 필요한 결정, 상태 신뢰도를 먼저 보여줍니다.",
-          "purpose.work": "열려 있는 작업을 먼저 보여주고 진행률, 남은 기간, 차단 요인, 칸반 흐름, 간트 타임라인, KPI 입력값을 다룹니다.",
+          "purpose.work": "열려 있는 작업을 먼저 보여주고 진행률, 남은 기간, 차단 요인, 상태 레인, 준비도 타임라인, KPI 입력값을 다룹니다.",
           "purpose.evidence": "주장, 증거, 빠진 근거, 소스 링크, Git/SVN 기록, 검증 경고를 다룹니다.",
           "purpose.governance": "결정, AI 플랫폼 입력, 가치 우선순위, 준비 게이트, 정의, 주기, 리뷰와 회고 루프를 다룹니다.",
           "purpose.system": "운영 토폴로지, 서비스, 환경, 의존성, 릴리즈/장애/데이터 준비도, 리스너 상태를 다룹니다.",
@@ -3763,7 +4401,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "evidencePending": "운영 증거는 아직 수집 중입니다",
           "evidencePendingCopy": "운영 증거 점수가 낮다는 뜻은 릴리즈/운영 증명이 아직 연결되지 않았다는 의미입니다. 하네스 실패가 아닙니다.",
           "whatToLookAt": "다음에 볼 탭",
-          "guideStepWork": "작업 탭에서 열린 작업, 진행률, 차단 요인, 칸반, 간트 타임라인을 봅니다.",
+          "guideStepWork": "작업 탭에서 열린 작업, 진행률, 차단 요인, 상태 레인, 준비도 타임라인을 봅니다.",
           "guideStepEvidence": "근거 탭에서 릴리즈나 인수인계 전에 어떤 주장에 증명이 필요한지 봅니다.",
           "guideStepTech": "기술 구성 탭에서 프로젝트 구성, 인프라, 하네스 연동 지점을 봅니다.",
           "governanceActionabilityScore": "거버넌스 구성과 운영 준비도",
@@ -3792,6 +4430,13 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "decisionRiskPulse": "결정과 위험 흐름",
           "trustContinuity": "신뢰와 연속성 스냅샷",
           "ledgerTrust": "원장-프로젝션 신뢰 경계",
+          "realityGoalCompass": "현실과 목표 나침반",
+          "currentReality": "현재 현실",
+          "goalState": "목표 상태",
+          "topGaps": "상위 3개 간극",
+          "nextSafeMove": "다음 안전 행동",
+          "projectWorldMap": "프로젝트 세계 지도",
+          "contextRotMonitor": "컨텍스트 부패 감시",
           "currentGoal": "현재 목표",
           "whatChanged": "변경 내용",
           "whyMatters": "중요한 이유",
@@ -3805,9 +4450,9 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "lastSafeCheckpoint": "마지막 안전 체크포인트",
           "openWork": "열려 있는 작업",
           "openWorkHint": "아직 대기, 진행, 차단 상태인 작업입니다. 완료된 작업은 타임라인과 KPI 기록으로 이동합니다.",
-          "workBoard": "작업 보드",
-          "kanban": "칸반",
-          "gantt": "간트차트",
+          "operationalQueue": "운영 명령 큐",
+          "kanban": "상태 레인",
+          "gantt": "타임라인",
           "workKpiInputs": "작업 KPI 입력값",
           "queueBacklogDetails": "큐와 백로그 상세",
           "timelineCoverage": "타임라인 커버리지",
@@ -3826,7 +4471,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "thisYear": "올해",
           "lastYear": "작년",
           "allWork": "전체 기록",
-          "readinessMapCopy": "이 간트차트는 준비도 지도입니다. 막대는 작업 기간, 음영은 단계 압력, 노란 게이트는 종료 기준, 차단 행은 막고 있는 주장을 보여줍니다.",
+          "readinessMapCopy": "이 타임라인은 준비도 지도입니다. 막대는 작업 기간, 음영은 단계 압력, 노란 게이트는 종료 기준, 차단 행은 막고 있는 주장을 보여줍니다.",
           "tableAlternative": "타임라인 표 대체 보기",
           "progress": "진행률",
           "remaining": "남은 기간",
@@ -4303,7 +4948,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         }));
         const summary = '<div class="timeline-summary"><div class="timeline-chip"><span class="rail-label">' + esc(t("visibleWork")) + '</span><strong>' + esc(visible.length) + '</strong><span class="source">selected range</span></div><div class="timeline-chip"><span class="rail-label">' + esc(t("activeNow")) + '</span><strong>' + esc(activeItems.length) + '</strong><span class="source">animated bars</span></div><div class="timeline-chip risk"><span class="rail-label">' + esc(t("blockedGates")) + '</span><strong>' + esc(blockedItems.length) + '</strong><span class="source">readiness blockers</span></div><div class="timeline-chip"><span class="rail-label">' + esc(t("oldestWip")) + '</span><strong>' + esc(activeItems.length ? oldestActiveAge + "d" : t("none")) + '</strong><span class="source">' + esc(laneCount) + ' lanes, ' + esc(closedItems.length) + ' closed</span></div></div>';
         const legend = '<div class="gantt-legend" aria-label="Timeline status legend"><span class="legend-item"><span class="status-dot waiting"></span>' + esc(t("status.waiting")) + '</span><span class="legend-item"><span class="status-dot in-progress"></span>' + esc(t("status.in-progress")) + '</span><span class="legend-item"><span class="status-dot completed"></span>' + esc(t("status.completed")) + '</span><span class="legend-item"><span class="status-dot blocked"></span>' + esc(t("status.blocked")) + '</span></div>';
-        return '<div class="toolbar"><label>' + esc(t("timelineRange")) + '<select id="timeline-range" aria-label="Timeline range"><option value="this-month">' + esc(t("thisMonth")) + '</option><option value="this-quarter">' + esc(t("thisQuarter")) + '</option><option value="this-year">' + esc(t("thisYear")) + '</option><option value="last-year">' + esc(t("lastYear")) + '</option><option value="all">' + esc(t("allWork")) + '</option></select></label><span class="source">' + esc(t("readinessMapCopy")) + '</span></div>' + summary + legend + '<div class="gantt" role="img" aria-label="Work timeline Gantt chart with evidence links, blockers, exit gates, and WIP status">' + axis + rows + '</div>' + empty + '<h3>' + esc(t("tableAlternative")) + '</h3>' + alternative;
+        return '<div class="toolbar"><label>' + esc(t("timelineRange")) + '<select id="timeline-range" aria-label="Timeline range"><option value="this-month">' + esc(t("thisMonth")) + '</option><option value="this-quarter">' + esc(t("thisQuarter")) + '</option><option value="this-year">' + esc(t("thisYear")) + '</option><option value="last-year">' + esc(t("lastYear")) + '</option><option value="all">' + esc(t("allWork")) + '</option></select></label><span class="source">' + esc(t("readinessMapCopy")) + '</span></div>' + summary + legend + '<div class="gantt" role="img" aria-label="Work readiness timeline with evidence links, blockers, exit gates, and WIP status">' + axis + rows + '</div>' + empty + '<h3>' + esc(t("tableAlternative")) + '</h3>' + alternative;
       }
       function progressPercent(item) {
         const value = Number(item.progressPercent);
@@ -4340,7 +4985,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       function renderWorkViewSwitch() {
         return '<div class="toolbar"><div class="view-switch" role="group" aria-label="Work view mode"><button type="button" class="segment" data-work-view="kanban" aria-pressed="' + String(app.workView === "kanban") + '">' + esc(t("kanban")) + '</button><button type="button" class="segment" data-work-view="gantt" aria-pressed="' + String(app.workView === "gantt") + '">' + esc(t("gantt")) + '</button></div><span class="source">' + esc(t("purpose.work")) + '</span></div>';
       }
-      function renderKanban(items) {
+      function renderStatusLanes(items) {
         const groups = [
           ["waiting", t("status.waiting")],
           ["in-progress", t("status.in-progress")],
@@ -4545,6 +5190,75 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           [t("evidence"), (evidence.missingEvidenceClaims || []).length, "missing claims"],
         ]) + '<p><strong>' + esc(t("requiredDecision")) + ':</strong> ' + esc(brief.requiredDecision || t("none")) + '</p>' + slideCta + '</div>';
       }
+      function renderRealityGoalCompass() {
+        const compass = app.state.goalCompass || {};
+        const gaps = (compass.topGaps || []).slice(0, 3);
+        return '<div class="guide-strip">' +
+          '<article class="guide-card"><span class="rail-label">' + esc(t("currentReality")) + '</span><strong>' + esc(compass.currentReality || t("notDeclared")) + '</strong></article>' +
+          '<article class="guide-card ok"><span class="rail-label">' + esc(t("goalState")) + '</span><strong>' + esc(compass.goalState || t("notDeclared")) + '</strong></article>' +
+          '<article class="guide-card warn"><span class="rail-label">' + esc(t("topGaps")) + '</span><ul>' + gaps.map((gap) => '<li><strong>' + esc(gap.label || gap.id) + '</strong><br><span class="source">' + esc(gap.nextActionRef || "") + '</span></li>').join("") + '</ul></article>' +
+          '<article class="guide-card risk"><span class="rail-label">' + esc(t("nextSafeMove")) + '</span><strong>' + esc(compass.nextSafeMove || (app.state.agentResumeBrief || {}).nextSafestAction || t("notDeclared")) + '</strong></article>' +
+          '</div>';
+      }
+      function renderRealityGraph(nodes, edges) {
+        const visibleNodes = nodes.slice(0, 8);
+        const nodeCards = visibleNodes.map((node, index) =>
+          '<article class="world-node"><span class="world-node-index">' + esc(index + 1) + '</span><strong>' + esc(node.label || node.id || t("notDeclared")) + '</strong><span class="source">' + esc(node.type || "node") + ' · ' + esc(node.state || "unknown") + '</span></article>'
+        ).join("");
+        const edgeChips = edges.slice(0, 12).map((edge) =>
+          '<span class="world-edge"><span class="mono">' + esc(edge.from || "") + '</span> -> <span class="mono">' + esc(edge.to || "") + '</span> · ' + esc(edge.relation || "related") + '</span>'
+        ).join("");
+        return '<div class="world-map-visual" aria-label="Project world relationship map"><div class="world-node-grid">' + (nodeCards || '<p class="muted">' + esc(t("notDeclared")) + '</p>') + '</div><div class="world-edge-list">' + (edgeChips || '<span class="world-edge">' + esc(t("notDeclared")) + '</span>') + '</div></div>';
+      }
+      function renderProjectWorldMap() {
+        const reality = app.state.realityModel || {};
+        const nodes = reality.nodes || [];
+        const edges = reality.edges || [];
+        const missing = reality.missingRelationEvidence || [];
+        return '<div class="stack"><p class="muted">' + esc(reality.purpose || "") + '</p>' + metricGrid([
+          ["Nodes", nodes.length, "product / repo / service / environment"],
+          ["Relations", edges.length, "physical and governance edges"],
+          ["Missing relation evidence", missing.length, "must be resolved"],
+          ["Update rule", "active", reality.updateRule || ""],
+        ]) +
+          renderRealityGraph(nodes, edges) +
+          '<h3>' + esc(t("projectWorldMap")) + '</h3>' + table(["Node", "Type", "State", t("owner"), t("evidence")], nodes.slice(0, rowLimit(14)).map((node) => [
+            esc(node.label || node.id),
+            esc(node.type || ""),
+            badge(node.state || "unknown"),
+            esc(node.owner || ""),
+            esc((node.evidenceRefs || []).slice(0, 2).join(", ")),
+          ])) +
+          '<h3>Relations</h3>' + table(["From -> To", "Relation", "Status", t("owner")], edges.slice(0, rowLimit(14)).map((edge) => [
+            '<span class="mono">' + esc(edge.from || "") + '</span> -> <span class="mono">' + esc(edge.to || "") + '</span>',
+            esc(edge.relation || ""),
+            badge(edge.status || "unknown"),
+            esc(edge.owner || ""),
+          ])) +
+          '<h3>Missing relation evidence</h3>' + table(["Gap", "Relation", t("owner"), "Next"], missing.map((item) => [
+            esc(item.label || item.id),
+            esc(item.relation || ""),
+            esc(item.owner || ""),
+            esc(item.nextActionRef || ""),
+          ])) + '</div>';
+      }
+      function renderContextRotMonitor() {
+        const monitor = app.state.contextRotMonitor || {};
+        const warnings = monitor.rotWarnings || [];
+        return '<div class="stack">' + metricGrid([
+          ["Status", monitor.status || "unknown", "rot monitor"],
+          ["Warnings", warnings.length, "stale / contradictory / missing context"],
+          ["Expired facts", (monitor.expiredFacts || []).length, (monitor.expiredFacts || []).join(", ") || t("none")],
+          ["Next evidence", (monitor.nextEvidenceToCollect || []).length, "collection queue"],
+        ]) +
+          table(["Warning", "Severity", "Owner", "Next"], warnings.slice(0, rowLimit(12)).map((warning) => [
+            esc(warning.summary || warning.id),
+            badge(warning.severity || "warning"),
+            esc(warning.owner || ""),
+            esc(warning.nextAction || ""),
+          ])) +
+          '<h3>Next evidence to collect</h3><ul>' + (monitor.nextEvidenceToCollect || []).map((item) => '<li>' + esc(item) + '</li>').join("") + '</ul></div>';
+      }
       function renderAgentResumeBoard() {
         const agent = app.state.agentResumeBrief || {};
         const platforms = app.state.agentPlatformGovernance || {};
@@ -4685,7 +5399,9 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const mode = getAudienceMode();
         if (mode === "agent") {
           document.getElementById("view-overview").innerHTML =
+            panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
             panel(t("agentResumeBoard"), renderAgentResumeBoard(), true) +
+            panel(t("contextRotMonitor"), renderContextRotMonitor(), true) +
             panel(t("currentJudgmentConsole"), renderJudgmentConsole(), true) +
             panel(t("criticalSignals"), renderSignals(state.criticalSignals || []), true) +
             panel(t("ledgerTrust"), renderTrustBoundary(), true);
@@ -4693,7 +5409,9 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         }
         if (mode === "maintainer") {
           document.getElementById("view-overview").innerHTML =
+            panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
             panel(t("maintainerHealthBoard"), renderMaintainerHealthBoard(), true) +
+            panel(t("projectWorldMap"), renderProjectWorldMap(), true) +
             panel(t("worldJudgmentHeader"), renderWorldJudgment(), true) +
             panel(t("trustContinuity"), metricGrid([
               ["World Model", (completeness.score || 0) + "/" + (completeness.maxScore || 100), "completeness score"],
@@ -4705,7 +5423,9 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           return;
         }
         document.getElementById("view-overview").innerHTML =
+          panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
           panel(t("stakeholderReport"), renderStakeholderReport(), true) +
+          panel(t("projectWorldMap"), renderProjectWorldMap(), true) +
           panel(t("overviewGuide"), renderOverviewGuide(), true) +
           panel(t("governanceActionabilityScore"), renderActionabilityScore(), true) +
           panel(t("executiveOverview"), '<p><strong>' + esc(t("currentGoal")) + ':</strong> ' + esc(brief.currentGoal) + '</p><p><strong>' + esc(t("whatChanged")) + ':</strong> ' + esc(brief.whatChangedSinceLastReview) + '</p><p><strong>' + esc(t("whyMatters")) + ':</strong> ' + esc(brief.whyItMatters) + '</p><p><strong>' + esc(t("requiredDecision")) + ':</strong> ' + esc(brief.requiredDecision) + '</p><p><strong>' + esc(t("risk")) + ':</strong> ' + esc(brief.currentRisk) + '</p>', true) +
@@ -4737,7 +5457,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           return Math.max(max, Math.ceil((now.getTime() - start.getTime()) / DAY_MS));
         }, 0);
         const timelineCoverage = timelineItems.length > 0 ? Math.round((timelineItems.filter((item) => item.startAt || item.plannedStartAt).length / timelineItems.length) * 100) + "%" : "none";
-        const board = panel(t("workBoard"), (app.workView === "gantt" ? renderWorkViewSwitch() + renderGantt(timelineItems) : renderKanban(timelineItems)), true);
+        const board = panel(t("operationalQueue"), (app.workView === "gantt" ? renderWorkViewSwitch() + renderGantt(timelineItems) : renderStatusLanes(timelineItems)), true);
         const kpis = panel(t("workKpiInputs"), metricGrid([
             [t("timelineCoverage"), timelineCoverage, "dated work items"],
             [t("activeAnimated"), activeCount, "status=in-progress"],
@@ -5152,18 +5872,26 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         app.deckReturnFocus = trigger || document.activeElement;
         app.slideDeckOpen = true;
         app.slideIndex = 0;
-        const main = document.getElementById("main");
-        if (main && "inert" in main) main.inert = true;
-        if (main) main.setAttribute("aria-hidden", "true");
+        setSlideDeckBackgroundIsolation(true);
         renderSlideDeck();
       }
       function closeSlideDeck() {
         app.slideDeckOpen = false;
-        const main = document.getElementById("main");
-        if (main && "inert" in main) main.inert = false;
-        if (main) main.removeAttribute("aria-hidden");
+        setSlideDeckBackgroundIsolation(false);
         renderSlideDeck();
         if (app.deckReturnFocus && app.deckReturnFocus.focus) app.deckReturnFocus.focus();
+      }
+      function setSlideDeckBackgroundIsolation(isIsolated) {
+        [document.querySelector(".shell"), document.getElementById("skip-link")]
+          .filter(Boolean)
+          .forEach((node) => {
+            if ("inert" in node) node.inert = isIsolated;
+            if (isIsolated) {
+              node.setAttribute("aria-hidden", "true");
+            } else {
+              node.removeAttribute("aria-hidden");
+            }
+          });
       }
       function moveSlide(delta) {
         const slides = buildSlides();
@@ -5476,7 +6204,10 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           if (focusables.length) {
             const first = focusables[0];
             const last = focusables[focusables.length - 1];
-            if (event.shiftKey && document.activeElement === first) {
+            if (deck && !deck.contains(document.activeElement)) {
+              event.preventDefault();
+              first.focus();
+            } else if (event.shiftKey && document.activeElement === first) {
               event.preventDefault();
               last.focus();
             } else if (!event.shiftKey && document.activeElement === last) {
@@ -5598,7 +6329,7 @@ function buildDesignFrameworkHtml(): string {
   <p>Executive Overview first. Same data, different density for Stakeholder, AI Agent, and Maintainer modes.</p>
   <ul>
     <li>Modes: Local Live, Static Snapshot, Degraded Offline.</li>
-    <li>Components: status rail, decision cards, open-work board, Gantt/Kanban switcher, evidence tables, relationship maps, and technology stack panels.</li>
+    <li>Components: status rail, decision cards, open-work queue, status-lane/timeline switcher, evidence tables, relationship maps, and technology stack panels.</li>
     <li>Accessibility: WCAG 2.2 AA, semantic tabs, keyboard navigation, table alternatives for charts, reduced motion.</li>
     <li>No CDN, no remote fonts, no remote assets.</li>
   </ul>
@@ -5764,6 +6495,10 @@ export function generateDashboardFiles(
     },
     jsonFile("docs/ai-harness/dashboard/events/ledger-manifest.json", manifest),
     jsonFile("docs/ai-harness/dashboard/entities/project-world-model.json", state.projectWorldModel),
+    jsonFile("docs/ai-harness/dashboard/entities/reality-model.json", state.realityModel),
+    jsonFile("docs/ai-harness/dashboard/entities/goal-compass.json", state.goalCompass),
+    jsonFile("docs/ai-harness/dashboard/entities/context-rot-monitor.json", state.contextRotMonitor),
+    jsonFile("docs/ai-harness/dashboard/evaluations/harness-evaluation.json", state.harnessEvaluation),
     jsonFile("docs/ai-harness/dashboard/entities/sessions.json", state.governedSessions),
     jsonFile("docs/ai-harness/dashboard/entities/tasks.json", state.agile),
     jsonFile("docs/ai-harness/dashboard/entities/artifacts.json", state.artifacts),

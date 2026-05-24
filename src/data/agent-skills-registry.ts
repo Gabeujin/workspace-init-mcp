@@ -394,6 +394,16 @@ export const AGENT_REGISTRY: AgentEntry[] = [
     priority: 1,
   },
   {
+    id: "server-flow-monitoring-operator",
+    name: "Server Flow Monitoring Operator",
+    description: "Designs and maintains application/server flow dashboards for network traffic, workflow pipelines, resource status, service uptime, and alert thresholds",
+    categories: ["devops", "platform", "backend"],
+    tags: ["server-flow-dashboard", "monitoring", "network-traffic", "workflow", "pipeline", "uptime", "resources", "api", "mcp-server", "observability", "html-in-canvas", "view-transitions", "modern-web-ui"],
+    relevantProjectTypes: ["web-app", "api", "devops", "saas", "iot", "monorepo", "other"],
+    techKeywords: ["Node", "Express", "MCP", "API", "Docker", "Kubernetes", "Prometheus", "Grafana", "Nginx"],
+    priority: 1,
+  },
+  {
     id: "legacy-reconcile-operator",
     name: "Legacy Reconcile Operator",
     description: "Safely upgrades legacy repositories and older workspace-init-mcp outputs to the latest governed structure with dry-run, backup, and restore discipline",
@@ -1179,6 +1189,17 @@ export const SKILL_REGISTRY: SkillEntry[] = [
     priority: 1,
   },
   {
+    id: "server-flow-dashboard-builder",
+    name: "Server Flow Dashboard Builder",
+    description: "Creates separate application/server flow monitoring dashboards for network traffic, workflow pipelines, lightweight server resources, service uptime, and alert thresholds",
+    categories: ["devops", "infrastructure", "analysis", "code-gen"],
+    tags: ["server-flow-dashboard", "monitoring", "network-traffic", "workflow", "pipeline", "queue", "uptime", "resources", "observability", "api", "mcp-server", "html-in-canvas", "view-transitions", "modern-web-ui"],
+    relevantProjectTypes: ["web-app", "api", "devops", "saas", "iot", "monorepo", "other"],
+    techKeywords: ["Node", "Express", "MCP", "API", "Docker", "Kubernetes", "Prometheus", "Grafana", "Nginx"],
+    hasResources: false,
+    priority: 1,
+  },
+  {
     id: "domain-model-ledger",
     name: "Domain Model Ledger",
     description: "Maintains domain-specific timeline, entity, release, and version views so operators can understand work across software, narrative, and knowledge domains",
@@ -1592,6 +1613,29 @@ const DOMAIN_ORDER: Array<ProjectType | "shared"> = [
   ...(Object.keys(PROJECT_TYPE_CONFIGS) as ProjectType[]),
 ];
 
+const SERVER_FLOW_CAPABILITY_IDS = new Set([
+  "server-flow-monitoring-operator",
+  "server-flow-dashboard-builder",
+]);
+
+const SERVER_FLOW_INTENT_KEYWORDS = [
+  "server flow",
+  "server-flow",
+  "flow dashboard",
+  "monitoring dashboard",
+  "runtime monitoring",
+  "network traffic",
+  "top talkers",
+  "pipeline monitoring",
+  "uptime dashboard",
+  "observability dashboard",
+  "mcp server monitoring",
+];
+
+function hasServerFlowIntent(intentLower: string): boolean {
+  return SERVER_FLOW_INTENT_KEYWORDS.some((keyword) => intentLower.includes(keyword));
+}
+
 /**
  * Recommend agents and skills based on project type, tech stack, and user intent.
  */
@@ -1615,6 +1659,10 @@ export function recommendAgentSkills(options: {
 
   // Score agents
   const scoredAgents = AGENT_REGISTRY.map((agent) => {
+    if (SERVER_FLOW_CAPABILITY_IDS.has(agent.id) && !hasServerFlowIntent(intentLower)) {
+      return { agent, score: 0 };
+    }
+
     let score = 0;
 
     // Project type match
@@ -1651,6 +1699,10 @@ export function recommendAgentSkills(options: {
 
   // Score skills
   const scoredSkills = SKILL_REGISTRY.map((skill) => {
+    if (SERVER_FLOW_CAPABILITY_IDS.has(skill.id) && !hasServerFlowIntent(intentLower)) {
+      return { skill, score: 0 };
+    }
+
     let score = 0;
 
     if (

@@ -17,6 +17,11 @@ export const MANAGED_INVENTORY_SCHEMA_VERSION = "1.0.0";
 const TOOL_VERSION = "4.6.1";
 
 export const MANAGED_JSON_MERGE_PATHS = new Set([
+  "docs/ai-harness/dashboard/entities/project-world-model.json",
+  "docs/ai-harness/dashboard/entities/reality-model.json",
+  "docs/ai-harness/dashboard/entities/goal-compass.json",
+  "docs/ai-harness/dashboard/entities/context-rot-monitor.json",
+  "docs/ai-harness/dashboard/evaluations/harness-evaluation.json",
   "docs/ai-harness/dashboard/state/dashboard-state.json",
   "docs/ai-harness/runtime/state/session-index.json",
   "docs/ai-harness/runtime/state/active-session.json",
@@ -32,6 +37,7 @@ export const MANAGED_TEXT_MERGE_PATHS = new Set([
   "CLAUDE.md",
   ".cursor/rules/harness-world-model.mdc",
   ".agents/plugins/workspace-init-harness/rules/harness-world-model.md",
+  "docs/context/context-index.md",
 ]);
 
 const LEGACY_RESOURCE_ROOTS = [
@@ -144,8 +150,8 @@ function classifyManagedPath(relativePath: string): string {
   if (relativePath.startsWith(".governance/")) {
     return "governance";
   }
-  if (relativePath.startsWith("live-artifacts-dashboard/")) {
-    return "live-artifacts-dashboard";
+  if (relativePath.startsWith("server-flow-dashboard/")) {
+    return "server-flow-dashboard";
   }
   if (relativePath.startsWith("docs/ai-harness/dashboard/")) {
     return "dashboard";

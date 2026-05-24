@@ -103,6 +103,21 @@ function requireStringArrayField(
   }
 }
 
+function readStringArrayField(
+  errors: string[],
+  objectPath: string,
+  objectValue: Record<string, unknown>,
+  fieldName: string
+): string[] {
+  const fieldValue = objectValue[fieldName];
+  if (!Array.isArray(fieldValue) || fieldValue.some((entry) => !isString(entry))) {
+    pushTypeError(errors, `${objectPath}.${fieldName}`, "an array of strings", fieldValue);
+    return [];
+  }
+
+  return fieldValue;
+}
+
 function requireArray(
   errors: string[],
   fieldPath: string,
@@ -114,6 +129,52 @@ function requireArray(
   }
 
   return value;
+}
+
+function requireAllowedStringField(
+  errors: string[],
+  objectPath: string,
+  objectValue: Record<string, unknown>,
+  fieldName: string,
+  allowedValues: string[]
+): void {
+  const value = objectValue[fieldName];
+  requireStringField(errors, objectPath, objectValue, fieldName);
+  if (isString(value) && !allowedValues.includes(value)) {
+    errors.push(
+      `${objectPath}.${fieldName} must be one of ${allowedValues.join(", ")}; received ${value}`
+    );
+  }
+}
+
+function requireUniqueStringId(
+  errors: string[],
+  seenIds: Set<string>,
+  fieldPath: string,
+  value: unknown
+): string | null {
+  if (!isString(value) || value.trim().length === 0) {
+    pushTypeError(errors, fieldPath, "a non-empty string", value);
+    return null;
+  }
+  if (seenIds.has(value)) {
+    errors.push(`${fieldPath} must be unique; duplicate id ${value}`);
+  }
+  seenIds.add(value);
+  return value;
+}
+
+function requireNonEmptyStringArrayField(
+  errors: string[],
+  objectPath: string,
+  objectValue: Record<string, unknown>,
+  fieldName: string
+): string[] {
+  const values = readStringArrayField(errors, objectPath, objectValue, fieldName);
+  if (values.length === 0) {
+    errors.push(`${objectPath}.${fieldName} must contain at least one entry`);
+  }
+  return values;
 }
 
 export function validateDashboardStateShape(
@@ -202,6 +263,381 @@ export function validateDashboardStateShape(
     );
     requireStringField(errors, "dashboardState.domainOperations", domainOperations, "status");
     requireArray(errors, "dashboardState.domainOperations.programs", domainOperations.programs);
+  }
+
+  const realityModel = requireObject(
+    errors,
+    "dashboardState.realityModel",
+    root.realityModel
+  );
+  const realityNodeIds = new Set<string>();
+  if (realityModel != null) {
+    requireStringField(errors, "dashboardState.realityModel", realityModel, "schemaVersion");
+    requireStringField(errors, "dashboardState.realityModel", realityModel, "purpose");
+    const realityNodes =
+      requireArray(errors, "dashboardState.realityModel.nodes", realityModel.nodes) ?? [];
+    for (const [index, node] of realityNodes.entries()) {
+      const pathPrefix = `dashboardState.realityModel.nodes[${index}]`;
+      const item = requireObject(errors, pathPrefix, node);
+      if (item == null) {
+        continue;
+      }
+      requireUniqueStringId(errors, realityNodeIds, `${pathPrefix}.id`, item.id);
+      requireStringField(errors, pathPrefix, item, "label");
+      requireStringField(errors, pathPrefix, item, "type");
+      requireStringField(errors, pathPrefix, item, "state");
+      requireAllowedStringField(errors, pathPrefix, item, "confidence", ["low", "medium", "high"]);
+      requireStringField(errors, pathPrefix, item, "owner");
+      requireNonEmptyStringArrayField(errors, pathPrefix, item, "evidenceRefs");
+      requireStringField(errors, pathPrefix, item, "freshness");
+    }
+
+    const realityEdgeIds = new Set<string>();
+    const realityEdges =
+      requireArray(errors, "dashboardState.realityModel.edges", realityModel.edges) ?? [];
+    for (const [index, edge] of realityEdges.entries()) {
+      const pathPrefix = `dashboardState.realityModel.edges[${index}]`;
+      const item = requireObject(errors, pathPrefix, edge);
+      if (item == null) {
+        continue;
+      }
+      requireUniqueStringId(errors, realityEdgeIds, `${pathPrefix}.id`, item.id);
+      requireStringField(errors, pathPrefix, item, "from");
+      requireStringField(errors, pathPrefix, item, "to");
+      requireStringField(errors, pathPrefix, item, "relation");
+      requireStringField(errors, pathPrefix, item, "status");
+      requireAllowedStringField(errors, pathPrefix, item, "confidence", ["low", "medium", "high"]);
+      requireStringField(errors, pathPrefix, item, "owner");
+      requireNonEmptyStringArrayField(errors, pathPrefix, item, "evidenceRefs");
+      requireStringField(errors, pathPrefix, item, "freshness");
+      if (isString(item.from) && !realityNodeIds.has(item.from)) {
+        errors.push(`${pathPrefix}.from must reference an existing realityModel node`);
+      }
+      if (isString(item.to) && !realityNodeIds.has(item.to)) {
+        errors.push(`${pathPrefix}.to must reference an existing realityModel node`);
+      }
+    }
+
+    const missingRelationEvidence = requireArray(
+      errors,
+      "dashboardState.realityModel.missingRelationEvidence",
+      realityModel.missingRelationEvidence
+    ) ?? [];
+    const missingRelationIds = new Set<string>();
+    for (const [index, missing] of missingRelationEvidence.entries()) {
+      const pathPrefix = `dashboardState.realityModel.missingRelationEvidence[${index}]`;
+      const item = requireObject(errors, pathPrefix, missing);
+      if (item == null) {
+        continue;
+      }
+      requireUniqueStringId(errors, missingRelationIds, `${pathPrefix}.id`, item.id);
+      requireStringField(errors, pathPrefix, item, "label");
+      requireStringField(errors, pathPrefix, item, "relation");
+      requireStringField(errors, pathPrefix, item, "owner");
+      requireStringField(errors, pathPrefix, item, "requiredEvidenceType");
+      requireStringField(errors, pathPrefix, item, "nextActionRef");
+    }
+    requireStringField(errors, "dashboardState.realityModel", realityModel, "updateRule");
+  }
+
+  const goalCompass = requireObject(
+    errors,
+    "dashboardState.goalCompass",
+    root.goalCompass
+  );
+  const goalIds = new Set<string>();
+  if (goalCompass != null) {
+    requireStringField(errors, "dashboardState.goalCompass", goalCompass, "schemaVersion");
+    requireStringField(errors, "dashboardState.goalCompass", goalCompass, "currentReality");
+    requireStringField(errors, "dashboardState.goalCompass", goalCompass, "goalState");
+    requireStringField(errors, "dashboardState.goalCompass", goalCompass, "nextSafeMove");
+    const goalGraph =
+      requireArray(errors, "dashboardState.goalCompass.goalGraph", goalCompass.goalGraph) ?? [];
+    const parentRefs: Array<{ path: string; parentId: string }> = [];
+    for (const [index, goal] of goalGraph.entries()) {
+      const pathPrefix = `dashboardState.goalCompass.goalGraph[${index}]`;
+      const item = requireObject(errors, pathPrefix, goal);
+      if (item == null) {
+        continue;
+      }
+      requireUniqueStringId(errors, goalIds, `${pathPrefix}.id`, item.id);
+      if (item.parentId !== null) {
+        requireStringField(errors, pathPrefix, item, "parentId");
+        if (isString(item.parentId)) {
+          parentRefs.push({ path: `${pathPrefix}.parentId`, parentId: item.parentId });
+        }
+      }
+      requireStringField(errors, pathPrefix, item, "type");
+      requireStringField(errors, pathPrefix, item, "statement");
+      requireStringField(errors, pathPrefix, item, "status");
+      requireStringField(errors, pathPrefix, item, "owner");
+      requireNonEmptyStringArrayField(errors, pathPrefix, item, "evidenceRefs");
+    }
+    for (const ref of parentRefs) {
+      if (!goalIds.has(ref.parentId)) {
+        errors.push(`${ref.path} must reference an existing goalCompass.goalGraph id`);
+      }
+    }
+    if (!goalIds.has("mission")) {
+      errors.push("dashboardState.goalCompass.goalGraph must include the mission root goal");
+    }
+
+    const topGaps =
+      requireArray(errors, "dashboardState.goalCompass.topGaps", goalCompass.topGaps) ?? [];
+    const gapIds = new Set<string>();
+    for (const [index, gap] of topGaps.entries()) {
+      const pathPrefix = `dashboardState.goalCompass.topGaps[${index}]`;
+      const item = requireObject(errors, pathPrefix, gap);
+      if (item == null) {
+        continue;
+      }
+      requireUniqueStringId(errors, gapIds, `${pathPrefix}.id`, item.id);
+      requireStringField(errors, pathPrefix, item, "label");
+      requireStringField(errors, pathPrefix, item, "status");
+      requireStringField(errors, pathPrefix, item, "owner");
+      requireStringField(errors, pathPrefix, item, "nextActionRef");
+      requireNonEmptyStringArrayField(errors, pathPrefix, item, "blocks");
+      requireNonEmptyStringArrayField(errors, pathPrefix, item, "evidenceNeeded");
+    }
+    requireStringArrayField(
+      errors,
+      "dashboardState.goalCompass",
+      goalCompass,
+      "alignmentChecks"
+    );
+    const phaseGate = requireObject(
+      errors,
+      "dashboardState.goalCompass.phaseGate",
+      goalCompass.phaseGate
+    );
+    if (phaseGate != null) {
+      requireStringField(errors, "dashboardState.goalCompass.phaseGate", phaseGate, "id");
+      requireStringField(errors, "dashboardState.goalCompass.phaseGate", phaseGate, "status");
+      requireStringField(errors, "dashboardState.goalCompass.phaseGate", phaseGate, "failurePolicy");
+      requireNumberField(errors, "dashboardState.goalCompass.phaseGate", phaseGate, "thresholdScore");
+      requireBooleanField(errors, "dashboardState.goalCompass.phaseGate", phaseGate, "canPlan");
+      requireBooleanField(
+        errors,
+        "dashboardState.goalCompass.phaseGate",
+        phaseGate,
+        "canImplementApplicationChange"
+      );
+      requireBooleanField(
+        errors,
+        "dashboardState.goalCompass.phaseGate",
+        phaseGate,
+        "goalTraceRequired"
+      );
+      requireBooleanField(
+        errors,
+        "dashboardState.goalCompass.phaseGate",
+        phaseGate,
+        "rotWarningsBlockImplementation"
+      );
+      requireBooleanField(
+        errors,
+        "dashboardState.goalCompass.phaseGate",
+        phaseGate,
+        "staleRequiredFactsBlockCloseout"
+      );
+      requireNonEmptyStringArrayField(
+        errors,
+        "dashboardState.goalCompass.phaseGate",
+        phaseGate,
+        "requiredChecks"
+      );
+    }
+  }
+
+  const contextRotMonitor = requireObject(
+    errors,
+    "dashboardState.contextRotMonitor",
+    root.contextRotMonitor
+  );
+  let openCriticalRotWarningCount = 0;
+  if (contextRotMonitor != null) {
+    requireStringField(
+      errors,
+      "dashboardState.contextRotMonitor",
+      contextRotMonitor,
+      "schemaVersion"
+    );
+    requireStringField(
+      errors,
+      "dashboardState.contextRotMonitor",
+      contextRotMonitor,
+      "status"
+    );
+    const rotWarnings = requireArray(
+      errors,
+      "dashboardState.contextRotMonitor.rotWarnings",
+      contextRotMonitor.rotWarnings
+    ) ?? [];
+    const rotWarningIds = new Set<string>();
+    for (const [index, warning] of rotWarnings.entries()) {
+      const pathPrefix = `dashboardState.contextRotMonitor.rotWarnings[${index}]`;
+      const item = requireObject(errors, pathPrefix, warning);
+      if (item == null) {
+        continue;
+      }
+      requireUniqueStringId(errors, rotWarningIds, `${pathPrefix}.id`, item.id);
+      requireAllowedStringField(errors, pathPrefix, item, "severity", [
+        "info",
+        "warning",
+        "critical",
+      ]);
+      requireStringField(errors, pathPrefix, item, "status");
+      requireStringField(errors, pathPrefix, item, "summary");
+      requireStringField(errors, pathPrefix, item, "owner");
+      requireNonEmptyStringArrayField(errors, pathPrefix, item, "evidenceRefs");
+      requireStringField(errors, pathPrefix, item, "nextAction");
+      requireStringField(errors, pathPrefix, item, "openedAt");
+      requireStringField(errors, pathPrefix, item, "expiresAt");
+      requireBooleanField(errors, pathPrefix, item, "blocksImplementation");
+      if (
+        item.severity === "critical" &&
+        item.status === "open" &&
+        item.blocksImplementation === true
+      ) {
+        openCriticalRotWarningCount += 1;
+      }
+    }
+
+    const factRecords =
+      requireArray(errors, "dashboardState.contextRotMonitor.factRecords", contextRotMonitor.factRecords) ??
+      [];
+    const factIds = new Set<string>();
+    for (const [index, fact] of factRecords.entries()) {
+      const pathPrefix = `dashboardState.contextRotMonitor.factRecords[${index}]`;
+      const item = requireObject(errors, pathPrefix, fact);
+      if (item == null) {
+        continue;
+      }
+      requireUniqueStringId(errors, factIds, `${pathPrefix}.id`, item.id);
+      requireAllowedStringField(errors, pathPrefix, item, "status", [
+        "observed",
+        "declared",
+        "planned",
+        "stale",
+        "contradicted",
+        "retired",
+      ]);
+      requireStringField(errors, pathPrefix, item, "owner");
+      requireStringField(errors, pathPrefix, item, "lastVerifiedAt");
+      requireStringField(errors, pathPrefix, item, "ttl");
+      requireStringField(errors, pathPrefix, item, "evidenceRef");
+      requireStringField(errors, pathPrefix, item, "reversalCondition");
+      requireStringField(errors, pathPrefix, item, "relatedGoalRef");
+      requireStringField(errors, pathPrefix, item, "relatedRealityRef");
+    }
+    const expiredFacts = readStringArrayField(
+      errors,
+      "dashboardState.contextRotMonitor",
+      contextRotMonitor,
+      "expiredFacts"
+    );
+    for (const expiredFactId of expiredFacts) {
+      if (!factIds.has(expiredFactId)) {
+        errors.push(
+          `dashboardState.contextRotMonitor.expiredFacts contains unknown fact id ${expiredFactId}`
+        );
+      }
+    }
+    requireStringArrayField(
+      errors,
+      "dashboardState.contextRotMonitor",
+      contextRotMonitor,
+      "nextEvidenceToCollect"
+    );
+  }
+
+  const phaseGate = isPlainObject(goalCompass?.phaseGate)
+    ? (goalCompass.phaseGate as Record<string, unknown>)
+    : null;
+  if (
+    openCriticalRotWarningCount > 0 &&
+    phaseGate != null &&
+    phaseGate.canImplementApplicationChange === true
+  ) {
+    errors.push(
+      "dashboardState.goalCompass.phaseGate.canImplementApplicationChange must be false while critical context rot warnings are open"
+    );
+  }
+
+  const harnessEvaluation = requireObject(
+    errors,
+    "dashboardState.harnessEvaluation",
+    root.harnessEvaluation
+  );
+  if (harnessEvaluation != null) {
+    requireStringField(errors, "dashboardState.harnessEvaluation", harnessEvaluation, "schemaVersion");
+    requireStringField(errors, "dashboardState.harnessEvaluation", harnessEvaluation, "scope");
+    requireStringField(errors, "dashboardState.harnessEvaluation", harnessEvaluation, "status");
+    requireNumberField(errors, "dashboardState.harnessEvaluation", harnessEvaluation, "score");
+    requireNumberField(errors, "dashboardState.harnessEvaluation", harnessEvaluation, "thresholdScore");
+    requireStringField(errors, "dashboardState.harnessEvaluation", harnessEvaluation, "sourceStateHash");
+    requireStringField(errors, "dashboardState.harnessEvaluation", harnessEvaluation, "evaluatedAt");
+    requireStringField(errors, "dashboardState.harnessEvaluation", harnessEvaluation, "evaluator");
+    const metrics =
+      requireArray(errors, "dashboardState.harnessEvaluation.metrics", harnessEvaluation.metrics) ??
+      [];
+    const metricIds = new Set<string>();
+    let failingMetricCount = 0;
+    for (const [index, metric] of metrics.entries()) {
+      const pathPrefix = `dashboardState.harnessEvaluation.metrics[${index}]`;
+      const item = requireObject(errors, pathPrefix, metric);
+      if (item == null) {
+        continue;
+      }
+      requireUniqueStringId(errors, metricIds, `${pathPrefix}.id`, item.id);
+      requireStringField(errors, pathPrefix, item, "label");
+      requireStringField(errors, pathPrefix, item, "status");
+      requireNumberField(errors, pathPrefix, item, "score");
+      requireNumberField(errors, pathPrefix, item, "thresholdScore");
+      requireNonEmptyStringArrayField(errors, pathPrefix, item, "evidenceRefs");
+      requireStringField(errors, pathPrefix, item, "failClosedRule");
+      if (
+        item.status !== "pass" ||
+        (isFiniteNumber(item.score) &&
+          isFiniteNumber(item.thresholdScore) &&
+          item.score < item.thresholdScore)
+      ) {
+        failingMetricCount += 1;
+      }
+    }
+    const gates = requireObject(
+      errors,
+      "dashboardState.harnessEvaluation.gates",
+      harnessEvaluation.gates
+    );
+    if (gates != null) {
+      requireBooleanField(errors, "dashboardState.harnessEvaluation.gates", gates, "goalTraceRequired");
+      requireBooleanField(errors, "dashboardState.harnessEvaluation.gates", gates, "criticalRotBlocksImplementation");
+      requireBooleanField(errors, "dashboardState.harnessEvaluation.gates", gates, "staleFactsBlockCloseout");
+      requireBooleanField(errors, "dashboardState.harnessEvaluation.gates", gates, "brokenRealityRefsBlockProjection");
+    }
+    if (
+      isFiniteNumber(harnessEvaluation.score) &&
+      isFiniteNumber(harnessEvaluation.thresholdScore) &&
+      harnessEvaluation.score >= harnessEvaluation.thresholdScore &&
+      harnessEvaluation.status !== "pass"
+    ) {
+      errors.push("dashboardState.harnessEvaluation.status must be pass when score meets thresholdScore");
+    }
+    if (
+      harnessEvaluation.status === "pass" &&
+      isFiniteNumber(harnessEvaluation.score) &&
+      isFiniteNumber(harnessEvaluation.thresholdScore) &&
+      harnessEvaluation.score < harnessEvaluation.thresholdScore
+    ) {
+      errors.push("dashboardState.harnessEvaluation.score must meet thresholdScore when status is pass");
+    }
+    if (harnessEvaluation.status === "pass" && failingMetricCount > 0) {
+      errors.push("dashboardState.harnessEvaluation cannot pass while any metric is below threshold or not pass");
+    }
+    if (harnessEvaluation.status === "pass" && openCriticalRotWarningCount > 0) {
+      errors.push("dashboardState.harnessEvaluation cannot pass while critical context rot warnings are open");
+    }
   }
 
   const executiveSummary = requireObject(
@@ -1602,6 +2038,38 @@ export function validateDashboardStateShape(
           "dashboardState.dashboardQualityScorecard.uiUxDesignScore must stay below targetScore until qaEvidence.status is verified or passed"
         );
       }
+    }
+
+    const modernWebUiPolicy = requireObject(
+      errors,
+      "dashboardState.dashboardQualityScorecard.modernWebUiPolicy",
+      dashboardQualityScorecard.modernWebUiPolicy
+    );
+    if (modernWebUiPolicy != null) {
+      requireStringField(
+        errors,
+        "dashboardState.dashboardQualityScorecard.modernWebUiPolicy",
+        modernWebUiPolicy,
+        "sourceBaseline"
+      );
+      requireStringField(
+        errors,
+        "dashboardState.dashboardQualityScorecard.modernWebUiPolicy",
+        modernWebUiPolicy,
+        "liveRequirement"
+      );
+      requireStringField(
+        errors,
+        "dashboardState.dashboardQualityScorecard.modernWebUiPolicy",
+        modernWebUiPolicy,
+        "htmlInCanvasPolicy"
+      );
+      requireStringField(
+        errors,
+        "dashboardState.dashboardQualityScorecard.modernWebUiPolicy",
+        modernWebUiPolicy,
+        "qaGate"
+      );
     }
 
     const dimensions = requireArray(

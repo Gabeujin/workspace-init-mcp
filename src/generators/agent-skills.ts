@@ -498,6 +498,58 @@ ${skill.description}
 - another contributor can resume from the record alone
 - the record points to the latest plan, review, and verification artifacts
 `;
+    case "server-flow-dashboard-builder":
+      return `# ${skill.name}
+
+${skill.description}
+
+## Trigger
+
+Use this skill only when the user asks for server flow monitoring, runtime monitoring, traffic flow visibility, workflow or pipeline monitoring, lightweight server status, or when a newly built app, API server, MCP server, worker, or deployment needs observability.
+
+Do not use this skill to modify the World Model Harness Dashboard. That dashboard owns AI-agent continuity, project reality, goals, context rot, governance, evidence, and handoff state.
+
+## Dashboard Domains
+
+1. Network traffic flow
+   - throughput
+   - top talkers
+   - protocol share
+   - packet loss
+   - suspicious ports or IPs
+2. Data and workflow flow
+   - pipeline status
+   - queue latency
+   - throughput
+   - failures
+   - retries
+3. Lightweight server state
+   - CPU, memory, disk
+   - containers or services
+   - domains and ports
+   - uptime
+
+## Scaffold
+
+Prefer the MCP tool \`create_server_flow_dashboard\` when available. It creates:
+
+- \`server-flow-dashboard/README.md\`
+- \`server-flow-dashboard/config/server-flow-dashboard.config.json\`
+- \`server-flow-dashboard/data/sample-flow-snapshot.json\`
+- \`server-flow-dashboard/public/index.html\`
+- \`server-flow-dashboard/public/styles.css\`
+- \`server-flow-dashboard/public/app.js\`
+- \`docs/server-flow-monitoring-dashboard.md\`
+
+## Rules
+
+- Keep this dashboard separate from \`docs/ai-harness/dashboard/\`.
+- Never persist secrets, tokens, raw credentials, or customer payloads in dashboard state.
+- Start with read-only metrics and sample data before adding live controls.
+- Make alert thresholds explicit and owned before treating the dashboard as operational evidence.
+- Use modern browser UI primitives as progressive enhancement: View Transitions, scroll-driven animations, popover/dialog/inert, container queries, color-scheme, light-dark(), and reduced-motion handling.
+- HTML-in-Canvas may be used for network or pipeline topology canvases only when semantic DOM fallback, accessibility, searchability, translation, and Playwright checks pass.
+`;
     case "service-endpoint-tracer":
       return `# ${skill.name}
 
@@ -929,6 +981,8 @@ function getAgentTools(agentId: string): string[] {
   switch (agentId) {
     case "harness-doc-writer":
       return ["read", "edit", "search"];
+    case "server-flow-monitoring-operator":
+      return ["read", "edit", "search", "execute"];
     case "legacy-enterprise-analysis":
       return ["read", "search"];
     case "harness-expert-reviewer":
@@ -1097,6 +1151,43 @@ ${agent.description}
 - AS-IS vs TO-BE comparisons
 - handover notes
 - flow notes with Mermaid when structure matters
+`;
+    case "server-flow-monitoring-operator":
+      return `# ${agent.name}
+
+${agent.description}
+
+## Mission
+
+Create and maintain Server Flow Monitoring dashboards for application runtime visibility. This is a separate domain from the World Model Harness Dashboard.
+
+## Use When
+
+- The user asks for server flow, traffic flow, pipeline flow, resource, uptime, or runtime monitoring.
+- A web app, mobile backend, API server, MCP server, worker, data pipeline, VPS, container service, or deployment needs observability.
+
+## Do Not
+
+- Do not modify \`docs/ai-harness/dashboard/\` for server monitoring.
+- Do not store secrets, tokens, credentials, or customer payloads.
+- Do not treat server flow metrics as AI harness governance evidence unless a separate evidence artifact links them.
+
+## Build Checklist
+
+1. Pick the dominant flow mode: network traffic, workflow, lightweight server, or combined.
+2. Define monitored services, ports, pipelines, resources, and alert thresholds.
+3. Scaffold or update \`server-flow-dashboard/\`.
+4. Keep the first version read-only with sample data or a safe metrics endpoint.
+5. Add runbook links and owners before using it for operations.
+6. Use modern browser UI features only with stable fallback and current browser QA evidence.
+
+## Output
+
+- dashboard scaffold or change summary
+- metrics and thresholds
+- data source assumptions
+- security constraints
+- next integration steps
 `;
     case "legacy-enterprise-analysis":
       return `# ${agent.name}

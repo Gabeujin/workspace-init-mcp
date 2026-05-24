@@ -60,6 +60,15 @@ Use this skill when the generated dashboard surfaces need truthful updates that 
 - Name the relevant tab, item id or label, evidence path, current score impact, and safest next action.
 - Prefer generated harness skills and `get_harness_dashboard_context` over ad hoc reading of unrelated files.
 
+## Modern Web UI Guidance
+
+- World Model Harness Dashboard screen work must stay live: keep the read-only local listener, SSE/runtime refresh path, projection freshness cues, filters, copy/export actions, and health indicators interactive.
+- Use current browser-native UI primitives where they improve clarity: View Transitions, element-scoped transitions, scroll-driven animations, popover/dialog/inert, container queries, details/hidden-until-found, and contrast-aware color tokens.
+- Respect user preferences by default: color scheme, contrast, reduced motion, text scaling, keyboard navigation, and accessible focus states.
+- HTML-in-Canvas is allowed only as progressive enhancement for canvas/WebGL/WebGPU surfaces. Preserve semantic DOM fallback, accessibility, find-in-page, translation, and Playwright-verifiable interaction before enabling it.
+- If Playwright, accessibility, keyboard, console, responsive, or canvas fallback QA fails, prefer stable DOM/CSS over experimental APIs.
+- Keep text selectable, searchable, translatable, and inspectable; do not hide key dashboard state inside bitmap-only rendering.
+
 ## Work Guidance
 
 - Map legacy `TODO`, `FIXME`, `OPEN`, and unchecked boxes to `waiting`.

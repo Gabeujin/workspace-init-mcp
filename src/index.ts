@@ -36,6 +36,8 @@ import { assertGeneratedFilesRespectNonDestructivePolicy } from "./tools/generat
 import {
   auditWorkspaceManagedSemanticDiff,
   auditWorkspaceUpgradeRisk,
+  buildManagedFileInventoryFile,
+  MANAGED_FILE_INVENTORY_PATH,
   MANAGED_TEXT_MERGE_PATHS,
 } from "./tools/managed-inventory.js";
 import { mergeHarnessInstructionBlock } from "./generators/agent-platform-instructions.js";
@@ -78,6 +80,7 @@ import {
 } from "./data/agent-skills-registry.js";
 import { buildHarnessProfilesSummary } from "./data/harness-profiles.js";
 import { generateSelectedSkills } from "./generators/agent-skills.js";
+import { generateServerFlowDashboardFiles } from "./generators/server-flow-dashboard.js";
 
 // ---------------------------------------------------------------------------
 // Encoding helper
@@ -104,8 +107,6 @@ const LIVE_GOVERNANCE_STATE_PREFIXES = [
   ".governance/reports/",
   ".governance/reviews/",
   ".governance/sessions/",
-  "live-artifacts-dashboard/.state/",
-  "live-artifacts-dashboard/logs/",
   "docs/ai-harness/runtime/sessions/",
   "docs/ai-harness/runtime/work-packets/",
   "docs/ai-harness/runtime/inbox/",
@@ -118,6 +119,11 @@ const LIVE_GOVERNANCE_STATE_PREFIXES = [
 const LIVE_GOVERNANCE_STATE_FILES = new Set([
   ".governance/_INDEX.md",
   ".governance/_PROJECT_STATE.md",
+  "docs/context/context-index.md",
+  "docs/ai-harness/dashboard/entities/reality-model.json",
+  "docs/ai-harness/dashboard/entities/goal-compass.json",
+  "docs/ai-harness/dashboard/entities/context-rot-monitor.json",
+  "docs/ai-harness/dashboard/evaluations/harness-evaluation.json",
   "docs/ai-harness/dashboard/state/dashboard-state.json",
   "docs/ai-harness/readiness/maturity-scorecard.json",
   "docs/ai-harness/readiness/semantic-audit.json",
@@ -152,6 +158,46 @@ function writeFileWithEncoding(
     fs.writeFileSync(fullPath, "\uFEFF" + content, "utf-8");
   } else {
     fs.writeFileSync(fullPath, content, encoding as BufferEncoding);
+  }
+}
+
+function isPathWithin(parentPath: string, candidatePath: string): boolean {
+  const relative = path.relative(parentPath, candidatePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function assertContainedNonSymlinkWrite(workspacePath: string, fullPath: string): void {
+  const workspaceRealPath = fs.realpathSync.native(workspacePath);
+  const parentPath = path.dirname(fullPath);
+  fs.mkdirSync(parentPath, { recursive: true });
+  const parentRealPath = fs.realpathSync.native(parentPath);
+  if (!isPathWithin(workspaceRealPath, parentRealPath)) {
+    throw new Error(`Generated file write escaped the workspace through a linked directory: ${fullPath}`);
+  }
+  if (fs.existsSync(fullPath) && fs.lstatSync(fullPath).isSymbolicLink()) {
+    throw new Error(`Refusing to overwrite symbolic link generated path: ${fullPath}`);
+  }
+}
+
+function writeContainedFileAtomic(
+  workspacePath: string,
+  fullPath: string,
+  content: string,
+  encoding: string
+): void {
+  assertContainedNonSymlinkWrite(workspacePath, fullPath);
+  const tempPath = path.join(
+    path.dirname(fullPath),
+    `.${path.basename(fullPath)}.${process.pid}.${Date.now()}.tmp`
+  );
+  try {
+    writeFileWithEncoding(tempPath, content, encoding);
+    fs.renameSync(tempPath, fullPath);
+  } catch (error) {
+    if (fs.existsSync(tempPath)) {
+      fs.rmSync(tempPath, { force: true });
+    }
+    throw error;
   }
 }
 
@@ -992,6 +1038,157 @@ returned schema to collect inputs before calling initialize_workspace.`,
 );
 
 // ---------------------------------------------------------------------------
+// Tool: create_server_flow_dashboard
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "create_server_flow_dashboard",
+  {
+    title: "Create Server Flow Monitoring Dashboard",
+    description: `Create a separate Server Flow Monitoring Dashboard scaffold for an application, API server, MCP server, worker, data pipeline, deployment, VPS, or homelab service.
+
+This tool is intentionally separate from the World Model Harness Dashboard. It creates an application/server monitoring surface under server-flow-dashboard/ and a short docs blueprint, but it does not change docs/ai-harness/dashboard/ or agent governance state.
+
+Use it when the user asks for a server flow dashboard, runtime monitoring dashboard, traffic dashboard, pipeline monitoring dashboard, lightweight server status dashboard, or when newly built application infrastructure needs visible flow monitoring.`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      dashboardName: z
+        .string()
+        .optional()
+        .describe("Human-readable dashboard title"),
+      applicationName: z
+        .string()
+        .optional()
+        .describe("Application, API server, MCP server, worker, or deployment being monitored"),
+      focus: z
+        .enum(["network-traffic", "workflow", "lightweight", "combined"])
+        .optional()
+        .describe("Monitoring focus. Default: combined."),
+      monitoredServices: z
+        .array(z.string())
+        .optional()
+        .describe("Services or containers to show in the dashboard"),
+      ports: z
+        .array(z.number())
+        .optional()
+        .describe("Ports associated with monitored services"),
+      dataPipelines: z
+        .array(z.string())
+        .optional()
+        .describe("Data or workflow pipelines to show"),
+      force: z
+        .boolean()
+        .optional()
+        .describe("Overwrite existing server-flow-dashboard files. Default: false."),
+      fileEncoding: z
+        .enum(["utf-8", "utf-8-bom", "ascii", "latin1"])
+        .optional()
+        .describe("File encoding for generated files. Default: utf-8."),
+    }),
+  },
+  async (params) => {
+    try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
+      const files = generateServerFlowDashboardFiles({
+        workspacePath: params.workspacePath,
+        dashboardName: params.dashboardName,
+        applicationName: params.applicationName,
+        focus: params.focus,
+        monitoredServices: params.monitoredServices,
+        ports: params.ports,
+        dataPipelines: params.dataPipelines,
+      });
+      assertGeneratedFilesRespectNonDestructivePolicy(files);
+
+      const force = params.force ?? false;
+      const encoding = params.fileEncoding ?? "utf-8";
+      const written: string[] = [];
+      const skipped: string[] = [];
+      let managedInventoryStatus = "not-present";
+
+      for (const file of files) {
+        const fullPath = path.join(params.workspacePath, file.relativePath);
+        assertContainedNonSymlinkWrite(params.workspacePath, fullPath);
+        if (!force && fs.existsSync(fullPath)) {
+          skipped.push(file.relativePath);
+          continue;
+        }
+        writeContainedFileAtomic(params.workspacePath, fullPath, file.content, encoding);
+        written.push(file.relativePath);
+      }
+
+      const managedInventoryPath = path.join(params.workspacePath, MANAGED_FILE_INVENTORY_PATH);
+      if (written.length > 0 && fs.existsSync(managedInventoryPath)) {
+        try {
+          const current = JSON.parse(fs.readFileSync(managedInventoryPath, "utf-8")) as {
+            entries?: Array<{ path?: string }>;
+          };
+          if (current != null && typeof current === "object" && Array.isArray(current.entries)) {
+            const writtenFiles = files.filter((file) => written.includes(file.relativePath));
+            const generatedInventory = JSON.parse(
+              buildManagedFileInventoryFile(writtenFiles).content
+            ) as { entries?: Array<{ path: string }> };
+            const entriesByPath = new Map<string, unknown>();
+            for (const entry of current.entries) {
+              if (typeof entry.path === "string") {
+                entriesByPath.set(entry.path, entry);
+              }
+            }
+            for (const entry of generatedInventory.entries ?? []) {
+              entriesByPath.set(entry.path, entry);
+            }
+            current.entries = Array.from(entriesByPath.values()) as Array<{ path?: string }>;
+            current.entries.sort((left, right) => String(left.path).localeCompare(String(right.path)));
+            writeContainedFileAtomic(
+              params.workspacePath,
+              managedInventoryPath,
+              `${JSON.stringify(current, null, 2)}\n`,
+              encoding
+            );
+            managedInventoryStatus = "updated";
+          } else {
+            managedInventoryStatus = "skipped-invalid";
+          }
+        } catch {
+          managedInventoryStatus = "skipped-invalid";
+        }
+      } else if (fs.existsSync(managedInventoryPath)) {
+        managedInventoryStatus = written.length === 0 ? "unchanged-no-new-files" : "present";
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: [
+              "Server Flow Monitoring Dashboard scaffold complete.",
+              "",
+              `Written files (${written.length}):`,
+              ...written.map((file) => `  - ${file}`),
+              "",
+              `Skipped existing files (${skipped.length}):`,
+              ...skipped.map((file) => `  - ${file}`),
+              "",
+              `Managed inventory: ${managedInventoryStatus}`,
+              "",
+              "Domain boundary: this is separate from docs/ai-harness/dashboard/, which remains the World Model Harness Dashboard.",
+            ].join("\n"),
+          },
+        ],
+      };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: "text" as const, text: `Server flow dashboard creation failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
 // Tool: validate_workspace
 // ---------------------------------------------------------------------------
 
@@ -1256,7 +1453,7 @@ This tool:
 - creates a durable session JSON snapshot and markdown summary
 - seeds the first chunk and moves the workflow to plan-1
 - captures hub orchestration fields, dependency maps, expected read/write paths, merge owners, verification commands, and context-injection guidance for parallel workers
-- synchronizes durable runtime state and keeps the dashboard boundary clear: admin for server health, live artifacts for harness work status
+- synchronizes durable runtime state and keeps the Project World Model dashboard as the canonical reality, goal, context, evidence, runtime, and next-action surface
 
 Use this before meaningful implementation begins. The session is file-system-based and survives context resets, long-running work, and interrupted sessions.`,
     inputSchema: z.object({

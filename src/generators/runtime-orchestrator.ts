@@ -577,7 +577,7 @@ function buildRuntimeCompatibilityMatrix(): string {
             "Replace the server-status dashboard baseline with the 4.6.1 ledger-backed Hypertext Project World Model.",
             "Add stakeholderBrief, agentResumeBrief, governanceEvidenceBrief, service contracts, and operations readiness projections.",
             "Refresh dashboard state, schema, operations, and MCP context surfaces so agents can resume from projections.",
-            "Remove live-artifacts dashboard from default generation; keep backend dashboards as optional blueprints.",
+            "Keep the Project World Model Harness Dashboard as the only default dashboard; create Server Flow Monitoring dashboards only from explicit application-monitoring requests.",
           ],
           preserve: [
             "existing runtime sessions",

@@ -125,6 +125,22 @@ export function getHarnessDashboardContext(
   const stakeholderBrief =
     fullState.stakeholderBrief ?? compactIndex.stakeholderBrief;
   const governanceEvidenceBrief = fullState.governanceEvidenceBrief;
+  const goalCompass = fullState.goalCompass ?? compactIndex.goalCompass;
+  const realityModel = fullState.realityModel ?? compactIndex.realityModel;
+  const contextRotMonitor =
+    fullState.contextRotMonitor ?? compactIndex.contextRotMonitor;
+  const harnessEvaluation =
+    fullState.harnessEvaluation ?? compactIndex.harnessEvaluation;
+  const agentResumeRecord =
+    (agentResumeBrief as Record<string, unknown> | undefined) ?? {};
+  const governanceEvidenceRecord =
+    (governanceEvidenceBrief as Record<string, unknown> | undefined) ?? {};
+  const worldJudgmentRecord =
+    (fullState.worldJudgment as Record<string, unknown> | undefined) ?? {};
+  const judgmentConsoleRecord =
+    (fullState.judgmentConsole as Record<string, unknown> | undefined) ?? {};
+  const contextRotRecord =
+    (contextRotMonitor as Record<string, unknown> | undefined) ?? {};
 
   const context =
     view === "full"
@@ -136,6 +152,10 @@ export function getHarnessDashboardContext(
         }
       : view === "stakeholder"
         ? {
+            realityModel,
+            goalCompass,
+            contextRotMonitor,
+            harnessEvaluation,
             worldJudgment: fullState.worldJudgment,
             audienceLens: fullState.audienceLens,
             criticalSignals: fullState.criticalSignals,
@@ -150,6 +170,10 @@ export function getHarnessDashboardContext(
           }
         : view === "maintainer"
           ? {
+              realityModel,
+              goalCompass,
+              contextRotMonitor,
+              harnessEvaluation,
               worldJudgment: fullState.worldJudgment,
               audienceLens: fullState.audienceLens,
               criticalSignals: fullState.criticalSignals,
@@ -164,6 +188,40 @@ export function getHarnessDashboardContext(
               databaseReadiness: fullState.databaseReadiness,
             }
           : {
+              resumePacket: {
+                currentReality:
+                  (goalCompass as Record<string, unknown> | undefined)
+                    ?.currentReality ?? worldJudgmentRecord.summary,
+                goalState:
+                  (goalCompass as Record<string, unknown> | undefined)
+                    ?.goalState ?? stakeholderBrief,
+                nextSafeMove:
+                  (goalCompass as Record<string, unknown> | undefined)
+                    ?.nextSafeMove ?? agentResumeRecord.nextSafestAction,
+                blockedActions:
+                  judgmentConsoleRecord.blockedActions ??
+                  worldJudgmentRecord.blockedActions ??
+                  [],
+                authoritativeFiles:
+                  agentResumeRecord.authoritativeFiles ??
+                  compactIndex.authoritativeFiles,
+                harnessScore:
+                  (harnessEvaluation as Record<string, unknown> | undefined)
+                    ?.score,
+              },
+              rotWarnings: contextRotRecord.rotWarnings ?? [],
+              blockedActions:
+                judgmentConsoleRecord.blockedActions ??
+                worldJudgmentRecord.blockedActions ??
+                [],
+              nextEvidenceToCollect:
+                contextRotRecord.nextEvidenceToCollect ??
+                governanceEvidenceRecord.missingEvidenceClaims ??
+                [],
+              realityModel,
+              goalCompass,
+              contextRotMonitor,
+              harnessEvaluation,
               worldJudgment: fullState.worldJudgment,
               criticalSignals: fullState.criticalSignals,
               readinessJudgments: fullState.readinessJudgments,

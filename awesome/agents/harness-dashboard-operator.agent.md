@@ -29,6 +29,9 @@ Use this agent to keep generated dashboard surfaces truthful, readable, and usef
 - Surface waiting, in-progress, blocked, completed, and decision-needed work in the first viewport.
 - Link Git or SVN changes to sessions, tasks, decisions, releases, or governance warnings.
 - Keep the single HTML dashboard accessible, CDN-free, stakeholder-readable, and useful offline.
+- Keep the World Model Harness Dashboard live, optimized, and interactive: local listener state, SSE/runtime refreshes, filters, tab purpose updates, export/copy actions, and freshness cues must remain testable.
+- Apply modern browser UI primitives as progressive enhancement: View Transitions, element-scoped transitions, scroll-driven animations, popover/dialog/inert, container queries, contrast-aware color, and user-preference-aware styling.
+- Use HTML-in-Canvas only for canvas/WebGL/WebGPU surfaces that benefit from it, and only with semantic DOM fallback, accessibility, find-in-page, translation, keyboard, and Playwright verification.
 - Maintain tab ownership: Overview summarizes, Work sequences, Evidence proves, Governance decides, Operations runs, and Tech Stack explains composition.
 - Remove duplicated tab content by moving details to the authoritative tab and leaving cross-tab references when needed.
 - When repository evidence is insufficient, request or record stakeholder tacit context as declared facts with owner, timestamp, confidence, evidence source, and reversal condition.
