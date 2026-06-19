@@ -35,6 +35,7 @@ import {
   type AutonomyMode,
   type TokenBudget,
 } from "../types.js";
+import { WORKSPACE_INIT_MCP_VERSION } from "../data/version.js";
 
 export interface ReconcileWorkspaceOptions extends Partial<WorkspaceInitParams> {
   workspacePath: string;
@@ -163,7 +164,7 @@ export interface ReconcilePreflightExportResult {
   summary: string;
 }
 
-const RECONCILE_VERSION = "4.6.1";
+const RECONCILE_VERSION = WORKSPACE_INIT_MCP_VERSION;
 const RECONCILE_POLICY_PATH = ".github/ai-harness/reconcile-policy.json";
 
 const LEGACY_RESOURCE_ROOTS: Array<{

@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { type GeneratedFile } from "../types.js";
+import { WORKSPACE_INIT_MCP_VERSION } from "../data/version.js";
 import { analyzeWorkspace } from "./status.js";
 import {
   isGeneratedWorkspaceControlPath,
@@ -14,7 +15,7 @@ import {
 
 export const MANAGED_FILE_INVENTORY_PATH = ".github/ai-harness/managed-file-inventory.json";
 export const MANAGED_INVENTORY_SCHEMA_VERSION = "1.0.0";
-const TOOL_VERSION = "4.6.1";
+const TOOL_VERSION = WORKSPACE_INIT_MCP_VERSION;
 
 export const MANAGED_JSON_MERGE_PATHS = new Set([
   "docs/ai-harness/dashboard/entities/project-world-model.json",

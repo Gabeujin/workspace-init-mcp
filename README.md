@@ -5,7 +5,7 @@
 
 `workspace-init-mcp` installs a non-destructive AI Work Harness that lets humans and agents plan, resume, verify, and hand off project work from durable evidence instead of chat history.
 
-Version `4.6.1` ships the Hypertext Harness Dashboard as a single-file HTML Project World Model backed by JSONL events, JSON projections, a read-only local API, stakeholder-friendly interactive views, and domain-specific evidence gates. The main shift is from Markdown/JSON-only reporting to a durable hypertext dashboard that can be shared, served locally, inspected by AI agents, and used as a project continuity layer.
+Version `4.6.3` makes the harness more domain-independent and more durable across models by adding state-externalizing working-memory contracts, extensible domain stress profiles, and a persisted work-review-improve loop. The dashboard remains a single-file HTML Project World Model backed by JSONL events, JSON projections, a read-only local API, stakeholder-friendly interactive views, and evidence gates, but 4.6.3 shifts the default posture from service-specific reporting to a reusable world-model harness for software, learning, research, operations, and other governed work.
 
 ---
 
@@ -24,13 +24,32 @@ It generates:
 | Local listener | Token-protected, loopback-only, read-only dashboard API with SSE and deterministic query support. |
 | Reconcile tools | Non-destructive refresh of managed harness files while protecting application source roots. |
 | Parallel orchestration | Expected read/write path contracts, chunk conflict audits, worker assignment, and evaluator loops. |
-| Domain operations | Optional stress profiles for identity/commerce, legacy modernization, and content-release governance with evidence gates and report sections. |
+| Domain operations | Optional built-in or custom stress profiles with evidence gates, report sections, readiness checks, and operations views. |
 
-The harness is designed for both new services and existing production-adjacent projects that already have source code, history, and team conventions.
+The harness is designed for both new services and existing projects that already have source code, history, learning records, research material, operating rules, or team conventions.
 
 ---
 
-## 4.6.1 Highlights
+## 4.6.3 Highlights
+
+### Stateful Cognitive Offloading
+
+The harness now treats the model and the generated project state as separate cooperating systems.
+
+- The model focuses on semantic judgment, planning, critique, and synthesis.
+- The harness maintains recoverable state: dashboard projections, evidence links, work packets, handoffs, review records, and compact resume briefs.
+- Generated runtime handoffs include a `workingMemory` contract that separates prompt-facing context from outer durable stores.
+- Agents are expected to verify evidence before promoting facts into the dashboard world model.
+- Long work is resumed from ledger-backed state instead of chat memory alone.
+
+### Work, Negative Review, Improve Loop
+
+The runtime now persists evaluation loop history instead of leaving review pressure as prose guidance.
+
+- Work packets and adapter handoffs expose `evaluationLoop.history`.
+- `advance_harness_session` can record verdicts, findings, required fixes, verification evidence, residual risk, and before/after scores.
+- The default quality rhythm is: do the work, ask for negative review, apply improvements, verify, then record the evidence.
+- Harness state is intentionally allowed to start below release quality; it should improve through repeated review receipts.
 
 ### Hypertext Dashboard First
 
@@ -83,11 +102,12 @@ UI work follows current Chrome/Google I/O modern web guidance as progressive enh
 
 ### Domain Stress And Briefing Packs
 
-4.6.1 adds domain stress profiles that make the dashboard more useful for real service work instead of generic project tracking.
+4.6.3 keeps the built-in service profiles and adds custom profile support so the harness can fit a web application, learning plan, research corpus, documentation program, or other governed domain without hard-coding the world around commerce or release work.
 
 - `identity-commerce-operations`: credential/auth, payment, refund, fulfillment, and operational evidence gates.
 - `legacy-modernization-governance`: AS-IS/TO-BE mapping, migration, rollback, ownership, and compatibility evidence gates.
 - `content-release-governance`: message map, approval, localization, publishing, and post-release evidence gates.
+- Custom `domainStressProfile` IDs or labels generate generic domain glossary, actor/workflow, state contract, source-material, review, readiness, and handoff gates.
 - `record-domain-evidence` updates the matching work queue, readiness rows, operations timeline, report sections, and missing-evidence signals.
 - `export-report` produces `briefing.md`, `speaker-notes.md`, `evidence-appendix.json`, and `report-manifest.json` from the dashboard state.
 - `/api/harness-dashboard/v1/briefing` exposes the same report pack through the read-only local listener.
@@ -330,13 +350,13 @@ Main MCP tools include:
 | `restore_reconcile_backup` | Restore archived managed files from a reconcile run. |
 | `get_harness_dashboard_context` | Read dashboard projections for AI-agent resume. |
 | `audit_harness_parallel_chunk_conflicts` | Check expected write-path overlap before parallel work. |
-| `open_harness_session` / runtime tools | Start and manage governed sessions, chunks, handoffs, and native execution. |
+| `start_harness_session`, `list_harness_sessions`, `get_harness_session_log` / runtime tools | Start, inspect, and manage governed sessions, chunks, handoffs, and native execution. |
 
 ---
 
 ## Quality And Safety Baseline
 
-Version `4.6.1` includes these guardrails:
+Version `4.6.3` includes these guardrails:
 
 - Absolute `workspacePath` enforcement.
 - Non-destructive adoption for legacy projects.
@@ -349,7 +369,26 @@ Version `4.6.1` includes these guardrails:
 - Public export redaction for local paths, users, tokens, secrets, private URLs, and sensitive notes.
 - Runtime state corruption reporting that distinguishes malformed JSON from missing artifacts.
 - Parallel chunk conflict audits for open and queued sessions.
+- First-class session listing and request/process/result event logs for resumable user-facing work.
 - Semantic readiness scoring that does not hide missing evidence behind structural completeness.
+- Optional harness engineering generation that fully honors `includeHarnessEngineering: false`.
+- Extensible domain stress profiles so built-in commerce, modernization, and content-release examples do not become hidden defaults.
+- Persisted evaluation-loop receipts for negative review, required fixes, verification evidence, and residual risk.
+
+---
+
+## Versioning Policy
+
+Every source, generated-resource, schema, contract, or documentation change must increment the package version. The default policy is the next patch version unless the change is intentionally minor or major.
+
+When bumping the version, update these together:
+
+- `package.json`
+- `package-lock.json`
+- `src/data/version.ts`
+- README release notes
+
+The central TypeScript version constants drive generated runtime, dashboard, reconcile, and managed-inventory metadata so future changes do not leave stale literal versions scattered through the codebase. Run `npm run version:check` before publishing; `npm test` runs the same check before build and generation tests.
 
 ---
 
@@ -364,6 +403,7 @@ npm test
 This builds TypeScript and runs the harness generation regression suite:
 
 ```bash
+npm run version:check
 npm run build
 node tests/harness-generation.test.js
 ```
@@ -376,25 +416,25 @@ npm test
 npm pack --dry-run
 ```
 
-`prepack` runs a build so package contents do not depend on stale local `dist/` output.
+`prepack` runs `clean` and `build` so package contents do not depend on stale local `dist/` output.
 
 ---
 
-## 4.6.1 Release Notes
+## 4.6.3 Release Notes
 
 Major changes:
 
-- Reframed the Harness Dashboard as a hypertext Project World Model.
-- Moved stakeholder communication from Markdown-centric reports to a single-file HTML dashboard.
-- Added audience lenses, slide-show briefing mode, multilingual UI, Tech Stack view, status-lane/timeline work visualization, and clearer tab purposes.
-- Added domain stress profiles for identity/commerce operations, legacy modernization governance, and content-release governance.
-- Added domain evidence gates that keep missing evidence, work queues, readiness rows, report sections, and operations timelines synchronized.
-- Added dashboard-derived briefing/report export with speaker notes, evidence appendix, report manifest, and read-only `/briefing` API support.
-- Extended initialization inputs for primary domains, governance profile, autonomy mode, token budget, domain stress profile, and legacy adoption posture.
-- Added dashboard context APIs and read-only listener behavior for AI-agent resume.
-- Added agent platform detection, user declaration flow, and instruction surface indexing.
-- Strengthened parallel-agent chunk conflict guidance and expected write-path governance.
-- Improved projection validation, runtime state handling, and dashboard operations.
+- Added Harness-1-inspired stateful cognitive offloading contracts for prompt-facing working memory and durable outer stores.
+- Persisted negative review and improvement receipts in runtime session state, work packets, and adapter handoffs.
+- Made `domainStressProfile` extensible instead of a closed enum; custom IDs or labels now produce generic evidence gates and operations projections.
+- Centralized version constants so generated dashboard, runtime, reconcile, and managed-inventory metadata advance together.
+- Honored `includeHarnessEngineering: false` across runtime, readiness, dashboard, and dashboard-ops generation.
+- Generalized dashboard operations validation so custom domain profiles are first-class.
+- Allowed custom domain stress names such as `Learning Growth Harness`, while normalizing them into stable profile IDs.
+- Restored built-in domain stress profile suggestions in the init form without closing off custom values.
+- Added `npm run version:check` so package, lockfile, central version constants, README release notes, and prepack policy are checked before tests.
+- Lowered bootstrap KPI optimism where live evidence is still missing.
+- Updated packaging so `prepack` cleans stale `dist/` output before building.
 
 Compatibility notes:
 

@@ -16,6 +16,10 @@ export const HARNESS_REQUIRED_HANDOFF_FIELDS = [
   "operatorChecklist",
   "runtimeExpectations",
   "packet",
+  "requestRecord",
+  "taskTracePolicy",
+  "workingMemory",
+  "evaluationLoop",
   "promptBlock",
   "compatibility",
 ] as const;

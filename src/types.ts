@@ -46,11 +46,8 @@ export type AutonomyMode = "guided" | "balanced" | "autonomous";
 /** Token usage strategy for long-running work. */
 export type TokenBudget = "lean" | "balanced" | "thorough";
 
-/** Domain stress profiles that promote domain-specific evidence gates into the harness. */
-export type DomainStressProfile =
-  | "identity-commerce-operations"
-  | "legacy-modernization-governance"
-  | "content-release-governance";
+/** Domain stress profile id that promotes evidence gates into the harness. */
+export type DomainStressProfile = string;
 
 /** Input parameters for workspace initialization. */
 export interface WorkspaceInitParams {

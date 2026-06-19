@@ -2275,9 +2275,16 @@ export function validateDashboardStateShape(
         );
       }
     }
-    for (const programKey of ["commerceOperations", "modernizationGovernance", "contentRelease"]) {
-      const program = domainOperations != null && isPlainObject(domainOperations[programKey])
-        ? domainOperations[programKey] as Record<string, unknown>
+    const operationEntries = domainOperations == null
+      ? []
+      : Object.entries(domainOperations).filter(
+          ([programKey, value]) =>
+            !["schemaVersion", "activeProfileIds", "status", "dashboardQuestion", "programs"].includes(programKey) &&
+            isPlainObject(value)
+        );
+    for (const [programKey, programValue] of operationEntries) {
+      const program = isPlainObject(programValue)
+        ? programValue as Record<string, unknown>
         : null;
       if (program == null) {
         continue;

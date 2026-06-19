@@ -12,6 +12,7 @@ const dashboardContextModule = await import("../dist/tools/harness-dashboard-con
 const dashboardStateModule = await import("../dist/tools/dashboard-state.js");
 const dashboardStateContractModule = await import("../dist/data/dashboard-state-contract.js");
 const harnessRuntimeModule = await import("../dist/tools/harness-runtime.js");
+const formSchemaModule = await import("../dist/tools/form-schema.js");
 const serverFlowDashboardModule = await import("../dist/generators/server-flow-dashboard.js");
 const agentSkillsRegistryModule = await import("../dist/data/agent-skills-registry.js");
 const agentSkillsGeneratorModule = await import("../dist/generators/agent-skills.js");
@@ -22,22 +23,52 @@ const { reconcileWorkspaceInitialization } = reconcileModule;
 const { getHarnessDashboardContext } = dashboardContextModule;
 const { validateDashboardStateShape } = dashboardStateModule;
 const { DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS } = dashboardStateContractModule;
-const { startHarnessSession, auditHarnessParallelChunkConflicts } = harnessRuntimeModule;
+const {
+  startHarnessSession,
+  advanceHarnessSession,
+  listHarnessSessions,
+  getHarnessSessionLog,
+  auditHarnessRuntime,
+  auditHarnessParallelChunkConflicts,
+  recordHarnessExecutionResult,
+} = harnessRuntimeModule;
+const { buildInitFormSchema } = formSchemaModule;
 const { generateServerFlowDashboardFiles } = serverFlowDashboardModule;
 const { recommendAgentSkills, SKILL_REGISTRY, AGENT_REGISTRY } = agentSkillsRegistryModule;
 const { generateSelectedSkills } = agentSkillsGeneratorModule;
+const packageJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf-8"));
+const CURRENT_VERSION = packageJson.version;
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 {
   const indexSource = fs.readFileSync(path.join(process.cwd(), "src/index.ts"), "utf-8");
+  const versionSource = fs.readFileSync(path.join(process.cwd(), "src/data/version.ts"), "utf-8");
+  const readmeSource = fs.readFileSync(path.join(process.cwd(), "README.md"), "utf-8");
+  const versionPattern = escapeRegExp(CURRENT_VERSION);
+  assert.match(versionSource, new RegExp(`WORKSPACE_INIT_MCP_VERSION\\s*=\\s*"${versionPattern}"`));
+  assert.match(readmeSource, new RegExp(`Version \`${versionPattern}\``));
+  assert.match(readmeSource, new RegExp(`## ${versionPattern} Release Notes`));
+  assert.doesNotMatch(readmeSource, /4\.6\.1/);
   assert.match(indexSource, /domainStressProfile:\s*z/);
   assert.match(indexSource, /legacyAdoptionProfile:\s*z/);
   assert.match(indexSource, /primaryDomains:\s*z/);
+
+  const initForm = buildInitFormSchema();
+  const domainStressField = initForm.sections
+    .flatMap((section) => section.fields)
+    .find((field) => field.name === "domainStressProfile");
+  assert.ok(domainStressField);
+  assert.equal(domainStressField.type, "text");
+  assert.ok(domainStressField.options.some((option) => option.value === "identity-commerce-operations"));
 }
 
 function createParams(workspacePath) {
   return {
     workspaceName: "Harness Workspace",
-    purpose: "Verify Harness Dashboard 4.6.1 Hypertext Project World Model generation",
+    purpose: `Verify Harness Dashboard ${CURRENT_VERSION} Hypertext Project World Model generation`,
     workspacePath,
     projectType: "web-app",
     techStack: ["TypeScript", "Node.js"],
@@ -210,7 +241,7 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   for (const key of DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS) {
     assert.ok(key in state, `dashboard-state.json should include ${key}`);
   }
-  assert.equal(state.meta.schemaVersion, "4.6.1");
+  assert.equal(state.meta.schemaVersion, CURRENT_VERSION);
   assert.equal(state.projectWorldModel.mission.statement, params.purpose);
   assert.equal(state.realityModel.nodes.some((node) => node.type === "repository"), true);
   assert.equal(state.realityModel.edges.some((edge) => edge.relation === "projects-world-model"), true);
@@ -229,6 +260,10 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     true
   );
   assert.match(state.harnessEvaluation.scoreMeaning, /Bootstrap starts below 9\.8/);
+  assert.match(state.cognitiveOffloading.sourceInspiration, /stateful cognitive offloading/);
+  assert.match(state.cognitiveOffloading.divisionOfLabor.agentKeeps, /review judgments/);
+  assert.match(state.cognitiveOffloading.workingMemory.outerTier, /Durable file cabinet/);
+  assert.match(state.cognitiveOffloading.verificationPolicy.negativeReviewLoop, /negative review/);
   assert.equal(state.listener.readOnly, true);
   assert.equal(state.embeddingProjection.policy.blockedByDefault.includes("secret"), true);
   assert.ok(Array.isArray(state.workTimeline.items));
@@ -271,6 +306,7 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(state.agentContextPacks.agent.mustRead.includes("realityModel"));
   assert.ok(state.agentContextPacks.agent.mustRead.includes("contextRotMonitor"));
   assert.ok(state.agentContextPacks.agent.mustRead.includes("harnessEvaluation"));
+  assert.ok(state.agentContextPacks.agent.mustRead.includes("cognitiveOffloading"));
   assert.ok(state.agentContextPacks.agent.mustRead.includes("agentPlatformGovernance"));
   assert.ok(Array.isArray(state.workReadinessMap.rows));
   assert.ok(Array.isArray(state.projectEvidenceInventory.sources));
@@ -449,6 +485,33 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   const validation = validateWorkspace(root);
   assert.equal(validation.isInitialized, true);
   assert.equal(validation.completeness, 100);
+}
+
+{
+  const root = createWorkspace();
+  const files = collectFiles({
+    ...createParams(root),
+    includeHarnessEngineering: false,
+  });
+  const byPath = new Map(files.map((file) => [file.relativePath, file]));
+
+  assert.ok(byPath.has("AGENTS.md"));
+  assert.equal(
+    files.some((file) => file.relativePath.startsWith("docs/ai-harness/dashboard/")),
+    false,
+    "includeHarnessEngineering=false must omit dashboard artifacts"
+  );
+  assert.equal(
+    files.some((file) => file.relativePath.startsWith("docs/ai-harness/runtime/")),
+    false,
+    "includeHarnessEngineering=false must omit runtime artifacts"
+  );
+  assert.equal(
+    files.some((file) => file.relativePath.startsWith(".github/ai-harness/")),
+    false,
+    "includeHarnessEngineering=false must omit harness engineering config"
+  );
+  assert.equal(byPath.has(".github/ai-harness/managed-file-inventory.json"), false);
 }
 
 {
@@ -682,6 +745,40 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     files.find((file) => file.relativePath === "docs/ai-harness/dashboard/state/dashboard-state.json").content
   );
   assert.equal(state.domainStress.activeProfileIds.includes("identity-commerce-operations"), false);
+}
+
+{
+  const root = createWorkspace();
+  const files = collectFiles({
+    ...createParams(root),
+    workspaceName: "Learning Growth Harness",
+    purpose: "Track learning progress, feedback, review loops, and durable knowledge state",
+    projectType: "other",
+    primaryDomains: ["learning", "curriculum", "assessment", "knowledge-base"],
+    domainStressProfile: "Learning Growth Harness",
+  });
+  const byPath = new Map(files.map((file) => [file.relativePath, file]));
+  const state = JSON.parse(
+    byPath.get("docs/ai-harness/dashboard/state/dashboard-state.json").content
+  );
+  const profileCatalog = JSON.parse(byPath.get("docs/ai-harness/domain-stress-profiles.json").content);
+
+  assert.deepEqual(state.domainStress.activeProfileIds, ["learning-growth-harness"]);
+  assert.equal(state.domainStress.requestedProfile, "Learning Growth Harness");
+  assert.equal(state.domainStress.requestedProfileId, "learning-growth-harness");
+  assert.equal(state.domainStress.profiles[0].label, "Learning Growth Harness Stress Profile");
+  assert.equal(state.domainStress.profiles[0].programKey, "customDomainOperations");
+  assert.equal(state.domainStress.profiles[0].activation, "explicit");
+  assert.ok(state.domainStress.missingEvidenceItems.some((item) => /negative review/i.test(item.label)));
+  assert.ok(state.domainStress.parallelSafetyRule.includes("domain invariants"));
+  assert.ok(state.domainOperations.customDomainOperations);
+  assert.equal(state.domainOperations.customDomainOperations.profileId, "learning-growth-harness");
+  assert.ok(state.domainOperations.customDomainOperations.sections.some((section) => section.label === "Review Findings"));
+  assert.match(state.domainOperations.customDomainOperations.readinessGate, /handoff continuity/);
+  assert.equal("commerceOperations" in state.domainOperations, false);
+  assert.equal("modernizationGovernance" in state.domainOperations, false);
+  assert.equal("contentRelease" in state.domainOperations, false);
+  assert.ok(profileCatalog.profiles.some((profile) => profile.id === "learning-growth-harness"));
 }
 
 {
@@ -1105,7 +1202,7 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
             cwd: root,
             exitCode: 0,
             capturedAt: "fixture",
-            parserVersion: "4.6.1",
+            parserVersion: CURRENT_VERSION,
             completeness: "fixture",
           },
         },
@@ -1129,7 +1226,7 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
               cwd: root,
               exitCode: 0,
               capturedAt: "fixture",
-              parserVersion: "4.6.1",
+              parserVersion: CURRENT_VERSION,
               timeoutOrTruncated: false,
             },
           },
@@ -1289,6 +1386,8 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok("realityModel" in context.context);
   assert.ok("contextRotMonitor" in context.context);
   assert.ok("harnessEvaluation" in context.context);
+  assert.ok("cognitiveOffloading" in context.context);
+  assert.match(context.context.cognitiveOffloading.verificationPolicy.negativeReviewLoop, /negative review/);
   assert.equal(context.context.harnessEvaluation.status, "needs-evidence");
   assert.ok(Array.isArray(context.context.rotWarnings));
   assert.ok(Array.isArray(context.context.nextEvidenceToCollect));
@@ -1303,6 +1402,9 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   startHarnessSession({
     workspacePath: root,
     goal: "Implement feature A",
+    originalRequest: "Implement feature A with traceable orchestration.",
+    processSummary: "Created a governed session for feature A and classified it as parallel-ready.",
+    resultSummary: "Feature A session was opened with explicit worker ownership.",
     sessionId: "session-a",
     chunkId: "chunk-a",
     dependencyNotes: "parallel-ready: isolated component",
@@ -1318,6 +1420,9 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   startHarnessSession({
     workspacePath: root,
     goal: "Implement feature A follow-up",
+    originalRequest: "Implement feature A follow-up with traceable orchestration.",
+    processSummary: "Created a queued governed session for a follow-up touching the same feature path.",
+    resultSummary: "Follow-up session was queued for conflict detection.",
     sessionId: "session-b",
     chunkId: "chunk-b",
     dependencyNotes: "parallel-ready: isolated component",
@@ -1338,6 +1443,217 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.equal(packet.parallelSafetyStatus, "parallel-ready");
   assert.match(packet.parallelExecution.hubRole, /main agent is the hub/);
   assert.match(packet.evaluationLoop.threshold, /Hub acceptance/);
+  assert.match(packet.workingMemory.policyRole, /harness maintains recoverable state/);
+  assert.match(packet.workingMemory.verifyBeforePromote, /verification evidence/);
+}
+
+{
+  const { root } = generateWorkspace();
+  startHarnessSession({
+    workspacePath: root,
+    goal: "Improve study progress harness",
+    originalRequest: "Improve the study progress harness with negative review traceability.",
+    processSummary: "Created a governed session for the study progress review loop.",
+    resultSummary: "Study progress session was opened with evaluation-loop tracking.",
+    sessionId: "session-review-loop",
+    chunkId: "chunk-review-loop",
+    expectedWritePaths: ["docs/plans/study-progress.md"],
+    evaluationThreshold: "Negative review findings must have fixes and verification evidence.",
+    queueIfBusy: true,
+  });
+  advanceHarnessSession({
+    workspacePath: root,
+    sessionId: "session-review-loop",
+    action: "complete",
+    actorRole: "planner",
+    note: "Initial plan drafted for evaluator review.",
+    processSummary: "Planner drafted the initial study progress plan and linked it as evidence.",
+    resultSummary: "Plan 1 advanced to evaluator review.",
+    artifactPaths: ["docs/plans/study-progress.md"],
+  });
+  advanceHarnessSession({
+    workspacePath: root,
+    sessionId: "session-review-loop",
+    action: "request_changes",
+    actorRole: "evaluator",
+    note: "Negative review found evidence gaps before implementation.",
+    processSummary: "Evaluator reviewed the plan against evidence requirements and found a missing assessment receipt.",
+    resultSummary: "Plan returned to revision with required evidence fixes.",
+    reviewVerdict: "changes-required",
+    findings: ["No assessment evidence is linked to the progress claim."],
+    requiredFixes: ["Add assessment receipt and update readiness claim before continuing."],
+    verificationEvidence: ["docs/reviews/study-progress-negative-review.md"],
+    residualRisk: "Learning readiness remains unproven until the receipt is attached.",
+    scoreBefore: 6.1,
+    scoreAfter: 7.0,
+    nextStep: "Revise the plan with an evidence-backed assessment gate.",
+    artifactPaths: ["docs/reviews/study-progress-negative-review.md"],
+  });
+
+  const session = readJson(root, "docs/ai-harness/runtime/sessions/session-review-loop.session.json");
+  const packet = readJson(root, "docs/ai-harness/runtime/work-packets/session-review-loop.work-packet.json");
+  const packetMarkdown = fs.readFileSync(
+    path.join(root, "docs/ai-harness/runtime/work-packets/session-review-loop.md"),
+    "utf-8"
+  );
+
+  assert.equal(session.session.currentPhase, "plan-1");
+  assert.equal(session.chunk.evaluationLoop.iteration, 1);
+  assert.equal(session.chunk.evaluationLoop.status, "running");
+  assert.equal(session.chunk.evaluationLoop.history[0].verdict, "changes-required");
+  assert.deepEqual(session.chunk.evaluationLoop.history[0].findings, [
+    "No assessment evidence is linked to the progress claim.",
+  ]);
+  assert.deepEqual(session.chunk.evaluationLoop.history[0].requiredFixes, [
+    "Add assessment receipt and update readiness claim before continuing.",
+  ]);
+  assert.deepEqual(session.chunk.evaluationLoop.history[0].verificationEvidence, [
+    "docs/reviews/study-progress-negative-review.md",
+  ]);
+  assert.equal(session.chunk.evaluationLoop.history[0].residualRisk, "Learning readiness remains unproven until the receipt is attached.");
+  assert.equal(session.chunk.evaluationLoop.history[0].scoreBefore, 6.1);
+  assert.equal(session.chunk.evaluationLoop.history[0].scoreAfter, 7.0);
+  assert.equal(packet.evaluationLoop.iteration, 1);
+  assert.match(packet.workingMemory.curationRule, /Promote only evidence-backed/);
+  assert.match(packetMarkdown, /Recent Negative Review \/ Improvement Records/);
+  assert.match(packetMarkdown, /No assessment evidence is linked/);
+}
+
+{
+  const { root } = generateWorkspace();
+  const originalRequest =
+    "Review workspace-init MCP from a user perspective and improve automation traceability.";
+  startHarnessSession({
+    workspacePath: root,
+    goal: "Improve automation traceability",
+    originalRequest,
+    processSummary:
+      "Orchestrator created a governed session and prepared the first traceable work packet.",
+    resultSummary: "Traceable session startup completed.",
+    sessionId: "session-traceability",
+    chunkId: "chunk-traceability",
+    expectedWritePaths: ["src/tools/harness-runtime.ts"],
+    evaluationThreshold: "Score must reach 9.5/10 after negative review.",
+    queueIfBusy: true,
+  });
+  advanceHarnessSession({
+    workspacePath: root,
+    sessionId: "session-traceability",
+    action: "complete",
+    actorRole: "planner",
+    note: "Traceability plan completed for evaluator review.",
+    processSummary:
+      "Planner converted the original request into request/process/result ledger requirements.",
+    resultSummary: "Plan 1 now has durable traceability evidence.",
+    artifactPaths: ["docs/plans/session-traceability/plan-1.md"],
+  });
+  recordHarnessExecutionResult({
+    workspacePath: root,
+    sessionId: "session-traceability",
+    bridgeId: "codex-cli",
+    outcome: "completed",
+    summary: "Codex worker produced a traceable implementation receipt.",
+    processSummary:
+      "Worker reviewed the work packet, changed the harness runtime, and ran targeted checks.",
+    resultSummary: "Execution returned a receipt with original request, process, and result.",
+    artifactPaths: ["docs/work-logs/session-traceability-chunk-traceability-implementation.md"],
+  });
+
+  const session = readJson(root, "docs/ai-harness/runtime/sessions/session-traceability.session.json");
+  const packet = readJson(root, "docs/ai-harness/runtime/work-packets/session-traceability.work-packet.json");
+  const receipt = readJson(
+    root,
+    "docs/ai-harness/runtime/execution-bridges/session-traceability/codex-cli/result-receipt.json"
+  );
+  const ledgerManifest = readJson(root, "docs/ai-harness/dashboard/events/ledger-manifest.json");
+  const ledgerLines = fs
+    .readFileSync(path.join(root, "docs/ai-harness/dashboard/events/harness-events.jsonl"), "utf-8")
+    .trim()
+    .split(/\r?\n/);
+  const listed = listHarnessSessions(root, "open");
+  const log = getHarnessSessionLog(root, "session-traceability", 5);
+  const packetMarkdown = fs.readFileSync(
+    path.join(root, "docs/ai-harness/runtime/work-packets/session-traceability.md"),
+    "utf-8"
+  );
+  const receiptMarkdown = fs.readFileSync(
+    path.join(
+      root,
+      "docs/ai-harness/runtime/execution-bridges/session-traceability/codex-cli/result-receipt.md"
+    ),
+    "utf-8"
+  );
+
+  assert.equal(session.requestRecord.originalRequest, originalRequest);
+  assert.equal(session.events[0].taskTrace.originalRequest, originalRequest);
+  assert.match(session.events[1].taskTrace.processSummary, /ledger requirements/);
+  assert.equal(packet.requestRecord.originalRequest, originalRequest);
+  assert.equal(packet.taskTracePolicy.requiredFields.includes("resultSummary"), true);
+  assert.match(packet.recentTaskRecords[1].resultSummary, /durable traceability evidence/);
+  assert.equal(ledgerManifest.lastSequence, 4);
+  assert.equal(ledgerLines.length, 4);
+  assert.match(ledgerLines[1], /harness\.session\.started/);
+  assert.match(ledgerLines[2], /harness\.session\.advanced/);
+  assert.match(ledgerLines[3], /harness\.execution\.receipt\.recorded/);
+  assert.equal(listed.sessions.some((item) => item.id === "session-traceability"), true);
+  assert.match(listed.summary, /improve automation traceability/);
+  assert.equal(log.events.length, 2);
+  assert.match(log.summary, /Request \/ Process \/ Result|Process:/);
+  assert.match(log.summary, /Plan 1 now has durable traceability evidence/);
+  assert.match(packetMarkdown, /Request \/ Process \/ Result Ledger/);
+  assert.match(packetMarkdown, /Review workspace-init MCP from a user perspective/);
+  assert.equal(receipt.taskTrace.originalRequest, originalRequest);
+  assert.match(receipt.taskTrace.processSummary, /changed the harness runtime/);
+  assert.match(receiptMarkdown, /Request \/ Process \/ Result/);
+  assert.match(receiptMarkdown, /Execution returned a receipt/);
+
+  session.events[0].taskTrace = undefined;
+  fs.writeFileSync(
+    path.join(root, "docs/ai-harness/runtime/sessions/session-traceability.session.json"),
+    JSON.stringify(session, null, 2) + "\n",
+    "utf-8"
+  );
+  const audit = auditHarnessRuntime(root);
+  assert.equal(audit.valid, false);
+  assert.match(audit.summary, /taskTrace/);
+}
+
+{
+  const { root } = generateWorkspace();
+  startHarnessSession({
+    workspacePath: root,
+    goal: "Verify strict trace enforcement",
+    originalRequest: "Verify strict trace enforcement for governed runtime tools.",
+    processSummary: "Created a governed session for strict trace failure checks.",
+    resultSummary: "Strict trace session opened.",
+    sessionId: "session-strict-trace",
+    chunkId: "chunk-strict-trace",
+    queueIfBusy: true,
+  });
+  assert.throws(
+    () =>
+      advanceHarnessSession({
+        workspacePath: root,
+        sessionId: "session-strict-trace",
+        action: "complete",
+        actorRole: "planner",
+        note: "This call intentionally omits resultSummary.",
+        processSummary: "Planner attempted to advance without a result summary.",
+      }),
+    /resultSummary is required/
+  );
+  assert.throws(
+    () =>
+      recordHarnessExecutionResult({
+        workspacePath: root,
+        sessionId: "session-strict-trace",
+        bridgeId: "codex-cli",
+        outcome: "completed",
+        summary: "This call intentionally omits processSummary.",
+        resultSummary: "Receipt should not be accepted without process summary.",
+      }),
+    /processSummary is required/
+  );
 }
 
 {
@@ -1345,6 +1661,9 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   startHarnessSession({
     workspacePath: root,
     goal: "Add dependency",
+    originalRequest: "Add a dependency with governed conflict detection.",
+    processSummary: "Created a dependency-manifest session for parallel audit coverage.",
+    resultSummary: "Dependency session was opened for integration-sensitive conflict review.",
     sessionId: "session-package",
     chunkId: "chunk-package",
     dependencyNotes: "parallel-ready: dependency manifest work",
@@ -1354,6 +1673,9 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   startHarnessSession({
     workspacePath: root,
     goal: "Refresh lockfile",
+    originalRequest: "Refresh the lockfile with governed conflict detection.",
+    processSummary: "Created a lockfile session for parallel audit coverage.",
+    resultSummary: "Lockfile session was opened for integration-sensitive conflict review.",
     sessionId: "session-lock",
     chunkId: "chunk-lock",
     dependencyNotes: "parallel-ready: lockfile work",
@@ -1433,16 +1755,16 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   const { root } = generateWorkspace();
   const runtimeIndex = readJson(root, "docs/ai-harness/runtime/version-index.json");
   const compatibilityMatrix = readJson(root, "docs/ai-harness/runtime/compatibility-matrix.json");
-  assert.equal(runtimeIndex.latestVersion, "4.6.1");
-  assert.equal(compatibilityMatrix.currentVersion, "4.6.1");
+  assert.equal(runtimeIndex.latestVersion, CURRENT_VERSION);
+  assert.equal(compatibilityMatrix.currentVersion, CURRENT_VERSION);
   assert.ok(
     runtimeIndex.versions.some(
       (entry) =>
-        entry.version === "4.6.1" &&
+        entry.version === CURRENT_VERSION &&
         entry.capabilities.includes("project-world-model-dashboard") &&
         entry.introducedFiles.includes("docs/ai-harness/dashboard/events/harness-events.jsonl")
     )
   );
 }
 
-console.log("Harness Dashboard 4.6.1 generation tests passed.");
+console.log(`Harness Dashboard ${CURRENT_VERSION} generation tests passed.`);

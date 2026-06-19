@@ -9,10 +9,19 @@ import {
   getRequiredDashboardKpis,
   inferDashboardDomainMode,
 } from "../data/dashboard-profiles.js";
+import {
+  buildCustomDomainStressDefinition,
+  DOMAIN_STRESS_DEFINITIONS,
+  matchesDomainStressDefinition,
+  toDomainStressProfileId,
+  type DomainStressDefinition,
+} from "../data/domain-stress-profiles.js";
+import {
+  DASHBOARD_API_VERSION,
+  DASHBOARD_PROJECTION_VERSION,
+  DASHBOARD_SCHEMA_VERSION,
+} from "../data/version.js";
 
-const DASHBOARD_SCHEMA_VERSION = "4.6.1";
-const DASHBOARD_API_VERSION = "v1";
-const DASHBOARD_PROJECTION_VERSION = "4.6.1";
 const BOOTSTRAP_SEQUENCE = 1;
 const BOOTSTRAP_TIME = "bootstrap";
 
@@ -986,252 +995,26 @@ function buildHarnessEvaluation(
   };
 }
 
-const DOMAIN_STRESS_DEFINITIONS = [
-  {
-    id: "identity-commerce-operations",
-    label: "Identity Commerce Operations",
-    programKey: "commerceOperations",
-    defaultOwner: "domain-commerce-orchestrator",
-    activationDomains: [
-      "commerce",
-      "payments",
-      "identity",
-      "device-auth",
-      "credential-flow",
-      "order-management",
-      "benefits",
-      "entitlements",
-      "privacy",
-    ],
-    appliesWhen: [
-      "identity, device-mediated access, ordering, payment, benefits, and audit surfaces are in scope",
-      "web and mobile or device-assisted work must proceed together",
-      "commerce-critical state, account credentials, provider callbacks, and benefit ledgers must remain traceable",
-    ],
-    actors: [
-      "anonymous user",
-      "registered account",
-      "operator",
-      "administrator",
-      "payment provider",
-      "support agent",
-      "AI agent operator",
-    ],
-    criticalSurfaces: [
-      "account identity and credential lifecycle",
-      "device permission and credential verification",
-      "resource or session binding",
-      "catalog, cart, order, or request flow",
-      "third-party payment handoff and callback",
-      "amount handoff, settlement, refund, and reversal",
-      "benefit or entitlement ledger",
-      "promotion, benefit, expiry, stacking, and reversal rules",
-      "operator/admin audit view",
-      "PII, consent, redaction, and retention",
-    ],
-    mandatoryEvidence: [
-      "credential issuance, revocation, replay prevention, and expiry tests",
-      "device permission denial and fallback tests",
-      "wrong-resource binding, stale binding, spoofing, and reassignment tests",
-      "order state transition contract and staff audit history",
-      "payment callback idempotency and provider outage recovery proof",
-      "amount handoff and settlement reconciliation proof",
-      "benefit accrual, redemption, and reversal ledger proof",
-      "promotion stacking, expiry, cancellation, abuse, and reversal tests",
-      "user PII, consent, export/delete, redaction, and retention policy",
-    ],
-    reportSections: [
-      "Credential/Auth",
-      "Device/Binding",
-      "Orders",
-      "Payments",
-      "Benefits",
-      "Operator Audit",
-      "Privacy/PII",
-      "Readiness Blockers",
-    ],
-    operatingQuestion:
-      "Can users and operators complete identity, ordering, payment, benefit, and audit flows without untracked value, state, or PII risk?",
-  },
-  {
-    id: "legacy-modernization-governance",
-    label: "Legacy Modernization Governance",
-    programKey: "modernizationGovernance",
-    defaultOwner: "legacy-modernization-orchestrator",
-    activationDomains: [
-      "legacy",
-      "legacy-modernization",
-      "modernization",
-      "migration",
-      "collaboration",
-      "organization",
-      "governance",
-      "monetization",
-    ],
-    appliesWhen: [
-      "an existing CRUD or workflow system exists before workspace-init",
-      "workspace-init is applied as a non-destructive harness overlay",
-      "the target product grows into identity, collaborative records, role governance, organizations, and monetization",
-    ],
-    actors: [
-      "legacy user",
-      "registered user",
-      "domain moderator",
-      "workflow owner",
-      "participant",
-      "group steward",
-      "organization admin",
-      "sponsor/customer",
-    ],
-    criticalSurfaces: [
-      "legacy entities, routes, screens, users, and permissions",
-      "modern identity and profiles",
-      "collaborative workflow creation, participation, and records",
-      "group roles, rules, proposals, voting, and approvals",
-      "moderation and safety workflows",
-      "organization transition model",
-      "plans, entitlements, billing, sponsorship, settlement, and tax assumptions",
-      "legacy data migration and rollback",
-    ],
-    mandatoryEvidence: [
-      "AS-IS entity, route, screen, auth, deployment, and data inventory",
-      "TO-BE capability map for records, collaboration, groups, governance, organizations, and monetization",
-      "keep/replace/archive/migrate classification for every legacy route and table",
-      "migration waves, dry-run rehearsal, rollback, and legacy URL compatibility proof",
-      "legacy CRUD preservation smoke tests after harness adoption",
-      "collaborative workflow lifecycle tests from creation to retained record and moderation",
-      "governance lifecycle tests for proposal, vote, quorum, approval, role change, and audit",
-      "monetization evidence for plans, entitlements, payments, refunds, sponsorship, settlement, and tax assumptions",
-      "moderation and abuse handling tests with role-based audit trail",
-    ],
-    reportSections: [
-      "Legacy Preservation",
-      "AS-IS/TO-BE",
-      "Migration Waves",
-      "Collaboration Records",
-      "Governance",
-      "Monetization",
-      "Moderation/Safety",
-      "Cutover Blockers",
-    ],
-    operatingQuestion:
-      "Can the existing system keep working while the product evolves into a governed, monetizable platform with reversible migrations?",
-  },
-  {
-    id: "content-release-governance",
-    label: "Content Release Governance",
-    programKey: "contentRelease",
-    defaultOwner: "content-governance-owner",
-    activationProjectTypes: ["creative"],
-    activationDomains: [
-      "content",
-      "editorial",
-      "content-release",
-      "campaign",
-      "media-assets",
-      "visual-assets",
-      "content-operations",
-    ],
-    appliesWhen: [
-      "long-form or multi-channel content is the main deliverable",
-      "derivative content is produced while the primary content evolves",
-      "visual or media assets need provenance and accessibility governance",
-    ],
-    actors: [
-      "content owner",
-      "editorial lead",
-      "reviewer",
-      "source/provenance librarian",
-      "channel operator",
-      "visual designer",
-      "audience persona",
-    ],
-    criticalSurfaces: [
-      "content promise and audience transformation",
-      "concept dictionary and approved language",
-      "argument map and counterargument coverage",
-      "content unit outline, draft stage, editorial debt, and cut list",
-      "channel derivative map",
-      "visual asset queue",
-      "asset prompt ledger and style guide",
-      "release calendar and feedback loop",
-      "promotion content promoted back into canonical content",
-    ],
-    mandatoryEvidence: [
-      "message map, concept boundary, and contradiction ledger",
-      "unit-to-message coverage and counterargument coverage map",
-      "content progress, draft stage, editorial debt, and cut-list burn-up",
-      "voice QA and audience empathy review",
-      "derivative content map from canonical source to channel asset and feedback loop",
-      "compression risk review and source concept links",
-      "asset prompt, style, rights/provenance, alt text, and layout safe-zone ledger",
-      "release calendar, audience feedback routing, and canonical impact policy",
-      "content finish report with next production session brief",
-    ],
-    reportSections: [
-      "Content Stage",
-      "Unit Heatmap",
-      "Message Consistency",
-      "Unresolved Tensions",
-      "Channel Pipeline",
-      "Derivative Pipeline",
-      "Visual Governance",
-      "Release Readiness",
-    ],
-    operatingQuestion:
-      "Can content operators finish one coherent canonical deliverable while derivative assets stay consistent, accessible, and provenance-safe?",
-  },
-] as const;
-
-type DomainStressDefinition = (typeof DOMAIN_STRESS_DEFINITIONS)[number];
-
-function normalizeDomain(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
-
 function resolveDomainStressDefinitions(
   params: WorkspaceInitParams
 ): DomainStressDefinition[] {
-  const normalizedDomains = new Set(
-    (params.primaryDomains ?? []).map((domain) => normalizeDomain(domain))
-  );
-  const explicit = params.domainStressProfile;
+  const explicit = params.domainStressProfile
+    ? toDomainStressProfileId(params.domainStressProfile)
+    : null;
   const active = new Set<string>();
+  const customDefinitions: DomainStressDefinition[] = [];
 
   if (explicit) {
     active.add(explicit);
   }
 
-  const hasDomain = (values: string[]) =>
-    values.some((value) => normalizedDomains.has(normalizeDomain(value)));
-
   for (const definition of DOMAIN_STRESS_DEFINITIONS) {
-    const activationProjectTypes =
-      "activationProjectTypes" in definition
-        ? (definition.activationProjectTypes as readonly string[] | undefined)
-        : undefined;
-    const projectTypeMatch =
-      activationProjectTypes?.includes(params.projectType ?? "other") ?? false;
-    let domainMatch = definition.activationDomains.some((domain) =>
-      normalizedDomains.has(normalizeDomain(domain))
-    );
-    if (definition.id === "identity-commerce-operations") {
-      domainMatch =
-        hasDomain(["commerce", "order-management", "identity-commerce"]) ||
-        (hasDomain(["device-auth", "credential-flow", "resource-binding"]) &&
-          hasDomain(["benefits", "entitlements", "payments"]));
-    }
-    if (definition.id === "legacy-modernization-governance") {
-      domainMatch =
-        hasDomain(["legacy", "legacy-modernization", "modernization", "migration"]) ||
-        (hasDomain(["collaboration"]) && hasDomain(["governance", "organization", "monetization"]));
-    }
-    if (definition.id === "content-release-governance") {
-      domainMatch =
-        hasDomain(["content", "editorial", "content-release", "content-operations"]) ||
-        (hasDomain(["campaign", "media-assets"]) && hasDomain(["visual-assets", "release-governance"]));
-    }
-    if (projectTypeMatch || domainMatch) {
+    if (
+      matchesDomainStressDefinition(definition, {
+        projectType: params.projectType,
+        primaryDomains: params.primaryDomains,
+      })
+    ) {
       active.add(definition.id);
     }
   }
@@ -1240,11 +1023,31 @@ function resolveDomainStressDefinitions(
     active.add("legacy-modernization-governance");
   }
 
-  return DOMAIN_STRESS_DEFINITIONS.filter((definition) => active.has(definition.id));
+  if (
+    explicit != null &&
+    !DOMAIN_STRESS_DEFINITIONS.some((definition) => definition.id === explicit)
+  ) {
+    customDefinitions.push(
+      buildCustomDomainStressDefinition(explicit, {
+        projectType: params.projectType,
+        primaryDomains: params.primaryDomains,
+        additionalContext: params.additionalContext,
+        legacyAdoptionProfile: params.legacyAdoptionProfile,
+      })
+    );
+  }
+
+  return [
+    ...DOMAIN_STRESS_DEFINITIONS.filter((definition) => active.has(definition.id)),
+    ...customDefinitions,
+  ];
 }
 
 function buildDomainStressState(params: WorkspaceInitParams) {
   const definitions = resolveDomainStressDefinitions(params);
+  const requestedProfileId = params.domainStressProfile
+    ? toDomainStressProfileId(params.domainStressProfile)
+    : null;
   const profiles = definitions.map((definition) => {
     const evidenceGates = definition.mandatoryEvidence.map((evidence, index) => {
       const gateSlug = slugify(evidence);
@@ -1261,15 +1064,16 @@ function buildDomainStressState(params: WorkspaceInitParams) {
       id: definition.id,
       label: definition.label,
       programKey: definition.programKey,
-      activation: params.domainStressProfile === definition.id ? "explicit" : "inferred",
+      activation: requestedProfileId === definition.id ? "explicit" : "inferred",
       appliesWhen: definition.appliesWhen,
       actors: definition.actors,
       criticalSurfaces: definition.criticalSurfaces,
       reportSections: definition.reportSections,
       operatingQuestion: definition.operatingQuestion,
+      parallelSafety: definition.parallelSafety,
       evidenceGates,
       hardGate:
-        "All mandatory evidence gates must be resolved, explicitly waived, or marked not-applicable before production/readiness claims are trusted.",
+        "All mandatory evidence gates must be resolved, explicitly waived, or marked not-applicable before readiness, publication, release, or operating claims are trusted.",
     };
   });
   const missingEvidenceItems = profiles.flatMap((profile) =>
@@ -1325,7 +1129,7 @@ function buildDomainStressState(params: WorkspaceInitParams) {
     falsificationTests: [
       "Reject readiness if any mandatory evidence gate is missing, stale, or unsupported.",
       "Reject readiness if the final report omits profile-specific report sections.",
-      "Reject readiness if parallel chunks share identity, payment, schema, governance, or canon state without an integration owner.",
+      "Reject readiness if parallel chunks share profile invariants, state, source material, or readiness claims without an integration owner.",
     ],
     nextActionRef: profile.evidenceGates[0]?.id ?? "domain-stress-profile-review",
     domainStressProfile: profile.id,
@@ -1355,6 +1159,7 @@ function buildDomainStressState(params: WorkspaceInitParams) {
     activeProfileIds: profiles.map((profile) => profile.id),
     selectionSource: params.domainStressProfile ? "explicit-or-explicit-plus-inferred" : "primary-domain-inference",
     requestedProfile: params.domainStressProfile ?? null,
+    requestedProfileId,
     legacyAdoptionProfile: params.legacyAdoptionProfile ?? null,
     profiles,
     claims,
@@ -1378,7 +1183,9 @@ function buildDomainStressState(params: WorkspaceInitParams) {
       }))
     ),
     parallelSafetyRule:
-      "Path-disjoint chunks are still coupled when they share identity, schema, payments, governance, or canonical content state.",
+      profiles.length > 0
+        ? profiles.map((profile) => profile.parallelSafety).join(" ")
+        : "Path-disjoint chunks are still coupled when they share domain invariants, state, source material, review gates, or readiness claims.",
   };
 }
 
@@ -1523,6 +1330,40 @@ function buildDomainOperations(domainStress: ReturnType<typeof buildDomainStress
           "Show content stage, unit heatmap, message consistency, unresolved tensions, ready derivative assets, and next production decision.",
       };
     }
+    if (
+      !["identity-commerce-operations", "legacy-modernization-governance", "content-release-governance"].includes(profile.id)
+    ) {
+      operations[profile.programKey || "customDomainOperations"] = {
+        profileId: profile.id,
+        status: "blocked-by-mandatory-evidence",
+        operatingQuestion: profile.operatingQuestion,
+        sections: profile.reportSections.map((section) => ({
+          id: slugify(section),
+          label: section,
+          status: "missing-evidence",
+          evidenceGateIds: profile.evidenceGates
+            .filter((gate) => gate.reportSection === section)
+            .map((gate) => gate.id),
+        })),
+        criticalSurfaces: profile.criticalSurfaces,
+        operatingKpis: [
+          {
+            id: "evidence-coverage",
+            label: "Evidence Coverage",
+            value: "not-proven",
+            target: "all mandatory evidence gates resolved, waived, or marked not-applicable",
+          },
+          {
+            id: "review-loop-closure",
+            label: "Review Loop Closure",
+            value: "not-started",
+            target: "negative-review findings have remediation and verification receipts",
+          },
+        ],
+        readinessGate:
+          "Do not claim domain readiness until evidence gates, review findings, and handoff continuity are resolved.",
+      };
+    }
   }
 
   return operations;
@@ -1531,16 +1372,16 @@ function buildDomainOperations(domainStress: ReturnType<typeof buildDomainStress
 function buildDashboardState(params: WorkspaceInitParams) {
   const workspaceId = buildWorkspaceId(params);
   const projectType = params.projectType ?? "other";
-  const domainMode = inferDashboardDomainMode(params.projectType);
+  const domainMode = inferDashboardDomainMode(projectType);
   const primaryDomains = params.primaryDomains ?? [];
   const requiredKpis = getRequiredDashboardKpis({
     domainMode,
-    projectType: params.projectType,
+    projectType,
     primaryDomains,
   });
   const kpiProfile = getDashboardKpiProfile({
     domainMode,
-    projectType: params.projectType,
+    projectType,
     primaryDomains,
   });
   const domainStress = buildDomainStressState(params);
@@ -1702,6 +1543,58 @@ function buildDashboardState(params: WorkspaceInitParams) {
     goalCompass,
     contextRotMonitor,
     harnessEvaluation,
+    cognitiveOffloading: {
+      schemaVersion: DASHBOARD_SCHEMA_VERSION,
+      sourceInspiration:
+        "Harness-1 stateful cognitive offloading pattern: policy keeps semantic decisions while the harness maintains recoverable state.",
+      divisionOfLabor: {
+        agentKeeps:
+          "Choose goals, searches, implementation moves, review judgments, promotion/demotion decisions, verification targets, and stop conditions.",
+        harnessKeeps:
+          "Maintain candidate pools, curated evidence, verification records, cross-artifact links, deduplicated observations, work packets, and budget-aware context renderings.",
+      },
+      workingMemory: {
+        innerTier:
+          "Prompt-facing summary: active goal, curated evidence, current blockers, recent review findings, next action, and context-budget marker.",
+        outerTier:
+          "Durable file cabinet: full ledgers, source documents, work packets, review artifacts, verification receipts, VCS records, and generated projections.",
+        renderRule:
+          "Render compact state before each meaningful agent action; keep raw artifacts addressable by path instead of copying them into every prompt.",
+      },
+      curationPolicy: {
+        warmStart:
+          "Seed the first working set from existing project files, user-declared goals, and detected harness artifacts, then require agents to promote, demote, or discard entries with evidence.",
+        importanceTags: ["very-high", "high", "fair", "low"],
+        capacityRule:
+          "Prefer a small, importance-ordered curated set; archive or link bulky evidence rather than flooding prompt context.",
+      },
+      verificationPolicy: {
+        verifyBeforePromote:
+          "High-confidence readiness claims need verification evidence before promotion.",
+        negativeReviewLoop:
+          "Every meaningful work packet cycles through work -> negative review -> remediation -> verification until accepted, blocked, or explicitly risk-accepted.",
+        requiredReviewRecordFields: [
+          "iteration",
+          "reviewer role",
+          "verdict",
+          "findings",
+          "required fixes",
+          "remediation evidence",
+          "verification evidence",
+          "residual risk",
+          "next action",
+        ],
+      },
+      budgetPolicy: {
+        marker: "context-budget-marker",
+        degradationOrder: [
+          "keep goal, blockers, curated evidence, and latest review findings",
+          "summarize older observations",
+          "link large artifacts by path",
+          "request compaction or context reset only after writing a handover",
+        ],
+      },
+    },
     domainStress,
     domainOperations,
     worldModelFacts: [
@@ -1902,7 +1795,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
       claims: [
         {
           claimId: "claim.world-model.bootstrap",
-          statement: "The Harness Dashboard 4.6.1 world model exists for this workspace.",
+          statement: "The Harness Dashboard 4.6.3 world model exists for this workspace.",
           subjectRef: `workspace:${workspaceId}`,
           claimStatus: "supported",
           confidence: 0.78,
@@ -2420,6 +2313,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           "realityModel",
           "contextRotMonitor",
           "harnessEvaluation",
+          "cognitiveOffloading",
           "governanceActionabilityScore",
           "worldModelImprovementContract",
           "agentPlatformGovernance",
@@ -2457,7 +2351,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     stakeholderBrief: {
       currentGoal: params.purpose,
       whatChangedSinceLastReview:
-        "Workspace initialized with the Harness Dashboard 4.6.1 Hypertext Project World Model.",
+        "Workspace initialized with the Harness Dashboard 4.6.3 Hypertext Project World Model.",
       whyItMatters:
         "Stakeholders and AI Agents now share a durable, evidence-backed view of project reality.",
       currentRisk:
@@ -2676,7 +2570,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         },
       ],
       singleFileConstraint:
-        "the 4.6.1 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
+        "the 4.6.3 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
     },
     listener: {
       workspaceId,
@@ -2702,7 +2596,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.1", "world model"],
+          aliases: ["Harness Dashboard 4.6.3", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -2767,7 +2661,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.1", "world model"],
+          aliases: ["Harness Dashboard 4.6.3", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -2858,7 +2752,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         type: "dashboard-bootstrap",
         status: "complete",
         occurredAt: BOOTSTRAP_TIME,
-        summary: "Harness Dashboard 4.6.1 world model bootstrap generated.",
+        summary: "Harness Dashboard 4.6.3 world model bootstrap generated.",
         evidenceRefs: ["event-000001-bootstrap"],
       },
     ],
@@ -2935,7 +2829,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         completeness: "partial",
       },
     },
-    // Runtime-facing facade fields projected from the 4.6.1 world model.
+    // Runtime-facing facade fields projected from the 4.6.3 world model.
     executiveSummary: {
       headline: `${params.workspaceName} Project World Model`,
       overallStatus: "bootstrap",
@@ -2968,7 +2862,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     },
     governanceState: {
       policyId: "project-world-model-4-6",
-      policyLabel: "Harness Dashboard 4.6.1 Hypertext Project World Model",
+      policyLabel: "Harness Dashboard 4.6.3 Hypertext Project World Model",
       status: "active",
       sessionGovernanceRule:
         "Every meaningful AI session must append canonical events, refresh projections, and leave an agent resume brief.",
@@ -3112,7 +3006,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     timeline: [
       {
         id: "timeline-bootstrap",
-        label: "dashboard 4.6.1 Bootstrap",
+        label: "dashboard 4.6.3 Bootstrap",
         type: "governance",
         status: "complete",
         owner: "workspace-init-mcp",
@@ -3138,7 +3032,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     versionLedger: [
       {
         id: "harness-dashboard-4-6",
-        label: "Harness Dashboard 4.6.1",
+        label: "Harness Dashboard 4.6.3",
         status: "bootstrap",
         scope: "Project World Model",
         progressPercent: 8,
@@ -3178,7 +3072,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           actor: "initializer",
           action: "bootstrap",
           outcome: "project-world-model-created",
-          note: "dashboard 4.6.1 projections and canonical ledger initialized.",
+          note: "dashboard 4.6.3 projections and canonical ledger initialized.",
         },
       ],
     },
@@ -3291,6 +3185,7 @@ function buildDashboardIndex(state: Record<string, unknown>) {
     goalCompass: state.goalCompass,
     contextRotMonitor: state.contextRotMonitor,
     harnessEvaluation: state.harnessEvaluation,
+    cognitiveOffloading: state.cognitiveOffloading,
     worldModelImprovementContract: state.worldModelImprovementContract,
     workReadinessMap: state.workReadinessMap,
     projectEvidenceInventory: state.projectEvidenceInventory,
@@ -3685,7 +3580,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
-    <title>${workspaceName} Harness Dashboard 4.6.1</title>
+    <title>${workspaceName} Harness Dashboard 4.6.3</title>
     <style>
       :root {
         --bg: #f6f8fb;
@@ -4002,7 +3897,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <div class="shell">
       <header class="hero">
         <div>
-          <p class="eyebrow">Harness Dashboard 4.6.1</p>
+          <p class="eyebrow">Harness Dashboard 4.6.3</p>
           <h1 id="dashboard-title" data-workspace="${workspaceName}">${workspaceName} Project World Model</h1>
           <p class="lede" id="dashboard-lede">A canonical, ledger-backed view of project reality for stakeholders, AI Agents, and maintainers.</p>
         </div>
@@ -6247,7 +6142,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
 }
 
 function buildDashboardReadme(): string {
-  return `# Harness Dashboard 4.6.1: Project World Model
+  return `# Harness Dashboard 4.6.3: Project World Model
 
 The dashboard is a ledger-backed Project World Model, not a Markdown-derived report page.
 
@@ -6325,7 +6220,7 @@ function buildDesignFrameworkHtml(): string {
 <meta charset="utf-8" />
 <title>Harness Dashboard Design Framework</title>
 <body>
-  <h1>Harness Dashboard 4.6.1 Design Framework</h1>
+  <h1>Harness Dashboard 4.6.3 Design Framework</h1>
   <p>Executive Overview first. Same data, different density for Stakeholder, AI Agent, and Maintainer modes.</p>
   <ul>
     <li>Modes: Local Live, Static Snapshot, Degraded Offline.</li>
@@ -6345,7 +6240,7 @@ function buildBackendBlueprintHtml(): string {
 <title>Optional Backend Dashboard Blueprint</title>
 <body>
   <h1>Optional Backend Dashboard Blueprint</h1>
-  <p>The default 4.6.1 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
+  <p>The default 4.6.3 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
   <ul>
     <li>Must preserve ledger-first governance.</li>
     <li>Must not replace the local single-file dashboard contract.</li>
@@ -6485,7 +6380,7 @@ export function generateDashboardFiles(
         "Specification for future opt-in backend dashboard implementation.",
       nonGoals: [
         "No backend dashboard app is generated by default.",
-        "No database is required for 4.6.1 MVP.",
+        "No database is required for 4.6.3 MVP.",
         "No persistent UI writes are allowed by default.",
       ],
     }),

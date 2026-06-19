@@ -1,6 +1,6 @@
 {
   "name": "workspace-init-mcp",
-  "version": "4.6.1",
+  "version": "4.6.3",
   "description": "MCP server that installs an AI governance harness with hypertext dashboard, agent instructions, Project World Model, and safe workspace reconcile",
   "type": "module",
   "main": "dist/index.js",
@@ -17,9 +17,10 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
-    "test": "npm run build && node tests/harness-generation.test.js",
+    "version:check": "node scripts/check-version-consistency.mjs",
+    "test": "npm run version:check && npm run build && node tests/harness-generation.test.js",
     "clean": "rimraf dist",
-    "prepack": "npm run build",
+    "prepack": "npm run clean && npm run build",
     "prepublishOnly": "npm run clean && npm test && npm pack --dry-run"
   },
   "keywords": [

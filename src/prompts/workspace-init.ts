@@ -50,7 +50,7 @@ export const WORKSPACE_INIT_ARGS = {
     .string()
     .optional()
     .describe(
-      '주요 도메인 (쉼표로 구분, 예: "commerce, identity, device-auth, benefits" 또는 "legacy-modernization, governance, monetization")'
+      '주요 도메인 (쉼표로 구분, 예: "learning, curriculum, assessment" 또는 "product, platform, security, data")'
     ),
   techStack: z
     .string()
@@ -100,7 +100,7 @@ export const WORKSPACE_INIT_ARGS = {
     .string()
     .optional()
     .describe(
-      '도메인 스트레스 프로필 (예: identity-commerce-operations, legacy-modernization-governance, content-release-governance)'
+      '도메인 스트레스 프로필 이름 또는 ID (예: Learning Growth Harness, research-review-harness, identity-commerce-operations)'
     ),
   legacyAdoptionProfile: z
     .string()

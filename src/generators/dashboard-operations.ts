@@ -3,11 +3,16 @@ import {
   type WorkspaceInitParams,
 } from "../types.js";
 import { DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS } from "../data/dashboard-state-contract.js";
+import {
+  DASHBOARD_API_VERSION,
+  DASHBOARD_PROJECTION_VERSION,
+  DASHBOARD_SCHEMA_VERSION,
+} from "../data/version.js";
 
 function buildDashboardOpsReadme(): string {
   return `# Harness Dashboard Operations
 
-The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6.1 Hypertext Project World Model.
+The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6.3 Hypertext Project World Model.
 It treats the JSONL event ledger as canonical, the JSON state files as disposable projections,
 and the HTML file as a portable stakeholder projection.
 
@@ -64,9 +69,9 @@ import crypto from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const API_VERSION = "v1";
-const SCHEMA_VERSION = "4.6.1";
-const PROJECTION_VERSION = "4.6.1";
+const API_VERSION = ${JSON.stringify(DASHBOARD_API_VERSION)};
+const SCHEMA_VERSION = ${JSON.stringify(DASHBOARD_SCHEMA_VERSION)};
+const PROJECTION_VERSION = ${JSON.stringify(DASHBOARD_PROJECTION_VERSION)};
 const REQUIRED_TOP_LEVEL_KEYS = ${requiredTopLevelKeys};
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -819,8 +824,11 @@ function validateState(state) {
       errors.push("domainStress.reportSections cannot be resolved while section gates are still blocked: " + String(section.section || ""));
     }
   }
-  for (const key of ["commerceOperations", "modernizationGovernance", "contentRelease"]) {
-    const program = domainOperations[key];
+  const domainOperationEntries = Object.entries(domainOperations).filter(([key, value]) =>
+    !["schemaVersion", "activeProfileIds", "status", "dashboardQuestion", "programs"].includes(key) &&
+    value && typeof value === "object" && !Array.isArray(value)
+  );
+  for (const [key, program] of domainOperationEntries) {
     if (!program) continue;
     for (const section of [...(program.sections || []), ...(program.domains || []), ...(program.pipelines || [])]) {
       const sectionGateIds = section.evidenceGateIds || [];

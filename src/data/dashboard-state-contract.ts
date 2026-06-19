@@ -1,3 +1,5 @@
+import { DASHBOARD_SCHEMA_VERSION } from "./version.js";
+
 export const DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS = [
   "meta",
   "workspace",
@@ -8,6 +10,7 @@ export const DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS = [
   "goalCompass",
   "contextRotMonitor",
   "harnessEvaluation",
+  "cognitiveOffloading",
   "domainStress",
   "domainOperations",
   "worldModelFacts",
@@ -69,4 +72,4 @@ export type DashboardStateTopLevelKey =
   (typeof DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS)[number];
 
 export const DASHBOARD_STATE_CONTRACT_DESCRIPTION =
-  "Harness Dashboard 4.6.1 Hypertext Project World Model state contract shared by schema generation, generated dashboard operations, and runtime validation.";
+  `Harness Dashboard ${DASHBOARD_SCHEMA_VERSION} Hypertext Project World Model state contract shared by schema generation, generated dashboard operations, and runtime validation.`;

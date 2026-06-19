@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * workspace-init-mcp MCP Server v4.6.1
+ * workspace-init-mcp MCP Server v4.6.3
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -50,6 +50,8 @@ import {
   startHarnessSession,
   advanceHarnessSession,
   getHarnessSessionStatus,
+  listHarnessSessions,
+  getHarnessSessionLog,
   activateHarnessSession,
   auditHarnessRuntime,
   auditHarnessParallelChunkConflicts,
@@ -79,6 +81,7 @@ import {
   SKILL_REGISTRY,
 } from "./data/agent-skills-registry.js";
 import { buildHarnessProfilesSummary } from "./data/harness-profiles.js";
+import { WORKSPACE_INIT_MCP_VERSION } from "./data/version.js";
 import { generateSelectedSkills } from "./generators/agent-skills.js";
 import { generateServerFlowDashboardFiles } from "./generators/server-flow-dashboard.js";
 
@@ -253,12 +256,6 @@ const PROJECT_TYPES = [
   "other",
 ] as const;
 
-const DOMAIN_STRESS_PROFILES = [
-  "identity-commerce-operations",
-  "legacy-modernization-governance",
-  "content-release-governance",
-] as const;
-
 const HARNESS_RUNTIME_ACTIONS = [
   "complete",
   "request_changes",
@@ -376,10 +373,13 @@ const BaseWorkspaceInputSchema = z.object({
       'Primary domains the harness must coordinate (e.g., ["product", "platform", "security"]).'
     ),
   domainStressProfile: z
-    .enum(DOMAIN_STRESS_PROFILES)
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
     .optional()
     .describe(
-      "Optional high-risk domain profile. When set, the dashboard promotes domain evidence gates into claims, blocked work, and report sections."
+      "Optional high-risk domain profile id or label. Built-ins include identity-commerce-operations, legacy-modernization-governance, and content-release-governance; any project-specific value is normalized into a custom evidence-gate profile."
     ),
   legacyAdoptionProfile: z
     .string()
@@ -464,7 +464,7 @@ const ReconcileWorkspaceInputSchema = BaseWorkspaceInputSchema.partial().extend(
 
 const server = new McpServer({
   name: "workspace-init-mcp",
-  version: "4.6.1",
+  version: WORKSPACE_INIT_MCP_VERSION,
 });
 
 // ---------------------------------------------------------------------------
@@ -487,7 +487,7 @@ This tool creates a complete workspace setup including:
 - .github/ai-harness/reconcile-policy.json (file-level reconcile safety policy for hold / merge / replace decisions)
 - .github/ai-harness/native-executor-overrides.json (workspace-local handoff and launch tuning for GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, and similar runtimes)
 - docs/ai-harness/readiness/ (remaining-work spec, scoring model, and readiness scorecard template)
-- docs/ai-harness/dashboard/ (Harness Dashboard 4.6.1 Hypertext Project World Model with ledger, projections, single-file HTML, and read-only local API)
+- docs/ai-harness/dashboard/ (Harness Dashboard 4.6.3 Hypertext Project World Model with ledger, projections, single-file HTML, and read-only local API)
 - docs/ai-harness/runtime/ (planner / generator / evaluator runtime state, prompts, and session ledgers)
 - docs/ai-harness/dashboard/scripts/dashboard-ops.mjs (projection rebuild, strict validation, read-only listener, SSE, VCS collection, and public export)
 - .vscode/settings.json (Copilot custom instruction references)
@@ -1234,7 +1234,7 @@ server.registerTool(
   "get_harness_dashboard_context",
   {
     title: "Get Harness Dashboard Context",
-    description: `Read the Harness Dashboard 4.6.1 Hypertext Project World Model projections for AI Agent resume context.
+    description: `Read the Harness Dashboard 4.6.3 Hypertext Project World Model projections for AI Agent resume context.
 
 This tool is intentionally read-only. It never starts listeners, refreshes VCS,
 mutates dashboard state, appends ledger events, runs shell commands, or calls an LLM.
@@ -1463,6 +1463,18 @@ Use this before meaningful implementation begins. The session is file-system-bas
       goal: z
         .string()
         .describe("Approved goal for the next bounded chunk or governed session"),
+      originalRequest: z
+        .string()
+        .min(1)
+        .describe("Original user request text to preserve verbatim for request/process/result traceability."),
+      processSummary: z
+        .string()
+        .min(1)
+        .describe("Process summary for session startup, such as orchestration setup, worker assignment, or context preparation."),
+      resultSummary: z
+        .string()
+        .min(1)
+        .describe("Startup result summary for the created runtime session and initial plan phase."),
       title: z
         .string()
         .optional()
@@ -1547,6 +1559,9 @@ Use this before meaningful implementation begins. The session is file-system-bas
       const result = startHarnessSession({
         workspacePath: params.workspacePath,
         goal: params.goal,
+        originalRequest: params.originalRequest,
+        processSummary: params.processSummary,
+        resultSummary: params.resultSummary,
         title: params.title,
         sessionId: params.sessionId,
         chunkId: params.chunkId,
@@ -1613,6 +1628,18 @@ Every transition writes durable evidence into the runtime session files and re-s
       note: z
         .string()
         .describe("Durable note describing what changed, what was decided, or why the session is blocked"),
+      originalRequest: z
+        .string()
+        .optional()
+        .describe("Original user request text for this agent task. Defaults to the session request record when omitted."),
+      processSummary: z
+        .string()
+        .min(1)
+        .describe("What the actor actually did during this task or phase step."),
+      resultSummary: z
+        .string()
+        .min(1)
+        .describe("User-facing result of this task or phase step."),
       artifactPaths: z
         .array(z.string())
         .optional()
@@ -1621,6 +1648,34 @@ Every transition writes durable evidence into the runtime session files and re-s
         .string()
         .optional()
         .describe("Optional explicit next-step instruction to override the default phase guidance"),
+      reviewVerdict: z
+        .string()
+        .optional()
+        .describe("Optional structured verdict for a negative review, evaluator pass, remediation review, or verification gate."),
+      findings: z
+        .array(z.string())
+        .optional()
+        .describe("Negative review findings or risks that must remain visible in the evaluation loop."),
+      requiredFixes: z
+        .array(z.string())
+        .optional()
+        .describe("Concrete improvements required before the session can pass the review loop."),
+      verificationEvidence: z
+        .array(z.string())
+        .optional()
+        .describe("Evidence paths, commands, receipts, or review artifacts proving remediation or verification."),
+      residualRisk: z
+        .string()
+        .optional()
+        .describe("Residual risk accepted after remediation or verification."),
+      scoreBefore: z
+        .number()
+        .optional()
+        .describe("Optional score before remediation for score movement tracking."),
+      scoreAfter: z
+        .number()
+        .optional()
+        .describe("Optional score after remediation for score movement tracking."),
     }),
   },
   async (params) => {
@@ -1632,8 +1687,18 @@ Every transition writes durable evidence into the runtime session files and re-s
         action: params.action,
         actorRole: params.actorRole,
         note: params.note,
+        originalRequest: params.originalRequest,
+        processSummary: params.processSummary,
+        resultSummary: params.resultSummary,
         artifactPaths: params.artifactPaths,
         nextStep: params.nextStep,
+        reviewVerdict: params.reviewVerdict,
+        findings: params.findings,
+        requiredFixes: params.requiredFixes,
+        verificationEvidence: params.verificationEvidence,
+        residualRisk: params.residualRisk,
+        scoreBefore: params.scoreBefore,
+        scoreAfter: params.scoreAfter,
       });
       return { content: [{ type: "text" as const, text: result.summary }] };
     } catch (err) {
@@ -1679,6 +1744,92 @@ Use this when:
       const msg = err instanceof Error ? err.message : String(err);
       return {
         content: [{ type: "text" as const, text: `Failed to read harness session status: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: list_harness_sessions
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "list_harness_sessions",
+  {
+    title: "List Harness Sessions",
+    description: `List governed runtime sessions without requiring operators to inspect session-index.json manually.
+
+Use this when:
+- a user wants to see active, queued, blocked, open, or closed harness work
+- an agent needs to choose the correct session before status, log, handoff, or activation
+- orchestration needs a quick queue and evaluation-loop overview`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      filter: z
+        .enum(["all", "open", "active", "queued", "blocked", "closed"])
+        .optional()
+        .describe('Optional session filter. Default: "all".'),
+    }),
+  },
+  async (params) => {
+    try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
+      const result = listHarnessSessions(params.workspacePath, params.filter);
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to list harness sessions: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: get_harness_session_log
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "get_harness_session_log",
+  {
+    title: "Get Harness Session Log",
+    description: `Read the recent event and evaluation-loop history for a governed runtime session.
+
+Use this when:
+- a fresh agent needs the actual task trail, not just file paths
+- a reviewer wants request/process/result traceability
+- an operator needs the recent negative-review and remediation record before deciding the next action`,
+    inputSchema: z.object({
+      workspacePath: z
+        .string()
+        .describe("Absolute path to the workspace root directory"),
+      sessionId: z
+        .string()
+        .optional()
+        .describe("Optional session ID. If omitted, the MCP uses the active runtime session."),
+      limit: z
+        .number()
+        .optional()
+        .describe("Maximum number of recent events and evaluation records to return. Default: 20; max: 100."),
+    }),
+  },
+  async (params) => {
+    try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
+      const result = getHarnessSessionLog(
+        params.workspacePath,
+        params.sessionId,
+        params.limit
+      );
+      return { content: [{ type: "text" as const, text: result.summary }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Failed to read harness session log: ${msg}` }],
         isError: true,
       };
     }
@@ -2271,6 +2422,18 @@ Use this after GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, generic CLI r
       summary: z
         .string()
         .describe("Durable summary of what the external runtime completed or why it failed"),
+      originalRequest: z
+        .string()
+        .optional()
+        .describe("Original user request text preserved for execution receipt traceability. Defaults to the session request record."),
+      processSummary: z
+        .string()
+        .min(1)
+        .describe("Commands, files, checks, and decisions the external runtime performed."),
+      resultSummary: z
+        .string()
+        .min(1)
+        .describe("User-facing execution result, including remaining risk or next work."),
       artifactPaths: z
         .array(z.string())
         .optional()
@@ -2290,6 +2453,9 @@ Use this after GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, generic CLI r
         sessionId: params.sessionId,
         outcome: params.outcome,
         summary: params.summary,
+        originalRequest: params.originalRequest,
+        processSummary: params.processSummary,
+        resultSummary: params.resultSummary,
         artifactPaths: params.artifactPaths,
         nextStep: params.nextStep,
       });
@@ -2701,7 +2867,7 @@ server.registerPrompt(
       domainStressProfile: z
         .string()
         .optional()
-        .describe("Domain stress profile: identity-commerce-operations, legacy-modernization-governance, content-release-governance"),
+        .describe("Domain stress profile id or label: identity-commerce-operations, legacy-modernization-governance, content-release-governance, or a custom value such as Learning Growth Harness"),
       legacyAdoptionProfile: z
         .string()
         .optional()
@@ -2901,7 +3067,7 @@ server.registerResource(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("workspace-init-mcp server v4.6.1 started on stdio");
+  console.error(`workspace-init-mcp server v${WORKSPACE_INIT_MCP_VERSION} started on stdio`);
 }
 
 main().catch((err) => {

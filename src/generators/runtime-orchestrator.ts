@@ -6,8 +6,9 @@ import {
   HARNESS_ADAPTER_CONTRACT_VERSION,
   HARNESS_REQUIRED_HANDOFF_FIELDS,
 } from "../data/runtime-contract.js";
+import { HARNESS_RUNTIME_VERSION } from "../data/version.js";
 
-const RUNTIME_COMPATIBILITY_VERSION = "4.6.1";
+const RUNTIME_COMPATIBILITY_VERSION = HARNESS_RUNTIME_VERSION;
 const RUNTIME_COMPATIBILITY_FILES = [
   "docs/ai-harness/runtime/version-index.json",
   "docs/ai-harness/runtime/compatibility-matrix.json",
@@ -60,40 +61,45 @@ Use these MCP tools against the initialized workspace:
    Moves the active session through the governed phase graph using \`complete\`, \`request_changes\`, \`block\`, \`resume\`, or \`context_reset\`.
 3. \`get_harness_session_status\`
    Reads the current session and returns the next actor brief plus the current evidence paths.
-4. \`activate_harness_session\`
+4. \`list_harness_sessions\`
+   Lists active, queued, blocked, open, or closed governed runtime sessions without reading JSON files manually.
+5. \`get_harness_session_log\`
+   Returns recent request/process/result events and evaluation-loop records for a governed session.
+6. \`activate_harness_session\`
    Moves the single active lease to a queued or blocked session when execution focus changes.
-5. \`audit_harness_runtime\`
+7. \`audit_harness_runtime\`
    Audits runtime index, active snapshot, and session ledgers for drift or broken references.
-6. \`prepare_harness_work_packet\`
+8. \`prepare_harness_work_packet\`
    Rebuilds the durable work packet and actor inbox files for the active or requested session.
-7. \`list_harness_runtime_adapters\`
+9. \`list_harness_runtime_adapters\`
    Lists the supported runtime adapters and their execution style.
-8. \`prepare_harness_adapter_handoff\`
+10. \`prepare_harness_adapter_handoff\`
    Builds a runtime-specific handoff bundle for GitHub Copilot Chat, Codex CLI, Claude Code, Gemini CLI, generic CLI agents, OpenHands, or a generic file-based runtime.
-9. \`list_harness_execution_bridges\`
+11. \`list_harness_execution_bridges\`
    Lists the supported execution bridges and their launch style.
-10. \`prepare_harness_execution_bridge\`
+12. \`prepare_harness_execution_bridge\`
    Generates launch-ready bridge manifests, scripts, and result templates for a concrete runtime.
-11. \`record_harness_execution_result\`
+13. \`record_harness_execution_result\`
    Records the result receipt that returns an external execution back into governed runtime tracking.
-12. \`list_harness_native_executors\`
+14. \`list_harness_native_executors\`
    Lists the supported directly launchable runtime executors and reports local command detection.
-13. \`prepare_harness_native_executor\`
+15. \`prepare_harness_native_executor\`
    Builds the direct-launch plan, state file, and log targets for a native executor run.
-14. \`launch_harness_native_executor\`
+16. \`launch_harness_native_executor\`
    Starts a supported native executor in foreground or background mode and records governed launch state.
-15. \`get_harness_native_execution_status\`
+17. \`get_harness_native_execution_status\`
    Reads the latest native executor state for a session or the workspace-level current snapshot.
-16. \`compact_harness_runtime\`
+18. \`compact_harness_runtime\`
    Archives older closed runtime sessions into durable archive bundles so the active ledgers stay readable.
 
 ## Operating Rules
 
 1. No generator implementation begins before the evaluator-approved chunk contract exists.
 2. Every phase change must record a durable note and at least one artifact path.
-3. Use \`context_reset\` whenever drift, context anxiety, or handover risk appears.
-4. Close governance only after verification and governance refresh are both complete.
-5. Keep session JSON and markdown summaries tracked in git.
+3. Every agent task, worker handoff, external execution, and phase transition records the original request, process summary, and result summary.
+4. Use \`context_reset\` whenever drift, context anxiety, or handover risk appears.
+5. Close governance only after verification, governance refresh, and request/process/result traceability are complete.
+6. Keep session JSON and markdown summaries tracked in git.
 `;
 }
 
@@ -202,6 +208,12 @@ function buildCurrentWorkPacketTemplate(): string {
       nextActor: "planner",
       nextAction:
         "Start the first governed runtime session before implementation begins.",
+      requestRecord: null,
+      taskTracePolicy: {
+        requiredFields: ["originalRequest", "processSummary", "resultSummary"],
+        rule:
+          "Every governed agent task records the original request, process summary, and result summary.",
+      },
       workPacketFile: null,
       actorInboxFile: null,
       summary:
@@ -305,6 +317,8 @@ function buildRuntimeVersionIndex(): string {
           capabilities: [
             "start_harness_session",
             "advance_harness_session",
+            "list_harness_sessions",
+            "get_harness_session_log",
             "prepare_harness_work_packet",
             "prepare_harness_adapter_handoff",
             "prepare_harness_execution_bridge",
@@ -440,7 +454,7 @@ function buildRuntimeVersionIndex(): string {
             "The dashboard is a projection of a canonical event ledger, not a Markdown-derived report page.",
             "Use get_harness_dashboard_context at session start so AI Agents resume from explicit contracts instead of chat history.",
             "The local listener is restored on harness activity and remains loopback-only, token-protected, and read-only.",
-            "Optional backend dashboard apps are blueprints only in 4.6.1 and are not generated by default.",
+            "Optional backend dashboard apps are blueprints only in 4.6.3 and are not generated by default.",
             "Public exports must redact local paths, usernames, tokens, private URLs, environment values, and sensitive deployment detail.",
           ],
         },
@@ -558,7 +572,7 @@ function buildRuntimeCompatibilityMatrix(): string {
           from: "4.2.0",
           to: RUNTIME_COMPATIBILITY_VERSION,
           requiredActions: [
-            "Regenerate runtime compatibility files so 4.6.1 Hypertext Project World Model governance appears in version-index.json.",
+            "Regenerate runtime compatibility files so 4.6.3 Hypertext Project World Model governance appears in version-index.json.",
             "Re-run validation after reconcile to surface malformed JSON runtime state with operator-facing diagnostics.",
             "Refresh native executor state after background launch failures so dashboards do not retain stale launch state.",
             "Install dashboard ledger, projection, entity, design framework, and read-only listener files.",
@@ -574,7 +588,7 @@ function buildRuntimeCompatibilityMatrix(): string {
           from: "4.2.1",
           to: RUNTIME_COMPATIBILITY_VERSION,
           requiredActions: [
-            "Replace the server-status dashboard baseline with the 4.6.1 ledger-backed Hypertext Project World Model.",
+            "Replace the server-status dashboard baseline with the 4.6.3 ledger-backed Hypertext Project World Model.",
             "Add stakeholderBrief, agentResumeBrief, governanceEvidenceBrief, service contracts, and operations readiness projections.",
             "Refresh dashboard state, schema, operations, and MCP context surfaces so agents can resume from projections.",
             "Keep the Project World Model Harness Dashboard as the only default dashboard; create Server Flow Monitoring dashboards only from explicit application-monitoring requests.",
@@ -673,6 +687,7 @@ function buildRuntimeAdapterContract(): string {
       ],
       persistenceRules: [
         "Keep sessionId, chunkId, currentPhase, nextActor, and leaseStatus stable across runtime switches.",
+        "Preserve requestRecord.originalRequest and add processSummary plus resultSummary for every meaningful task, worker receipt, and phase transition.",
         "Record runtime outcomes through governed receipts or advance_harness_session artifact paths before moving phases.",
         "Do not rely on hidden chat memory when a durable file provides the same fact.",
         "Use context_reset and handover artifacts when an agent cannot safely continue from current context.",
@@ -702,6 +717,9 @@ function buildRuntimeAdapterContract(): string {
           "bridgeId",
           "outcome",
           "summary",
+          "originalRequest",
+          "processSummary",
+          "resultSummary",
           "artifactPaths",
           "nextStep",
         ],
@@ -740,6 +758,7 @@ Before moving Copilot <-> Codex <-> Claude <-> Gemini <-> OpenHands, prepare a f
 - Read the generated handoff JSON and markdown for the selected adapter.
 - Read the work packet and actor inbox before touching project files.
 - Treat durable harness files as stronger evidence than prior chat context.
+- Preserve the original user request and record process/result summaries in receipts or phase events.
 - Return results through \`record_harness_execution_result\` or \`advance_harness_session\` with artifact paths.
 
 ## Parallel Worker Rule
@@ -761,6 +780,12 @@ function buildSessionTemplate(params: WorkspaceInitParams): string {
         rootPath: params.workspacePath,
         projectType: params.projectType ?? "other",
         purpose: params.purpose,
+      },
+      requestRecord: {
+        originalRequest: "Store the user's original request text here.",
+        normalizedGoal: "Describe the approved chunk goal here.",
+        capturedAt: "TBD",
+        source: "start_harness_session",
       },
       session: {
         id: "session-example",
@@ -823,7 +848,27 @@ function buildSessionTemplate(params: WorkspaceInitParams): string {
         },
       },
       phases: [],
-      events: [],
+      events: [
+        {
+          id: "evt-0001",
+          at: "TBD",
+          phase: "governance-open",
+          actor: "planner",
+          action: "complete",
+          outcome: "governance-opened",
+          note: "Governance scaffolding opened.",
+          artifactPaths: [],
+          taskTrace: {
+            originalRequest: "Store the user's original request text here.",
+            processSummary:
+              "Describe the process used for this agent task or phase transition.",
+            resultSummary:
+              "Describe the result in user-facing terms, including residual risk.",
+            recordedAt: "TBD",
+            source: "start_harness_session",
+          },
+        },
+      ],
       artifacts: [],
       notes: {
         current:
@@ -844,6 +889,7 @@ function buildPlannerBrief(): string {
 - Prepare a context-injection packet for each worker with only relevant snippets, schemas, API specs, commands, expected read paths, expected write paths, and merge ownership when integration is required.
 - Run the parallel conflict audit before workers launch and resolve hard conflicts or integration-sensitive warnings first.
 - Repeat work -> evaluate -> improve until the evaluator and hub can justify acceptance or record a blocker.
+- Preserve the original request and require process/result summaries from each worker before accepting output.
 - Update world model memory with decisions, evidence links, tacit context, and next safest action.
 - Keep the plan ambitious at the product level and concrete at the verification level.
 - Avoid locking in fragile low-level implementation choices too early.
@@ -859,6 +905,7 @@ function buildGeneratorBrief(): string {
 - Use only the injected context packet for the chunk unless the contract is updated.
 - Keep outputs traceable to the active session, chunk, and verification criteria.
 - Record static analysis, boundary test, version compatibility, dependency audit, and notable implementation tradeoffs as you work.
+- Record processSummary and resultSummary so the hub can reconstruct what happened without hidden chat history.
 - Produce a self-correction note that names uncertainty or low-confidence areas before evaluator review.
 - If drift or context anxiety appears, request a context reset instead of guessing.
 - Do not self-approve. Finish with evidence that can be judged independently.
@@ -872,6 +919,7 @@ function buildEvaluatorBrief(): string {
 - Prefer concrete evidence over optimistic summaries.
 - Confirm static analysis, boundary testing, environment compatibility, dependency audit, maintainability, self-correction, and atomic commit evidence.
 - When quality is insufficient, request changes with actionable findings.
+- Score the result negatively, explain the evidence behind the score, and keep request/process/result traceability intact.
 - Keep generator progress separate from evaluator approval.
 - Verification ends only when the chunk is usable, reviewable, and safely handoff-ready.
 `;

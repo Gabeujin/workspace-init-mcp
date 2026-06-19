@@ -73,11 +73,13 @@ export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
   }
 
   // 6. AI harness engineering artifacts
-  files.push(...generateHarnessFiles(params));
-  files.push(...generateRuntimeOrchestratorFiles(params));
-  files.push(...generateReadinessFiles(params));
-  files.push(...generateDashboardFiles(params));
-  files.push(...generateDashboardOperationFiles(params));
+  if (params.includeHarnessEngineering !== false) {
+    files.push(...generateHarnessFiles(params));
+    files.push(...generateRuntimeOrchestratorFiles(params));
+    files.push(...generateReadinessFiles(params));
+    files.push(...generateDashboardFiles(params));
+    files.push(...generateDashboardOperationFiles(params));
+  }
 
   // 7. Initial changelog and work log
   const relativePaths = files.map((file) => file.relativePath);
@@ -89,7 +91,9 @@ export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
       "docs/work-logs/...",
     ])
   );
-  files.push(buildManagedFileInventoryFile(files));
+  if (params.includeHarnessEngineering !== false) {
+    files.push(buildManagedFileInventoryFile(files));
+  }
 
   assertGeneratedFilesRespectNonDestructivePolicy(files);
 

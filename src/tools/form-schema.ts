@@ -6,6 +6,7 @@
  */
 
 import { PROJECT_TYPE_CONFIGS } from "../types.js";
+import { listDomainStressProfileOptions } from "../data/domain-stress-profiles.js";
 
 export interface FormField {
   name: string;
@@ -126,30 +127,13 @@ export function buildInitFormSchema(): FormSchema {
     {
       name: "domainStressProfile",
       label: "Domain stress profile",
-      type: "select",
+      type: "text",
       required: false,
       description:
-        "Optional high-risk domain profile that agents should copy into plans, contracts, dashboard events, and evaluator prompts.",
-      options: [
-        {
-          value: "identity-commerce-operations",
-          label: "Identity commerce operations",
-          description:
-            "Identity, device-assisted access, commerce, payments, benefits, and operator audit",
-        },
-        {
-          value: "legacy-modernization-governance",
-          label: "Legacy modernization governance",
-          description:
-            "Existing system adopted into a governed, role-aware, monetizable product surface",
-        },
-        {
-          value: "content-release-governance",
-          label: "Content release governance",
-          description:
-            "Canonical content, derivative assets, visual governance, release cadence, and feedback loops",
-        },
-      ],
+        "Optional high-risk domain profile id. Use a built-in id or define a project-specific slug to create custom evidence gates.",
+      placeholder:
+        "identity-commerce-operations, content-release-governance, learning-growth-harness, research-review-harness",
+      options: listDomainStressProfileOptions(),
     },
     {
       name: "legacyAdoptionProfile",

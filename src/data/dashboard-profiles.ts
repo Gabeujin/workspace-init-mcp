@@ -38,7 +38,7 @@ export function inferDashboardDomainMode(
     case "other":
       return "generic-governance";
     default:
-      return "software-delivery";
+      return projectType == null ? "generic-governance" : "software-delivery";
   }
 }
 
@@ -96,9 +96,9 @@ export const DASHBOARD_KPI_DEFINITIONS: DashboardKpiDefinition[] = [
     label: "Session Resumability",
     target: "Every session leaves restart-ready evidence",
     defaultValue: "seeded",
-    defaultStatus: "ok",
+    defaultStatus: "warning",
     defaultInterpretation:
-      "The JSON structure is ready to hold resumable state, handovers, and artifact links.",
+      "The JSON structure can hold resumable state, but live handover evidence is still pending.",
     perspectives: ["AX/DX", "Governance"],
     appliesToModes: [
       "software-delivery",
@@ -144,9 +144,9 @@ export const DASHBOARD_KPI_DEFINITIONS: DashboardKpiDefinition[] = [
     label: "Evidence Traceability",
     target: "Plans, reviews, outputs, and handovers remain linked per session",
     defaultValue: "seeded",
-    defaultStatus: "ok",
+    defaultStatus: "warning",
     defaultInterpretation:
-      "The dashboard can point each governed session to explicit evidence and outputs.",
+      "The dashboard can point sessions to evidence after real governed work records are added.",
     perspectives: ["AX/DX", "Governance"],
     appliesToModes: [
       "software-delivery",
@@ -176,9 +176,9 @@ export const DASHBOARD_KPI_DEFINITIONS: DashboardKpiDefinition[] = [
     label: "DX / AX Operating Readiness",
     target: "Stakeholders and AI Agents can trace the project world model, briefs, evidence, KPIs, issues, and decisions without chat history",
     defaultValue: "foundation-present",
-    defaultStatus: "ok",
+    defaultStatus: "warning",
     defaultInterpretation:
-      "The workspace now has a dashboard-ready operating surface; teams must keep it current.",
+      "The workspace has a dashboard-ready operating surface, but adoption is not proven until live sessions keep it current.",
     perspectives: ["AX/DX"],
     appliesToModes: [
       "software-delivery",
@@ -398,9 +398,9 @@ export const DASHBOARD_KPI_DEFINITIONS: DashboardKpiDefinition[] = [
     label: "Stakeholder Visibility",
     target: "Non-developers can understand the current state without reading chat or code",
     defaultValue: "foundation-present",
-    defaultStatus: "ok",
+    defaultStatus: "warning",
     defaultInterpretation:
-      "The dashboard is designed for broad stakeholder readability and requires live updates to stay useful.",
+      "The dashboard is designed for broad stakeholder readability; live updates are required before this can be treated as proven.",
     perspectives: ["AX/DX", "Operations"],
     appliesToModes: [
       "software-delivery",

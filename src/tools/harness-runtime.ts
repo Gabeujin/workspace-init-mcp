@@ -1,10 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   HARNESS_ADAPTER_CONTRACT_VERSION,
   HARNESS_REQUIRED_HANDOFF_FIELDS,
 } from "../data/runtime-contract.js";
+import { HARNESS_RUNTIME_VERSION } from "../data/version.js";
 import {
   normalizeSafeWorkspaceRelativePaths,
   normalizeWorkspaceRelativePath,
@@ -57,7 +59,6 @@ export const HARNESS_RUNTIME_ADAPTER_IDS = [
 type HarnessRuntimeAdapterId = (typeof HARNESS_RUNTIME_ADAPTER_IDS)[number];
 const NATIVE_EXECUTOR_OVERRIDES_PATH =
   ".github/ai-harness/native-executor-overrides.json";
-const HARNESS_RUNTIME_VERSION = "4.6.1";
 const HARNESS_VERSION_INDEX_PATH = "docs/ai-harness/runtime/version-index.json";
 const HARNESS_COMPATIBILITY_MATRIX_PATH =
   "docs/ai-harness/runtime/compatibility-matrix.json";
@@ -65,6 +66,10 @@ const HARNESS_ADAPTER_CONTRACT_PATH =
   "docs/ai-harness/runtime/adapter-contract.json";
 const HARNESS_SESSION_CONTINUITY_PATH =
   "docs/ai-harness/runtime/session-continuity.md";
+const HARNESS_DASHBOARD_LEDGER_PATH =
+  "docs/ai-harness/dashboard/events/harness-events.jsonl";
+const HARNESS_DASHBOARD_LEDGER_MANIFEST_PATH =
+  "docs/ai-harness/dashboard/events/ledger-manifest.json";
 const WINDOWS_RESERVED_RUNTIME_PATH_SEGMENT_PATTERN =
   /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 const DEFAULT_NATIVE_EXECUTOR_TIMEOUT_MS = 10 * 60 * 1000;
@@ -162,6 +167,15 @@ interface HarnessRuntimeEvent {
   outcome: string;
   note: string;
   artifactPaths: string[];
+  taskTrace: HarnessTaskTrace;
+}
+
+interface HarnessTaskTrace {
+  originalRequest: string;
+  processSummary: string;
+  resultSummary: string;
+  recordedAt: string;
+  source: string;
 }
 
 interface HarnessRuntimeSessionState {
@@ -171,6 +185,12 @@ interface HarnessRuntimeSessionState {
     rootPath: string;
     projectType: string;
     purpose: string;
+  };
+  requestRecord: {
+    originalRequest: string;
+    normalizedGoal: string;
+    capturedAt: string;
+    source: string;
   };
   session: {
     id: string;
@@ -235,7 +255,15 @@ interface HarnessRuntimeSessionState {
         at: string;
         actor: HarnessActorRole;
         verdict: string;
+        phase: HarnessPhaseId;
+        action: HarnessAction;
+        findings: string[];
+        requiredFixes: string[];
+        verificationEvidence: string[];
         improvementAction: string;
+        residualRisk: string | null;
+        scoreBefore: number | null;
+        scoreAfter: number | null;
       }>;
     };
   };
@@ -277,6 +305,9 @@ interface HarnessSessionIndex {
 export interface StartHarnessSessionParams {
   workspacePath: string;
   goal: string;
+  originalRequest?: string;
+  processSummary?: string;
+  resultSummary?: string;
   title?: string;
   sessionId?: string;
   chunkId?: string;
@@ -309,8 +340,18 @@ export interface AdvanceHarnessSessionParams {
   action: HarnessAction;
   actorRole: HarnessActorRole;
   note: string;
+  originalRequest?: string;
+  processSummary?: string;
+  resultSummary?: string;
   artifactPaths?: string[];
   nextStep?: string;
+  reviewVerdict?: string;
+  findings?: string[];
+  requiredFixes?: string[];
+  verificationEvidence?: string[];
+  residualRisk?: string;
+  scoreBefore?: number;
+  scoreAfter?: number;
 }
 
 export interface HarnessRuntimeResult {
@@ -323,6 +364,49 @@ export interface HarnessRuntimeResult {
   workPacketPath: string;
   workPacketMarkdownPath: string;
   actorInboxPath: string;
+  summary: string;
+}
+
+export interface HarnessSessionListResult {
+  activeSessionId: string | null;
+  queueDepth: number;
+  sessions: Array<{
+    id: string;
+    title: string;
+    status: string;
+    leaseStatus: HarnessLeaseStatus;
+    currentPhase: HarnessPhaseId;
+    nextActor: HarnessActorRole;
+    chunkId: string;
+    updatedAt: string;
+    originalRequest: string;
+    eventCount: number;
+    evaluationIteration: number;
+    evaluationStatus: string;
+    lastOutcome: string;
+    nextAction: string;
+    sessionPath: string;
+    summaryPath: string;
+  }>;
+  summary: string;
+}
+
+export interface HarnessSessionLogResult {
+  sessionId: string;
+  events: Array<{
+    id: string;
+    at: string;
+    phase: HarnessPhaseId;
+    actor: HarnessActorRole;
+    action: HarnessAction;
+    outcome: string;
+    note: string;
+    artifactPaths: string[];
+    taskTrace: HarnessTaskTrace;
+  }>;
+  evaluationHistory: NonNullable<
+    HarnessRuntimeSessionState["chunk"]["evaluationLoop"]
+  >["history"];
   summary: string;
 }
 
@@ -413,6 +497,9 @@ export interface RecordHarnessExecutionResultParams {
   sessionId?: string;
   outcome: "completed" | "needs-review" | "blocked" | "failed";
   summary: string;
+  originalRequest?: string;
+  processSummary?: string;
+  resultSummary?: string;
   artifactPaths?: string[];
   nextStep?: string;
 }
@@ -1625,6 +1712,12 @@ function ensureRuntimeIndex(workspacePath: string): HarnessSessionIndex {
     nextActor: "planner",
     nextAction:
       "Start the first governed runtime session before implementation begins.",
+    requestRecord: null,
+    taskTracePolicy: {
+      requiredFields: ["originalRequest", "processSummary", "resultSummary"],
+      rule:
+        "Every governed agent task records the original request, process summary, and result summary.",
+    },
     workPacketFile: null,
     actorInboxFile: null,
     summary:
@@ -1807,7 +1900,8 @@ function appendPhaseUpdate(
   actorRole: HarnessActorRole,
   action: HarnessAction,
   note: string,
-  extraArtifacts: string[]
+  extraArtifacts: string[],
+  taskTrace?: HarnessTaskTrace
 ): void {
   if (relativePath == null) {
     return;
@@ -1822,6 +1916,12 @@ function appendPhaseUpdate(
     `- Note: ${note}`,
   ];
 
+  if (taskTrace != null) {
+    lines.push(`- Original request: ${taskTrace.originalRequest}`);
+    lines.push(`- Process: ${taskTrace.processSummary}`);
+    lines.push(`- Result: ${taskTrace.resultSummary}`);
+  }
+
   if (extraArtifacts.length > 0) {
     lines.push(`- Linked artifacts: ${extraArtifacts.join(", ")}`);
   }
@@ -1831,6 +1931,226 @@ function appendPhaseUpdate(
 
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
+}
+
+function normalizeTraceText(value: string | undefined, fallback: string): string {
+  const trimmed = value?.trim();
+  return trimmed != null && trimmed.length > 0 ? trimmed : fallback;
+}
+
+function requireTraceInput(value: string | undefined, fieldName: string): string {
+  const trimmed = value?.trim();
+  if (trimmed == null || trimmed.length === 0) {
+    throw new Error(`${fieldName} is required for request/process/result traceability.`);
+  }
+  return trimmed;
+}
+
+function stableHash(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function buildTaskTrace(params: {
+  originalRequest?: string;
+  fallbackOriginalRequest: string;
+  processSummary?: string;
+  fallbackProcessSummary: string;
+  resultSummary?: string;
+  fallbackResultSummary: string;
+  recordedAt: string;
+  source: string;
+}): HarnessTaskTrace {
+  return {
+    originalRequest: normalizeTraceText(
+      params.originalRequest,
+      params.fallbackOriginalRequest
+    ),
+    processSummary: normalizeTraceText(
+      params.processSummary,
+      params.fallbackProcessSummary
+    ),
+    resultSummary: normalizeTraceText(
+      params.resultSummary,
+      params.fallbackResultSummary
+    ),
+    recordedAt: params.recordedAt,
+    source: params.source,
+  };
+}
+
+function requireTaskTrace(params: {
+  originalRequest?: string;
+  fallbackOriginalRequest: string;
+  processSummary?: string;
+  resultSummary?: string;
+  recordedAt: string;
+  source: string;
+}): HarnessTaskTrace {
+  return {
+    originalRequest: normalizeTraceText(
+      params.originalRequest,
+      params.fallbackOriginalRequest
+    ),
+    processSummary: requireTraceInput(params.processSummary, "processSummary"),
+    resultSummary: requireTraceInput(params.resultSummary, "resultSummary"),
+    recordedAt: params.recordedAt,
+    source: params.source,
+  };
+}
+
+function validateTaskTraceShape(
+  trace: unknown,
+  label: string,
+  errors: string[]
+): void {
+  if (!isPlainObject(trace)) {
+    errors.push(`${label}.taskTrace must be an object`);
+    return;
+  }
+  for (const field of [
+    "originalRequest",
+    "processSummary",
+    "resultSummary",
+    "recordedAt",
+    "source",
+  ]) {
+    if (!isString(trace[field]) || trace[field].trim().length === 0) {
+      errors.push(`${label}.taskTrace.${field} must be a non-empty string`);
+    }
+  }
+}
+
+function validateSessionTraceQuality(
+  session: HarnessRuntimeSessionState,
+  label: string,
+  errors: string[]
+): void {
+  if (!isPlainObject(session.requestRecord)) {
+    errors.push(`${label}.requestRecord must be an object`);
+  } else {
+    for (const field of ["originalRequest", "normalizedGoal", "capturedAt", "source"]) {
+      if (
+        !isString(session.requestRecord[field as keyof typeof session.requestRecord]) ||
+        String(session.requestRecord[field as keyof typeof session.requestRecord]).trim().length === 0
+      ) {
+        errors.push(`${label}.requestRecord.${field} must be a non-empty string`);
+      }
+    }
+  }
+
+  if (!Array.isArray(session.events)) {
+    errors.push(`${label}.events must be an array`);
+    return;
+  }
+
+  for (const [index, event] of session.events.entries()) {
+    validateTaskTraceShape(event.taskTrace, `${label}.events[${index}]`, errors);
+  }
+}
+
+function appendHarnessDashboardLedgerEvent(params: {
+  workspacePath: string;
+  eventType: string;
+  sourceTool: string;
+  session: HarnessRuntimeSessionState;
+  payload: Record<string, unknown>;
+  causationId?: string | null;
+  idempotencyKey: string;
+  recordedAt: string;
+}): string | null {
+  const ledgerPath = path.join(params.workspacePath, HARNESS_DASHBOARD_LEDGER_PATH);
+  const manifestPath = path.join(
+    params.workspacePath,
+    HARNESS_DASHBOARD_LEDGER_MANIFEST_PATH
+  );
+  const manifest = readJsonIfExists<Record<string, unknown>>(manifestPath);
+  if (manifest == null || !fs.existsSync(ledgerPath)) {
+    return null;
+  }
+
+  const lastSequence = Number(manifest.lastSequence || 0);
+  const sequence = lastSequence + 1;
+  const payloadHash = stableHash(params.payload);
+  const workspaceId =
+    typeof manifest.workspaceId === "string"
+      ? manifest.workspaceId
+      : params.session.workspace.name;
+  const event = {
+    eventId: `event-${String(sequence).padStart(6, "0")}-${params.eventType.replace(/[^a-z0-9.-]+/gi, "-").toLowerCase()}`,
+    sequence,
+    eventType: params.eventType,
+    eventVersion: "1.0.0",
+    workspaceId,
+    aggregateId: params.session.session.id,
+    aggregateType: "harnessRuntimeSession",
+    aggregateVersion: params.session.events.length,
+    occurredAt: params.recordedAt,
+    recordedAt: params.recordedAt,
+    actor: params.session.session.nextActor,
+    agentId: "workspace-init-mcp",
+    sourceTool: params.sourceTool,
+    correlationId: params.session.session.id,
+    causationId: params.causationId ?? null,
+    idempotencyKey: params.idempotencyKey,
+    payloadHash,
+    previousEventHash: String(manifest.rootHash || "genesis"),
+    redactionLevel: "internal",
+    payload: params.payload,
+  };
+  const record = {
+    ...event,
+    eventHash: stableHash(event),
+  };
+
+  appendText(ledgerPath, `${JSON.stringify(record)}\n`);
+  const nextManifest = {
+    ...manifest,
+    firstSequence: Number(manifest.firstSequence || 1),
+    lastSequence: sequence,
+    rowCount: Number(manifest.rowCount || lastSequence) + 1,
+    rootHash: record.eventHash,
+    lastVerifiedAt: params.recordedAt,
+    segments: Array.isArray(manifest.segments)
+      ? (manifest.segments as Array<Record<string, unknown>>).map((segment, index) =>
+          index === 0
+            ? {
+                ...segment,
+                lastSequence: sequence,
+                rowCount: Number(segment.rowCount || lastSequence) + 1,
+                segmentHash: record.eventHash,
+              }
+            : segment
+        )
+      : [
+          {
+            id: `segment-000001-${String(sequence).padStart(6, "0")}`,
+            path: HARNESS_DASHBOARD_LEDGER_PATH,
+            firstSequence: 1,
+            lastSequence: sequence,
+            rowCount: sequence,
+            schemaVersion: manifest.schemaVersion ?? "1.0.0",
+            segmentHash: record.eventHash,
+            compactionStatus: "hot",
+          },
+        ],
+  };
+  writeJson(manifestPath, nextManifest);
+  return record.eventId;
+}
+
+function fallbackRequestRecord(session: HarnessRuntimeSessionState): HarnessRuntimeSessionState["requestRecord"] {
+  return {
+    originalRequest: session.session.goal,
+    normalizedGoal: session.session.goal,
+    capturedAt: session.session.createdAt,
+    source: "legacy-session-fallback",
+  };
+}
+
+function getSessionRequestRecord(
+  session: HarnessRuntimeSessionState
+): HarnessRuntimeSessionState["requestRecord"] {
+  return session.requestRecord ?? fallbackRequestRecord(session);
 }
 
 function lookupCommandPath(commandName: string): string | null {
@@ -2083,6 +2403,12 @@ function validateActiveRuntimeShape(value: unknown): HarnessRuntimeValidationRes
     }
     if (!Array.isArray(sessionValue.events)) {
       errors.push("active runtime session.session.events must be an array");
+    } else {
+      validateSessionTraceQuality(
+        sessionValue as unknown as HarnessRuntimeSessionState,
+        "active runtime session.session",
+        errors
+      );
     }
     if (
       !isPlainObject(sessionValue.governance) ||
@@ -2345,6 +2671,11 @@ export function auditHarnessRuntime(
     if (session.session.id !== entry.id) {
       errors.push(`session-index.json: session "${entry.id}" does not match file payload id "${session.session.id}"`);
     }
+    validateSessionTraceQuality(
+      session,
+      `session-index.json: session file for "${entry.id}"`,
+      errors
+    );
     if (session.session.currentPhase !== entry.currentPhase) {
       warnings.push(
         `session-index.json: currentPhase for "${entry.id}" is "${entry.currentPhase}" but session file has "${session.session.currentPhase}"`
@@ -2820,11 +3151,13 @@ function buildSessionSummaryMarkdown(session: HarnessRuntimeSessionState): strin
   const activePhase = session.phases.find(
     (phase) => phase.id === session.session.currentPhase
   );
+  const requestRecord = getSessionRequestRecord(session);
 
   return `# ${session.session.title}
 
 - Session ID: \`${session.session.id}\`
 - Goal: ${session.session.goal}
+- Original request: ${requestRecord.originalRequest}
 - Status: ${session.session.status}
 - Adoption track: ${session.session.adoptionTrack}
 - Current phase: \`${session.session.currentPhase}\`
@@ -2863,6 +3196,24 @@ ${activePhase?.artifactPath ?? "n/a"}
 ## Runtime Artifacts
 
 ${session.artifacts.map((artifact) => `- ${artifact}`).join("\n") || "- none"}
+
+## Request / Process / Result Trace
+
+${recentEvents
+  .map((event) => {
+    const trace = event.taskTrace ?? {
+      originalRequest: requestRecord.originalRequest,
+      processSummary: event.note,
+      resultSummary: event.outcome,
+    };
+    return [
+      `- ${event.at} | ${event.phase} | ${event.actor} | ${event.action}`,
+      `  - Original request: ${trace.originalRequest}`,
+      `  - Process: ${trace.processSummary}`,
+      `  - Result: ${trace.resultSummary}`,
+    ].join("\n");
+  })
+  .join("\n") || "- none"}
 
 ## Recent Events
 
@@ -3394,6 +3745,15 @@ function buildWorkPacketMarkdown(packet: Record<string, unknown>): string {
   const qualityGateChecklist = Array.isArray(packet.qualityGateChecklist)
     ? (packet.qualityGateChecklist as string[])
     : [];
+  const requestRecord = isPlainObject(packet.requestRecord)
+    ? packet.requestRecord
+    : {};
+  const taskTracePolicy = isPlainObject(packet.taskTracePolicy)
+    ? packet.taskTracePolicy
+    : {};
+  const recentTaskRecords = Array.isArray(packet.recentTaskRecords)
+    ? (packet.recentTaskRecords as Array<Record<string, unknown>>)
+    : [];
   const verificationCommands = Array.isArray(packet.verificationCommands)
     ? (packet.verificationCommands as string[])
     : [];
@@ -3403,6 +3763,13 @@ function buildWorkPacketMarkdown(packet: Record<string, unknown>): string {
   const evaluationLoop = isPlainObject(packet.evaluationLoop)
     ? packet.evaluationLoop
     : {};
+  const workingMemory = isPlainObject(packet.workingMemory)
+    ? packet.workingMemory
+    : {};
+  const evaluationHistory = Array.isArray(evaluationLoop.history)
+    ? (evaluationLoop.history as Array<Record<string, unknown>>)
+    : [];
+  const recentEvaluationHistory = evaluationHistory.slice(-5);
 
   return `# Work Packet: ${String(packet.sessionId || "unknown")}
 
@@ -3419,6 +3786,25 @@ function buildWorkPacketMarkdown(packet: Record<string, unknown>): string {
 ## Current Instruction
 
 ${String(packet.nextAction || "Start the first governed runtime session before implementation begins.")}
+
+## Request / Process / Result Ledger
+
+- Original request: ${String(requestRecord.originalRequest || packet.goal || "n/a")}
+- Normalized goal: ${String(requestRecord.normalizedGoal || packet.goal || "n/a")}
+- Captured at: ${String(requestRecord.capturedAt || "unknown")}
+- Trace rule: ${String(taskTracePolicy.rule || "Record the original request, process summary, and result summary for every meaningful task.")}
+- Closeout gate: ${String(taskTracePolicy.closeoutGate || "Do not close governance without a final request/process/result record.")}
+
+### Recent Task Records
+
+${recentTaskRecords.map((record) => {
+  return [
+    `- ${String(record.at || "unknown")} | ${String(record.phase || "phase")} | ${String(record.actor || "actor")} | ${String(record.action || "action")}`,
+    `  - Original request: ${String(record.originalRequest || "n/a")}`,
+    `  - Process: ${String(record.processSummary || "n/a")}`,
+    `  - Result: ${String(record.resultSummary || "n/a")}`,
+  ].join("\n");
+}).join("\n") || "- none yet"}
 
 ## Role Brief
 
@@ -3452,6 +3838,30 @@ ${dependencyMap.map((item) => `  - ${item}`).join("\n") || "  - none"}
 - Iteration: ${String(evaluationLoop.iteration ?? "0")}
 - Status: ${String(evaluationLoop.status || "not-started")}
 - Threshold: ${String(evaluationLoop.threshold || "Contract satisfied and evidence reviewed by the hub.")}
+
+### Recent Negative Review / Improvement Records
+
+${recentEvaluationHistory.map((entry) => {
+  const findings = Array.isArray(entry.findings) ? entry.findings : [];
+  const requiredFixes = Array.isArray(entry.requiredFixes) ? entry.requiredFixes : [];
+  const evidence = Array.isArray(entry.verificationEvidence) ? entry.verificationEvidence : [];
+  return [
+    `- ${String(entry.at || "unknown")} ${String(entry.phase || "phase")} ${String(entry.verdict || "review")}`,
+    findings.length > 0 ? `  - Findings: ${findings.map(String).join("; ")}` : "",
+    requiredFixes.length > 0 ? `  - Required fixes: ${requiredFixes.map(String).join("; ")}` : "",
+    evidence.length > 0 ? `  - Verification evidence: ${evidence.map(String).join("; ")}` : "",
+    entry.residualRisk ? `  - Residual risk: ${String(entry.residualRisk)}` : "",
+    entry.improvementAction ? `  - Improvement action: ${String(entry.improvementAction)}` : "",
+  ].filter(Boolean).join("\n");
+}).join("\n") || "- none yet"}
+
+## Stateful Cognitive Offloading
+
+- Inner tier: ${String(workingMemory.innerTier || "compact prompt-facing working memory")}
+- Outer tier: ${String(workingMemory.outerTier || "durable artifact file cabinet")}
+- Division of labor: ${String(workingMemory.policyRole || "agent decides; harness maintains recoverable state")}
+- Curation rule: ${String(workingMemory.curationRule || "promote evidence-backed artifacts and demote noise")}
+- Verify-before-promote: ${String(workingMemory.verifyBeforePromote || "completion claims require verification evidence")}
 
 ## Context Injection
 
@@ -3493,12 +3903,18 @@ function buildAdapterPromptBlock(
   const expectedWrites = Array.isArray(packet.expectedWrites)
     ? (packet.expectedWrites as string[])
     : [];
+  const requestRecord = isPlainObject(packet.requestRecord)
+    ? packet.requestRecord
+    : {};
 
   return [
     `You are continuing governed AI delivery through the "${adapter.title}" adapter.`,
     `Session ID: ${session.session.id}`,
     `Current phase: ${session.session.currentPhase}`,
     `Next actor: ${session.session.nextActor}`,
+    `Original request: ${String(
+      requestRecord.originalRequest || session.session.goal
+    )}`,
     `Goal: ${session.session.goal}`,
     `Chunk: ${session.chunk.id} (${session.chunk.title})`,
     "",
@@ -3509,6 +3925,9 @@ function buildAdapterPromptBlock(
     "- For parallel work, stay inside your assigned dependency-free chunk and expected write paths.",
     "- Use only the injected context packet unless you stop and update the contract.",
     "- Persist decisions, evidence, and outcomes into the referenced durable files.",
+    "- For every meaningful task, preserve originalRequest, processSummary, and resultSummary in the event or execution receipt.",
+    "- Use the workingMemory contract: let the harness carry recoverable state while you focus on semantic decisions.",
+    "- Treat evaluationLoop.history as the durable record of work -> negative review -> remediation -> verification.",
     "- Before completion, record static analysis, boundary testing, compatibility, dependency audit, maintainability, self-correction, and atomic commit evidence.",
     "- Preserve sessionId, chunkId, currentPhase, nextActor, and leaseStatus unless an MCP runtime tool advances governance.",
     "- If the work is blocked or ambiguous, stop and record the blocker instead of improvising.",
@@ -3535,6 +3954,22 @@ function buildAdapterHandoffMarkdown(handoff: Record<string, unknown>): string {
   const compatibility = isPlainObject(handoff.compatibility)
     ? handoff.compatibility
     : {};
+  const workingMemory = isPlainObject(handoff.workingMemory)
+    ? handoff.workingMemory
+    : {};
+  const requestRecord = isPlainObject(handoff.requestRecord)
+    ? handoff.requestRecord
+    : isPlainObject(packet.requestRecord)
+      ? packet.requestRecord
+      : {};
+  const taskTracePolicy = isPlainObject(handoff.taskTracePolicy)
+    ? handoff.taskTracePolicy
+    : isPlainObject(packet.taskTracePolicy)
+      ? packet.taskTracePolicy
+      : {};
+  const evaluationLoop = isPlainObject(handoff.evaluationLoop)
+    ? handoff.evaluationLoop
+    : {};
   const operatorChecklist = Array.isArray(handoff.operatorChecklist)
     ? (handoff.operatorChecklist as string[])
     : [];
@@ -3555,6 +3990,14 @@ function buildAdapterHandoffMarkdown(handoff: Record<string, unknown>): string {
 - Current phase: ${String(handoff.currentPhase || "awaiting-session-start")}
 - Goal: ${String(handoff.goal || "n/a")}
 - Chunk: ${String(handoff.chunkId || "n/a")} (${String(handoff.chunkTitle || "n/a")})
+
+## Request Trace
+
+- Original request: ${String(requestRecord.originalRequest || handoff.goal || "n/a")}
+- Normalized goal: ${String(requestRecord.normalizedGoal || handoff.goal || "n/a")}
+- Captured at: ${String(requestRecord.capturedAt || "unknown")}
+- Required trace fields: ${Array.isArray(taskTracePolicy.requiredFields) ? (taskTracePolicy.requiredFields as string[]).join(", ") : "originalRequest, processSummary, resultSummary"}
+- Closeout gate: ${String(taskTracePolicy.closeoutGate || "Do not close governance without request/process/result evidence.")}
 
 ## Source Files
 
@@ -3578,6 +4021,12 @@ function buildAdapterHandoffMarkdown(handoff: Record<string, unknown>): string {
 ## Agent Switching Rule
 
 When moving this session between Copilot, Codex, Claude, Gemini, OpenHands, or another runtime, keep \`sessionId\`, \`chunkId\`, \`currentPhase\`, and \`nextActor\` stable. Read the adapter contract and session continuity files before relying on chat history.
+
+## Working Memory Contract
+
+- Inner tier: ${String(workingMemory.innerTier || "compact prompt-facing working memory")}
+- Outer tier: ${String(workingMemory.outerTier || "durable artifact file cabinet")}
+- Evaluation loop: iteration ${String(evaluationLoop.iteration ?? "0")}, status ${String(evaluationLoop.status || "not-started")}
 
 ## Operator Checklist
 
@@ -3723,6 +4172,9 @@ function buildExecutionResultTemplate(manifest: Record<string, unknown>): Record
   const resultArtifacts = isPlainObject(manifest.resultArtifacts)
     ? manifest.resultArtifacts
     : {};
+  const requestRecord = isPlainObject(manifest.requestRecord)
+    ? manifest.requestRecord
+    : {};
   return {
     schemaVersion: "1.0.0",
     generatedAt: nowIso(),
@@ -3730,6 +4182,11 @@ function buildExecutionResultTemplate(manifest: Record<string, unknown>): Record
     bridgeId: manifest.bridgeId,
     outcome: "completed",
     summary: "Describe what the external runtime completed and what remains.",
+    originalRequest: String(requestRecord.originalRequest || "Repeat the original user request here."),
+    processSummary:
+      "Describe the commands, files, checks, and decisions the external runtime performed.",
+    resultSummary:
+      "Describe the result in user-facing terms, including remaining risk or next work.",
     artifactPaths:
       typeof resultArtifacts.nativeLastMessageFile === "string"
         ? [resultArtifacts.nativeLastMessageFile]
@@ -3742,6 +4199,7 @@ function buildExecutionReceiptMarkdown(receipt: Record<string, unknown>): string
   const artifactPaths = Array.isArray(receipt.artifactPaths)
     ? (receipt.artifactPaths as string[])
     : [];
+  const taskTrace = isPlainObject(receipt.taskTrace) ? receipt.taskTrace : {};
 
   return `# Execution Receipt: ${String(receipt.sessionId || "unknown")} / ${String(
     receipt.bridgeId || "bridge"
@@ -3751,6 +4209,12 @@ function buildExecutionReceiptMarkdown(receipt: Record<string, unknown>): string
 - Outcome: ${String(receipt.outcome || "unknown")}
 - Summary: ${String(receipt.summary || "n/a")}
 - Next step: ${String(receipt.nextStep || "n/a")}
+
+## Request / Process / Result
+
+- Original request: ${String(taskTrace.originalRequest || receipt.originalRequest || "n/a")}
+- Process: ${String(taskTrace.processSummary || receipt.processSummary || "n/a")}
+- Result: ${String(taskTrace.resultSummary || receipt.resultSummary || receipt.summary || "n/a")}
 
 ## Artifact Paths
 
@@ -3834,6 +4298,13 @@ function writeIdleWorkPacket(
       queuedSessionId != null
         ? `Activate the next queued session: ${queuedSessionId}`
         : "Start the first governed runtime session before implementation begins.",
+    requestRecord:
+      queuedSession == null ? null : getSessionRequestRecord(queuedSession),
+    taskTracePolicy: {
+      requiredFields: ["originalRequest", "processSummary", "resultSummary"],
+      rule:
+        "Every governed agent task records the original request, process summary, and result summary.",
+    },
     workPacketFile:
       queuedSessionId != null
         ? `docs/ai-harness/runtime/work-packets/${queuedSessionId}.work-packet.json`
@@ -3886,6 +4357,7 @@ function writeWorkPacket(
   );
   const leaseStatus = resolveLeaseStatus(session.session.id, runtimeIndex);
   const activePhase = activePhaseRecord(session);
+  const requestRecord = getSessionRequestRecord(session);
   const packet = {
     schemaVersion: "1.0.0",
     generatedAt: nowIso(),
@@ -3898,6 +4370,16 @@ function writeWorkPacket(
     nextActor: session.session.nextActor,
     currentPhase: session.session.currentPhase,
     nextAction: session.notes.current,
+    requestRecord,
+    taskTracePolicy: {
+      requiredFields: ["originalRequest", "processSummary", "resultSummary"],
+      rule:
+        "Every agent task, worker handoff, external execution, and phase transition must preserve the original request, process summary, and result summary in durable files.",
+      sourceOfTruth:
+        "Use requestRecord.originalRequest as the canonical original user request unless a later governed session explicitly records a narrower original request.",
+      closeoutGate:
+        "Do not close governance until the final event or receipt explains what was requested, what was done, and what changed.",
+    },
     contextPolicy: session.context.policy,
     adoptionTrack: session.session.adoptionTrack,
     chunkId: session.chunk.id,
@@ -3914,6 +4396,18 @@ function writeWorkPacket(
     mergeOwner: session.chunk.mergeOwner ?? null,
     integrationOwner: session.chunk.integrationOwner ?? null,
     parallelSafetyStatus: session.chunk.parallelSafetyStatus ?? "unclassified",
+    workingMemory: {
+      innerTier:
+        "Use this packet as compact working memory: goal, phase, expected writes, curated evidence, review findings, next action, and context budget.",
+      outerTier:
+        "Use linked artifacts as the file cabinet: session JSON, phase artifacts, dashboard state, review notes, handovers, VCS records, and verification receipts.",
+      policyRole:
+        "The agent makes semantic decisions; the harness maintains recoverable state, evidence links, curation records, verification receipts, and budget-aware renderings.",
+      curationRule:
+        "Promote only evidence-backed artifacts into the active working set; demote stale or noisy context instead of copying it forward.",
+      verifyBeforePromote:
+        "High-confidence readiness or completion claims require verification evidence before closeout.",
+    },
     evaluationLoop: session.chunk.evaluationLoop ?? null,
     rolePromptFile: rolePromptRelativePath(session.session.nextActor),
     stateFile: relativeToWorkspace(workspacePath, sessionPath),
@@ -3972,6 +4466,16 @@ function writeWorkPacket(
       "Use one logical change per commit and reference the session, chunk, plan, or issue when available.",
     roleBrief: buildRoleBrief(session),
     summary: `${session.session.nextActor} should continue ${session.session.currentPhase} for ${session.session.id} using the active artifact and approved governance boundaries.`,
+    recentTaskRecords: session.events.slice(-5).map((event) => ({
+      at: event.at,
+      phase: event.phase,
+      actor: event.actor,
+      action: event.action,
+      originalRequest: event.taskTrace?.originalRequest ?? requestRecord.originalRequest,
+      processSummary: event.taskTrace?.processSummary ?? event.note,
+      resultSummary: event.taskTrace?.resultSummary ?? event.outcome,
+      source: event.taskTrace?.source ?? "legacy-event-fallback",
+    })),
     recentEvents: session.events.slice(-5).map((event) => ({
       at: event.at,
       phase: event.phase,
@@ -4038,7 +4542,8 @@ function ensureRuntimeArtifacts(
 
 function createStartEvent(
   startedAt: string,
-  activeArtifactPath: string | null
+  activeArtifactPath: string | null,
+  taskTrace: HarnessTaskTrace
 ): HarnessRuntimeEvent {
   return {
     id: "evt-0001",
@@ -4053,6 +4558,7 @@ function createStartEvent(
       "docs/ai-harness/runtime/state/session-index.json",
       "docs/ai-harness/runtime/state/active-session.json",
     ]),
+    taskTrace,
   };
 }
 
@@ -5070,6 +5576,12 @@ export function startHarnessSession(
   const startedAt = nowIso();
   const sessionId = buildSessionId(params.sessionId, params.goal);
   const chunkId = buildChunkId(params.chunkId, params.goal, sessionId);
+  const requestRecord = {
+    originalRequest: requireTraceInput(params.originalRequest, "originalRequest"),
+    normalizedGoal: params.goal,
+    capturedAt: startedAt,
+    source: "start_harness_session",
+  };
 
   const session: HarnessRuntimeSessionState = {
     schemaVersion: "1.0.0",
@@ -5079,6 +5591,7 @@ export function startHarnessSession(
       projectType: metadata.projectType,
       purpose: metadata.purpose,
     },
+    requestRecord,
     session: {
       id: sessionId,
       title: params.title?.trim() || buildDefaultSessionTitle(params.goal),
@@ -5184,15 +5697,39 @@ export function startHarnessSession(
     "docs/ai-harness/runtime/state/session-index.json",
     "docs/ai-harness/runtime/state/active-session.json",
   ]);
-  session.events.push(createStartEvent(startedAt, governanceArtifact));
+  const startTaskTrace = requireTaskTrace({
+    originalRequest: requestRecord.originalRequest,
+    fallbackOriginalRequest: params.goal,
+    processSummary: params.processSummary,
+    resultSummary: params.resultSummary,
+    recordedAt: startedAt,
+    source: "start_harness_session",
+  });
+  session.events.push(createStartEvent(startedAt, governanceArtifact, startTaskTrace));
   appendPhaseUpdate(
     workspacePath,
     governanceArtifact,
     "planner",
     "complete",
     "Governance opened and the runtime session advanced to Plan 1.",
-    [planArtifact ?? ""]
+    [planArtifact ?? ""],
+    startTaskTrace
   );
+  appendHarnessDashboardLedgerEvent({
+    workspacePath,
+    eventType: "harness.session.started",
+    sourceTool: "start_harness_session",
+    session,
+    payload: {
+      sessionId,
+      chunkId,
+      requestRecord,
+      taskTrace: startTaskTrace,
+      artifactPaths: session.artifacts,
+    },
+    idempotencyKey: `harness-session-start:${sessionId}`,
+    recordedAt: startedAt,
+  });
 
   const shouldQueue =
     activeSession != null && activeSession.session.status !== "closed";
@@ -5370,6 +5907,83 @@ function moveToPhase(
   return nextPhase;
 }
 
+function normalizeReviewTextList(values: string[] | undefined): string[] {
+  return (values ?? [])
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+}
+
+function shouldRecordEvaluationLoopEntry(
+  phaseId: HarnessPhaseId,
+  params: AdvanceHarnessSessionParams
+): boolean {
+  return (
+    phaseId.startsWith("review-") ||
+    phaseId === "independent-evaluation" ||
+    phaseId === "verification" ||
+    phaseId === "remediation" ||
+    params.action === "request_changes" ||
+    (params.reviewVerdict?.trim().length ?? 0) > 0 ||
+    normalizeReviewTextList(params.findings).length > 0 ||
+    normalizeReviewTextList(params.requiredFixes).length > 0 ||
+    normalizeReviewTextList(params.verificationEvidence).length > 0
+  );
+}
+
+function recordEvaluationLoopEntry(
+  session: HarnessRuntimeSessionState,
+  params: AdvanceHarnessSessionParams,
+  phaseId: HarnessPhaseId,
+  changedAt: string
+): void {
+  const loop = session.chunk.evaluationLoop;
+  if (loop == null || !shouldRecordEvaluationLoopEntry(phaseId, params)) {
+    return;
+  }
+
+  const findings = normalizeReviewTextList(params.findings);
+  const requiredFixes = normalizeReviewTextList(params.requiredFixes);
+  const verificationEvidence = normalizeReviewTextList(params.verificationEvidence);
+  const verdict =
+    params.reviewVerdict?.trim() ||
+    (params.action === "request_changes"
+      ? "negative-review-changes-required"
+      : params.action === "complete"
+        ? "accepted-for-next-phase"
+        : params.action);
+  const improvementAction =
+    params.nextStep?.trim() ||
+    (requiredFixes.length > 0
+      ? requiredFixes.join("; ")
+      : params.action === "request_changes"
+        ? "Remediate required fixes, then re-run independent review and verification."
+        : "Record verification evidence and continue the governed loop.");
+
+  loop.iteration += 1;
+  loop.status =
+    params.action === "block"
+      ? "blocked"
+      : params.action === "request_changes"
+        ? "running"
+        : phaseId === "verification" && params.action === "complete"
+          ? "passed"
+          : "running";
+  loop.history.push({
+    at: changedAt,
+    actor: params.actorRole,
+    verdict,
+    phase: phaseId,
+    action: params.action,
+    findings,
+    requiredFixes,
+    verificationEvidence,
+    improvementAction,
+    residualRisk: params.residualRisk?.trim() || null,
+    scoreBefore: Number.isFinite(params.scoreBefore) ? params.scoreBefore ?? null : null,
+    scoreAfter: Number.isFinite(params.scoreAfter) ? params.scoreAfter ?? null : null,
+  });
+}
+
 function applyActionToSession(
   session: HarnessRuntimeSessionState,
   params: AdvanceHarnessSessionParams
@@ -5396,6 +6010,7 @@ function applyActionToSession(
   const changedAt = nowIso();
   session.session.updatedAt = changedAt;
   currentPhase.lastNote = params.note;
+  recordEvaluationLoopEntry(session, params, currentPhase.id, changedAt);
 
   switch (params.action) {
     case "block":
@@ -5575,6 +6190,15 @@ export function advanceHarnessSession(
   const session = loadSession(params.workspacePath, sessionId);
   const currentPhaseBefore = activePhaseRecord(session);
   const transition = applyActionToSession(session, safeParams);
+  const requestRecord = getSessionRequestRecord(session);
+  const taskTrace = requireTaskTrace({
+    originalRequest: params.originalRequest,
+    fallbackOriginalRequest: requestRecord.originalRequest,
+    processSummary: params.processSummary,
+    resultSummary: params.resultSummary,
+    recordedAt: session.session.updatedAt,
+    source: "advance_harness_session",
+  });
 
   const currentArtifactPath =
     currentPhaseBefore?.artifactPath ??
@@ -5586,7 +6210,8 @@ export function advanceHarnessSession(
       params.actorRole,
       params.action,
       params.note,
-      artifactPaths
+      artifactPaths,
+      taskTrace
     );
   }
 
@@ -5617,6 +6242,31 @@ export function advanceHarnessSession(
     outcome: transition.outcome,
     note: params.note,
     artifactPaths: eventArtifactPaths,
+    taskTrace,
+  });
+  appendHarnessDashboardLedgerEvent({
+    workspacePath: params.workspacePath,
+    eventType: "harness.session.advanced",
+    sourceTool: "advance_harness_session",
+    session,
+    payload: {
+      sessionId,
+      phase: transition.currentPhase.id,
+      action: params.action,
+      outcome: transition.outcome,
+      note: params.note,
+      taskTrace,
+      artifactPaths: eventArtifactPaths,
+      reviewVerdict: params.reviewVerdict ?? null,
+      findings: normalizeReviewTextList(params.findings),
+      requiredFixes: normalizeReviewTextList(params.requiredFixes),
+      verificationEvidence: normalizeReviewTextList(params.verificationEvidence),
+      scoreBefore: params.scoreBefore ?? null,
+      scoreAfter: params.scoreAfter ?? null,
+    },
+    causationId: session.events[session.events.length - 2]?.id ?? null,
+    idempotencyKey: `harness-session-advance:${sessionId}:${session.events.length}:${params.action}`,
+    recordedAt: session.session.updatedAt,
   });
   session.notes.lastOutcome = transition.outcome;
   let saveResult;
@@ -5728,6 +6378,159 @@ export function getHarnessSessionStatus(
       "",
       buildRoleBrief(session),
     ].join("\n"),
+  };
+}
+
+function resolveSessionLeaseStatus(
+  runtimeIndex: HarnessSessionIndex,
+  sessionId: string
+): HarnessLeaseStatus {
+  if (runtimeIndex.activeSessionId === sessionId) {
+    return "active";
+  }
+  if (runtimeIndex.queuedSessionIds.includes(sessionId)) {
+    return "queued";
+  }
+  return "inactive";
+}
+
+function eventWithTrace(
+  event: HarnessRuntimeEvent,
+  requestRecord: HarnessRuntimeSessionState["requestRecord"]
+): HarnessRuntimeEvent {
+  return {
+    ...event,
+    taskTrace:
+      event.taskTrace ??
+      buildTaskTrace({
+        fallbackOriginalRequest: requestRecord.originalRequest,
+        fallbackProcessSummary: event.note,
+        fallbackResultSummary: event.outcome,
+        recordedAt: event.at,
+        source: "legacy-event-fallback",
+      }),
+  };
+}
+
+export function listHarnessSessions(
+  workspacePath: string,
+  filter: "all" | "open" | "active" | "queued" | "blocked" | "closed" = "all"
+): HarnessSessionListResult {
+  const runtimeIndex = loadRuntimeIndex(workspacePath);
+  const sessions = runtimeIndex.sessions
+    .map((entry) => {
+      const session = loadSession(workspacePath, entry.id);
+      const requestRecord = getSessionRequestRecord(session);
+      const leaseStatus = resolveSessionLeaseStatus(runtimeIndex, entry.id);
+      const loop = session.chunk.evaluationLoop;
+      return {
+        id: session.session.id,
+        title: session.session.title,
+        status: session.session.status,
+        leaseStatus,
+        currentPhase: session.session.currentPhase,
+        nextActor: session.session.nextActor,
+        chunkId: session.chunk.id,
+        updatedAt: session.session.updatedAt,
+        originalRequest: requestRecord.originalRequest,
+        eventCount: session.events.length,
+        evaluationIteration: loop?.iteration ?? 0,
+        evaluationStatus: loop?.status ?? "not-started",
+        lastOutcome: session.notes.lastOutcome,
+        nextAction: session.notes.current,
+        sessionPath: entry.sessionPath,
+        summaryPath: entry.summaryPath,
+      };
+    })
+    .filter((session) => {
+      switch (filter) {
+        case "open":
+          return session.status !== "closed";
+        case "active":
+          return session.leaseStatus === "active";
+        case "queued":
+          return session.leaseStatus === "queued";
+        case "blocked":
+          return session.status === "blocked";
+        case "closed":
+          return session.status === "closed";
+        case "all":
+          return true;
+      }
+    });
+
+  return {
+    activeSessionId: runtimeIndex.activeSessionId,
+    queueDepth: runtimeIndex.queuedSessionIds.length,
+    sessions,
+    summary: [
+      "Harness sessions:",
+      `Active lease: ${runtimeIndex.activeSessionId ?? "none"}`,
+      `Queue depth: ${runtimeIndex.queuedSessionIds.length}`,
+      `Filter: ${filter}`,
+      ...sessions.map(
+        (session) =>
+          `- ${session.id} | lease=${session.leaseStatus} | status=${session.status} | phase=${session.currentPhase} | next=${session.nextActor} | eval=${session.evaluationStatus}/${session.evaluationIteration} | events=${session.eventCount}\n  - Request: ${session.originalRequest}\n  - Next: ${session.nextAction}\n  - State: ${session.sessionPath}`
+      ),
+      sessions.length === 0 ? "- none" : "",
+    ]
+      .filter((line) => line.length > 0)
+      .join("\n"),
+  };
+}
+
+export function getHarnessSessionLog(
+  workspacePath: string,
+  requestedSessionId?: string,
+  limit = 20
+): HarnessSessionLogResult {
+  const sessionId = resolveSessionId(workspacePath, requestedSessionId);
+  const session = loadSession(workspacePath, sessionId);
+  const requestRecord = getSessionRequestRecord(session);
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const events = session.events
+    .slice(-safeLimit)
+    .map((event) => eventWithTrace(event, requestRecord));
+  const evaluationHistory =
+    session.chunk.evaluationLoop?.history.slice(-safeLimit) ?? [];
+
+  return {
+    sessionId,
+    events,
+    evaluationHistory,
+    summary: [
+      `Harness session log: ${sessionId}`,
+      `Original request: ${requestRecord.originalRequest}`,
+      `Current phase: ${session.session.currentPhase}`,
+      `Next actor: ${session.session.nextActor}`,
+      `Events returned: ${events.length}`,
+      `Evaluation records returned: ${evaluationHistory.length}`,
+      "",
+      "Recent events:",
+      ...events.map((event) =>
+        [
+          `- ${event.at} | ${event.phase} | ${event.actor} | ${event.action} | ${event.outcome}`,
+          `  - Process: ${event.taskTrace.processSummary}`,
+          `  - Result: ${event.taskTrace.resultSummary}`,
+          `  - Artifacts: ${event.artifactPaths.join(", ") || "none"}`,
+        ].join("\n")
+      ),
+      events.length === 0 ? "- none" : "",
+      "",
+      "Evaluation loop:",
+      ...evaluationHistory.map((entry) =>
+        [
+          `- ${entry.at} | ${entry.phase} | ${entry.actor} | ${entry.verdict}`,
+          `  - Findings: ${entry.findings.join("; ") || "none"}`,
+          `  - Required fixes: ${entry.requiredFixes.join("; ") || "none"}`,
+          `  - Evidence: ${entry.verificationEvidence.join("; ") || "none"}`,
+          `  - Score: ${entry.scoreBefore ?? "n/a"} -> ${entry.scoreAfter ?? "n/a"}`,
+        ].join("\n")
+      ),
+      evaluationHistory.length === 0 ? "- none" : "",
+    ]
+      .filter((line) => line.length > 0)
+      .join("\n"),
   };
 }
 
@@ -6549,6 +7352,12 @@ export function prepareHarnessExecutionBridge(
           sessionContinuityFile: HARNESS_SESSION_CONTINUITY_PATH,
           requiredInterfaceFields: [...HARNESS_REQUIRED_HANDOFF_FIELDS],
         },
+    requestRecord: isPlainObject(handoff.requestRecord)
+      ? handoff.requestRecord
+      : null,
+    taskTracePolicy: isPlainObject(handoff.taskTracePolicy)
+      ? handoff.taskTracePolicy
+      : null,
     launchCommands: {
       powershell: launchCommands.powershell.map((command) =>
         applyBridgeTemplate(command, replacements)
@@ -6702,6 +7511,10 @@ export function prepareHarnessAdapterHandoff(
     runtimeExpectations: adapter.runtimeExpectations,
     compatibility,
     packet,
+    requestRecord: packet.requestRecord ?? getSessionRequestRecord(session),
+    taskTracePolicy: packet.taskTracePolicy ?? null,
+    workingMemory: packet.workingMemory ?? null,
+    evaluationLoop: packet.evaluationLoop ?? session.chunk.evaluationLoop ?? null,
     promptBlock: buildAdapterPromptBlock(session, adapter, packet),
   };
 
@@ -6762,14 +7575,25 @@ export function recordHarnessExecutionResult(
     sessionId,
     params.bridgeId
   );
+  const recordedAt = nowIso();
+  const requestRecord = getSessionRequestRecord(session);
+  const taskTrace = requireTaskTrace({
+    originalRequest: params.originalRequest,
+    fallbackOriginalRequest: requestRecord.originalRequest,
+    processSummary: params.processSummary,
+    resultSummary: params.resultSummary,
+    recordedAt,
+    source: "record_harness_execution_result",
+  });
   ensureDir(executionPaths.bridgeDir);
   const receipt = {
     schemaVersion: "1.0.0",
-    recordedAt: nowIso(),
+    recordedAt,
     sessionId,
     bridgeId: params.bridgeId,
     outcome: params.outcome,
     summary: params.summary,
+    taskTrace,
     artifactPaths: uniqueStrings(artifactPaths),
     nextStep:
       params.nextStep?.trim() ||
@@ -6782,6 +7606,23 @@ export function recordHarnessExecutionResult(
     buildExecutionReceiptMarkdown(receipt),
     "utf-8"
   );
+  appendHarnessDashboardLedgerEvent({
+    workspacePath: params.workspacePath,
+    eventType: "harness.execution.receipt.recorded",
+    sourceTool: "record_harness_execution_result",
+    session,
+    payload: {
+      sessionId,
+      bridgeId: params.bridgeId,
+      outcome: params.outcome,
+      summary: params.summary,
+      taskTrace,
+      artifactPaths: uniqueStrings(artifactPaths),
+      nextStep: receipt.nextStep,
+    },
+    idempotencyKey: `harness-execution-receipt:${sessionId}:${params.bridgeId}:${recordedAt}`,
+    recordedAt,
+  });
 
   syncDashboardExecutionReceipt(
     params.workspacePath,
