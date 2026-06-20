@@ -1892,6 +1892,144 @@ export function validateDashboardStateShape(
     }
   }
 
+  const agentTaskQueues = requireObject(
+    errors,
+    "dashboardState.agentTaskQueues",
+    root.agentTaskQueues
+  );
+  if (agentTaskQueues != null) {
+    for (const field of ["waiting", "inProgress", "completed", "blocked"]) {
+      requireStringArrayField(errors, "dashboardState.agentTaskQueues", agentTaskQueues, field);
+    }
+    if (agentTaskQueues.hiddenFromUserTaskBoard != null) {
+      requireStringArrayField(
+        errors,
+        "dashboardState.agentTaskQueues",
+        agentTaskQueues,
+        "hiddenFromUserTaskBoard"
+      );
+    }
+    const maintenance = requireArray(
+      errors,
+      "dashboardState.agentTaskQueues.maintenance",
+      agentTaskQueues.maintenance
+    );
+    if (maintenance != null) {
+      for (const [index, item] of maintenance.entries()) {
+        const maintenanceTask = requireObject(
+          errors,
+          `dashboardState.agentTaskQueues.maintenance[${index}]`,
+          item
+        );
+        if (maintenanceTask == null) {
+          continue;
+        }
+        requireStringField(errors, `dashboardState.agentTaskQueues.maintenance[${index}]`, maintenanceTask, "id");
+        requireStringField(errors, `dashboardState.agentTaskQueues.maintenance[${index}]`, maintenanceTask, "status");
+        requireStringField(errors, `dashboardState.agentTaskQueues.maintenance[${index}]`, maintenanceTask, "title");
+        requireStringField(errors, `dashboardState.agentTaskQueues.maintenance[${index}]`, maintenanceTask, "owner");
+        requireStringField(errors, `dashboardState.agentTaskQueues.maintenance[${index}]`, maintenanceTask, "queueVisibility");
+      }
+    }
+  }
+
+  const userTaskBoard = requireObject(
+    errors,
+    "dashboardState.userTaskBoard",
+    root.userTaskBoard
+  );
+  if (userTaskBoard != null) {
+    for (const field of ["current", "remaining", "completed", "hiddenAgentTaskIds"]) {
+      requireStringArrayField(errors, "dashboardState.userTaskBoard", userTaskBoard, field);
+    }
+    for (const field of ["blocked", "needsUser"]) {
+      if (userTaskBoard[field] != null) {
+        requireStringArrayField(errors, "dashboardState.userTaskBoard", userTaskBoard, field);
+      }
+    }
+  }
+  if (taskQueues != null && userTaskBoard != null) {
+    const readArray = (value: unknown) =>
+      Array.isArray(value) ? value.filter((item): item is string => isString(item)) : [];
+    const agentHiddenIds = agentTaskQueues == null
+      ? []
+      : [
+          ...readArray(agentTaskQueues.hiddenFromUserTaskBoard),
+          ...readArray(agentTaskQueues.waiting),
+          ...readArray(agentTaskQueues.inProgress),
+          ...readArray(agentTaskQueues.completed),
+          ...readArray(agentTaskQueues.blocked),
+        ];
+    const userHiddenIds = readArray(userTaskBoard.hiddenAgentTaskIds);
+    const hiddenAgentIds = new Set([
+      ...userHiddenIds,
+      ...agentHiddenIds,
+      "task-bootstrap-refresh-projections",
+      "session-0001",
+    ].map((item) => String(item)));
+    const userHiddenSet = new Set(userHiddenIds.map((item) => String(item)));
+    for (const taskId of agentHiddenIds) {
+      if (!userHiddenSet.has(String(taskId))) {
+        errors.push(
+          `dashboardState.userTaskBoard.hiddenAgentTaskIds is missing agent-only task "${taskId}"`
+        );
+      }
+    }
+    const idEntries = (items: unknown[]): string[] =>
+      items.map((item) => isPlainObject(item) ? String(item.id || "") : String(item || ""));
+    const publicSurfaces: Array<[string, string[]]> = [
+      [
+        "dashboardState.taskQueues",
+        ["waiting", "inProgress", "completed", "blocked", "needsUser"]
+          .flatMap((field) => readArray(taskQueues[field]).map((item) => String(item))),
+      ],
+      [
+        "dashboardState.userTaskBoard",
+        ["current", "remaining", "completed", "blocked", "needsUser"]
+          .flatMap((field) => readArray(userTaskBoard[field]).map((item) => String(item))),
+      ],
+      [
+        "dashboardState.agile.backlog",
+        idEntries(
+          isPlainObject(root.agile) && Array.isArray(root.agile.backlog)
+            ? root.agile.backlog
+            : []
+        ),
+      ],
+      [
+        "dashboardState.agileCadence.backlog",
+        idEntries(
+          isPlainObject(root.agileCadence) && Array.isArray(root.agileCadence.backlog)
+            ? root.agileCadence.backlog
+            : []
+        ),
+      ],
+      [
+        "dashboardState.workTimeline.items",
+        idEntries(
+          isPlainObject(root.workTimeline) && Array.isArray(root.workTimeline.items)
+            ? root.workTimeline.items
+            : []
+        ),
+      ],
+      [
+        "dashboardState.workReadinessMap.rows",
+        idEntries(
+          isPlainObject(root.workReadinessMap) && Array.isArray(root.workReadinessMap.rows)
+            ? root.workReadinessMap.rows
+            : []
+        ),
+      ],
+    ];
+    for (const [surfacePath, ids] of publicSurfaces) {
+      for (const id of ids) {
+        if (hiddenAgentIds.has(id)) {
+          errors.push(`${surfacePath} must not expose agent-only task "${id}"`);
+        }
+      }
+    }
+  }
+
   const claimEvidenceMatrix = requireObject(
     errors,
     "dashboardState.claimEvidenceMatrix",

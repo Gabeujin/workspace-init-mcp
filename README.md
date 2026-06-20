@@ -5,7 +5,7 @@
 
 `workspace-init-mcp` installs a non-destructive AI Work Harness that lets humans and agents plan, resume, verify, and hand off project work from durable evidence instead of chat history.
 
-Version `4.6.3` makes the harness more domain-independent and more durable across models by adding state-externalizing working-memory contracts, extensible domain stress profiles, and a persisted work-review-improve loop. The dashboard remains a single-file HTML Project World Model backed by JSONL events, JSON projections, a read-only local API, stakeholder-friendly interactive views, and evidence gates, but 4.6.3 shifts the default posture from service-specific reporting to a reusable world-model harness for software, learning, research, operations, and other governed work.
+Version `4.6.4` separates user-facing project work from AI-Agent-only dashboard maintenance. The dashboard now keeps current, remaining, and completed user tasks clean while moving projection refresh, listener, indexing, and bootstrap chores into explicit agent maintenance queues. It also keeps the domain-independent, model-durable world-model harness from 4.6.x: state-externalizing working-memory contracts, extensible domain stress profiles, and a persisted work-review-improve loop.
 
 ---
 
@@ -30,7 +30,7 @@ The harness is designed for both new services and existing projects that already
 
 ---
 
-## 4.6.3 Highlights
+## 4.6.4 Highlights
 
 ### Stateful Cognitive Offloading
 
@@ -89,7 +89,9 @@ The generated state now promotes three project-agnostic continuity contracts:
 The generated HTML dashboard includes:
 
 - Executive Overview landing view.
-- Work tab with an operational command queue, open work, progress, blockers, and timeline views.
+- Work tab with a user task board for current, remaining, and completed work.
+- Agent-only maintenance queues for dashboard refresh, projection, listener, and indexing chores.
+- Operational progress, blockers, and timeline views built from user-visible work only.
 - Evidence tab for claim-to-proof traceability.
 - Governance tab for decisions, gates, retros, and platform intake.
 - System and Tech Stack views for runtime, listener, architecture, infrastructure, and integration surfaces.
@@ -102,7 +104,7 @@ UI work follows current Chrome/Google I/O modern web guidance as progressive enh
 
 ### Domain Stress And Briefing Packs
 
-4.6.3 keeps the built-in service profiles and adds custom profile support so the harness can fit a web application, learning plan, research corpus, documentation program, or other governed domain without hard-coding the world around commerce or release work.
+4.6.4 keeps the built-in service profiles and adds custom profile support so the harness can fit a web application, learning plan, research corpus, documentation program, or other governed domain without hard-coding the world around commerce or release work.
 
 - `identity-commerce-operations`: credential/auth, payment, refund, fulfillment, and operational evidence gates.
 - `legacy-modernization-governance`: AS-IS/TO-BE mapping, migration, rollback, ownership, and compatibility evidence gates.
@@ -274,6 +276,7 @@ The listener exposes read-only routes under:
 /api/harness-dashboard/v1/snapshot
 /api/harness-dashboard/v1/index
 /api/harness-dashboard/v1/tasks
+/api/harness-dashboard/v1/agent-tasks
 /api/harness-dashboard/v1/sessions
 /api/harness-dashboard/v1/dictionary
 /api/harness-dashboard/v1/version-control
@@ -285,6 +288,7 @@ The listener exposes read-only routes under:
 ```
 
 Every response includes API version, schema version, workspace identity, projection version, ledger offset, generated time, capabilities, and `readOnly: true`.
+Use `x-harness-dashboard-token` or Bearer auth for REST routes. Query-string tokens are reserved for the SSE `events` route because browser `EventSource` cannot send custom headers.
 
 ---
 
@@ -356,7 +360,7 @@ Main MCP tools include:
 
 ## Quality And Safety Baseline
 
-Version `4.6.3` includes these guardrails:
+Version `4.6.4` includes these guardrails:
 
 - Absolute `workspacePath` enforcement.
 - Non-destructive adoption for legacy projects.
@@ -420,10 +424,13 @@ npm pack --dry-run
 
 ---
 
-## 4.6.3 Release Notes
+## 4.6.4 Release Notes
 
 Major changes:
 
+- Split user task management from AI-Agent-only dashboard maintenance so generated bootstrap chores no longer appear as stakeholder waiting or blocked work.
+- Added `userTaskBoard` and `agentTaskQueues` state contracts, validation gates, reconcile cleanup, public `/tasks`, and explicit `/agent-tasks` listener routes.
+- Filtered stakeholder reports, work KPIs, Gantt/status lanes, and slide decks so internal projection refresh tasks cannot become visible open work or "now doing" items.
 - Added Harness-1-inspired stateful cognitive offloading contracts for prompt-facing working memory and durable outer stores.
 - Persisted negative review and improvement receipts in runtime session state, work packets, and adapter handoffs.
 - Made `domainStressProfile` extensible instead of a closed enum; custom IDs or labels now produce generic evidence gates and operations projections.

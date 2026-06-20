@@ -170,7 +170,7 @@ async function terminateProcess(childProcess) {
 }
 
 async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
-  await new Promise((resolve, reject) => {
+  return await new Promise((resolve, reject) => {
     const request = http.get(endpoint);
     const timer = setTimeout(() => {
       request.destroy();
@@ -180,10 +180,11 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     request.on("response", (response) => {
       response.setEncoding("utf-8");
       response.on("data", (chunk) => {
-        if (String(chunk).includes(`event: ${eventName}`)) {
+        const text = String(chunk);
+        if (text.includes(`event: ${eventName}`)) {
           clearTimeout(timer);
           request.destroy();
-          resolve();
+          resolve(text);
         }
       });
     });
@@ -267,7 +268,7 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.equal(state.listener.readOnly, true);
   assert.equal(state.embeddingProjection.policy.blockedByDefault.includes("secret"), true);
   assert.ok(Array.isArray(state.workTimeline.items));
-  assert.equal(state.workTimeline.items[0].kpiTags.includes("world-model-completeness"), true);
+  assert.deepEqual(state.workTimeline.items, []);
   assert.equal(state.worldJudgment.status, "bootstrap-not-ready-for-operational-judgment");
   assert.ok(Array.isArray(state.criticalSignals));
   assert.ok(Array.isArray(state.claimEvidenceMatrix.claims));
@@ -312,8 +313,15 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(Array.isArray(state.projectEvidenceInventory.sources));
   assert.ok(state.valueHierarchy.values.some((item) => item.id === "value-user-outcome"));
   assert.ok(state.claimEvidenceMatrix.claims.some((claim) => claim.claimId === "claim.data.integrity"));
-  assert.deepEqual(state.taskQueues.waiting, ["task-bootstrap-refresh-projections"]);
+  assert.deepEqual(state.taskQueues.waiting, []);
   assert.deepEqual(state.taskQueues.blocked, []);
+  assert.ok(state.agentTaskQueues.waiting.includes("task-bootstrap-refresh-projections"));
+  assert.ok(state.agentTaskQueues.hiddenFromUserTaskBoard.includes("task-bootstrap-refresh-projections"));
+  assert.ok(state.agentTaskQueues.maintenance.some((item) => item.id === "task-bootstrap-refresh-projections" && item.queueVisibility === "agent-only"));
+  assert.deepEqual(state.userTaskBoard.current, []);
+  assert.deepEqual(state.userTaskBoard.remaining, []);
+  assert.deepEqual(state.userTaskBoard.completed, []);
+  assert.ok(state.userTaskBoard.hiddenAgentTaskIds.includes("task-bootstrap-refresh-projections"));
   assert.equal(state.taskQueues.needsUser.includes("decision-agent-platform-selection"), false);
   assert.equal(state.claimEvidenceMatrix.missingEvidenceItems.find((item) => item.id === "missing.database-readiness").blocksClaimIds.includes("claim.service.operational-readiness"), false);
   assert.equal(state.kpis.some((kpi) => kpi.id === "commerce-payment-integrity"), false);
@@ -322,8 +330,14 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.equal(state.domainOperations.status, "no-active-domain-stress-profile");
   const baselineTaskIds = new Set([
     ...state.agile.backlog.map((item) => item.id),
+    ...state.agileCadence.backlog.map((item) => item.id),
     ...state.workTimeline.items.map((item) => item.id),
+    ...state.workReadinessMap.rows.map((item) => item.id),
+    ...state.userTaskBoard.current,
+    ...state.userTaskBoard.remaining,
+    ...state.userTaskBoard.completed,
   ]);
+  assert.equal(baselineTaskIds.has("task-bootstrap-refresh-projections"), false);
   assert.equal(baselineTaskIds.has("task-confirm-agent-platforms"), false);
   assert.equal(baselineTaskIds.has("task-map-deployment-target"), false);
   assert.equal(baselineTaskIds.has("task-map-data-readiness"), false);
@@ -379,6 +393,11 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(html, /renderMaintainerHealthBoard/);
   assert.match(html, /Current Judgment Console/);
   assert.match(html, /Reality And Goal Compass/);
+  assert.match(html, /Reality & Next Actions Hub/);
+  assert.match(html, /renderRealityNextActionsHub/);
+  assert.match(html, /hubPrimaryNextActions/);
+  assert.match(html, /api-route-list/);
+  assert.match(html, /data-jump-tab="view-evidence"/);
   assert.match(html, /Current Reality/);
   assert.match(html, /Goal State/);
   assert.match(html, /Top 3 Gaps/);
@@ -398,6 +417,10 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(html, /data-platform-submit/);
   assert.match(html, /record-agent-platforms/);
   assert.match(html, /Open Work/);
+  assert.match(html, /User Task Board/);
+  assert.match(html, /Agent Maintenance Tasks/);
+  assert.match(html, /renderUserTaskBoard/);
+  assert.match(html, /renderAgentMaintenanceTasks/);
   assert.match(html, /Operational Command Queue/);
   assert.match(html, /Status lanes/);
   assert.match(html, /readiness map/);
@@ -588,6 +611,40 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   validation = validateDashboardStateShape(invalidPassBelowThreshold);
   assert.equal(validation.valid, false);
   assert.ok(validation.errors.some((error) => /score must meet thresholdScore/.test(error)));
+
+  const hiddenTaskInPublicSurfaces = JSON.parse(JSON.stringify(state));
+  const hiddenTask = {
+    id: "task-bootstrap-refresh-projections",
+    status: "waiting",
+    title: "Verify and refresh dashboard projections",
+    owner: "harness-dashboard-operator",
+    queueVisibility: "agent-only",
+    evidenceRefs: ["event-000001-bootstrap"],
+  };
+  hiddenTaskInPublicSurfaces.taskQueues.waiting.push(hiddenTask.id);
+  hiddenTaskInPublicSurfaces.userTaskBoard.remaining.push(hiddenTask.id);
+  hiddenTaskInPublicSurfaces.agile.backlog.push(hiddenTask);
+  hiddenTaskInPublicSurfaces.agileCadence.backlog.push(hiddenTask);
+  hiddenTaskInPublicSurfaces.workTimeline.items.push(hiddenTask);
+  hiddenTaskInPublicSurfaces.workReadinessMap.rows.push(hiddenTask);
+  validation = validateDashboardStateShape(hiddenTaskInPublicSurfaces);
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.some((error) => /agent-only task "task-bootstrap-refresh-projections"/.test(error)));
+
+  const agentOwnedUserWork = JSON.parse(JSON.stringify(state));
+  const agentOwnedTask = {
+    id: "task-agent-owned-project-work",
+    status: "waiting",
+    title: "Agent-owned real project work",
+    owner: "ai-agent",
+    audience: "agent",
+    evidenceRefs: ["user-evidence"],
+  };
+  agentOwnedUserWork.taskQueues.waiting.push(agentOwnedTask.id);
+  agentOwnedUserWork.userTaskBoard.remaining.push(agentOwnedTask.id);
+  agentOwnedUserWork.workTimeline.items.push(agentOwnedTask);
+  validation = validateDashboardStateShape(agentOwnedUserWork);
+  assert.equal(validation.valid, true, validation.errors.join("\n"));
 }
 
 {
@@ -612,6 +669,29 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(byPath.get("server-flow-dashboard/README.md").content, /Network traffic flow/);
   assert.match(byPath.get("docs/server-flow-monitoring-dashboard.md").content, /Modern UI Rule/);
   assert.doesNotMatch(byPath.get("server-flow-dashboard/README.md").content, /agent governance state/i);
+}
+
+{
+  const { root } = generateWorkspace();
+  const statePath = path.join(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  const state = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  const hiddenTask = {
+    id: "task-bootstrap-refresh-projections",
+    status: "waiting",
+    title: "Verify and refresh dashboard projections",
+    owner: "harness-dashboard-operator",
+    queueVisibility: "agent-only",
+    evidenceRefs: ["event-000001-bootstrap"],
+  };
+  state.taskQueues.waiting.push(hiddenTask.id);
+  state.workTimeline.items.push(hiddenTask);
+  state.workReadinessMap.rows.push(hiddenTask);
+  state.agile.backlog.push(hiddenTask);
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + "\n", "utf-8");
+  const scriptPath = path.join(root, "docs/ai-harness/dashboard/scripts/dashboard-ops.mjs");
+  const validateResult = runNode([scriptPath, "validate"], { cwd: root });
+  assert.notEqual(validateResult.status, 0);
+  assert.match(validateResult.stderr + validateResult.stdout, /agent-only task/);
 }
 
 {
@@ -929,6 +1009,16 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   const { root } = generateWorkspace();
   const statePath = path.join(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
   const noisy = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  const bootstrapMaintenanceTask = {
+    id: "task-bootstrap-refresh-projections",
+    status: "waiting",
+    title: "Verify and refresh dashboard projections",
+    owner: "harness-dashboard-operator",
+    evidenceRefs: ["event-000001-bootstrap"],
+    blocksClaimIds: ["claim.world-model.bootstrap"],
+    exitCriteria: "verify-projections and refresh complete without stale/corrupt projection warnings",
+  };
+  noisy.taskQueues.waiting.push("task-bootstrap-refresh-projections");
   noisy.taskQueues.waiting.push("task-confirm-agent-platforms");
   noisy.taskQueues.blocked.push(
     "task-collect-service-health",
@@ -936,6 +1026,12 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     "task-map-data-readiness"
   );
   noisy.taskQueues.needsUser.push("decision-agent-platform-selection");
+  noisy.agile.backlog.push({
+    ...bootstrapMaintenanceTask,
+  });
+  noisy.agileCadence.backlog.push({
+    ...bootstrapMaintenanceTask,
+  });
   noisy.agile.backlog.push({
     id: "task-map-data-readiness",
     status: "blocked",
@@ -951,6 +1047,14 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     evidenceRefs: ["user-evidence-vcs-link"],
   });
   noisy.workTimeline.items.push({
+    ...bootstrapMaintenanceTask,
+    lane: "Harness Bootstrap",
+  });
+  noisy.workReadinessMap.rows.push({
+    ...bootstrapMaintenanceTask,
+  });
+  noisy.userTaskBoard.remaining.push("task-bootstrap-refresh-projections");
+  noisy.workTimeline.items.push({
     id: "task-map-deployment-target",
     status: "blocked",
     title: "Legacy noisy deployment task",
@@ -960,6 +1064,7 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     id: "task-collect-service-health",
     status: "in-progress",
     title: "User-preserved health task",
+    owner: "maintainer",
     evidenceRefs: ["user-service-health-evidence"],
   });
   noisy.claimEvidenceMatrix.claims.push({
@@ -968,6 +1073,10 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   });
   noisy.claimEvidenceMatrix.missingEvidenceItems.push({
     id: "legacy-vcs-gap",
+    label: "Legacy VCS gap",
+    blocksClaimIds: ["claim.vcs.history-linked"],
+    requiredEvidenceType: "linked VCS evidence",
+    owner: "maintainer",
     resolutionTaskId: "task-link-vcs-records",
     nextActionRef: "task-map-data-readiness",
   });
@@ -1008,6 +1117,7 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     ...cleaned.workTimeline.items.map((item) => item.id),
     ...cleaned.workReadinessMap.rows.map((item) => item.id),
   ]);
+  assert.equal(cleanedTaskIds.has("task-bootstrap-refresh-projections"), false);
   assert.equal(cleanedTaskIds.has("task-confirm-agent-platforms"), false);
   assert.equal(cleanedTaskIds.has("task-map-deployment-target"), false);
   assert.equal(cleanedTaskIds.has("task-map-data-readiness"), false);
@@ -1024,6 +1134,13 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.equal(cleaned.claimEvidenceMatrix.claims.some((claim) => claim.claimId === "claim.data.integrity"), true);
   assert.equal(cleaned.claimEvidenceMatrix.claims.some((claim) => claim.claimId === "claim.data.save-integrity"), false);
   assert.equal(cleaned.agentResumeBrief.openDecisions.includes("decision-agent-platform-selection"), false);
+  assert.ok(cleaned.agentTaskQueues.waiting.includes("task-bootstrap-refresh-projections"));
+  assert.ok(cleaned.agentTaskQueues.hiddenFromUserTaskBoard.includes("task-bootstrap-refresh-projections"));
+  assert.ok(cleaned.userTaskBoard.hiddenAgentTaskIds.includes("task-bootstrap-refresh-projections"));
+  assert.equal(
+    validateDashboardStateShape(cleaned).valid,
+    true
+  );
 }
 
 {
@@ -1692,6 +1809,91 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
 
 {
   const { root } = generateWorkspace();
+  const statePath = path.join(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  const state = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  const maintenanceTask = (state.agentTaskQueues?.maintenance || []).find((item) => item && item.id === "task-bootstrap-refresh-projections");
+  const bootstrapTask = maintenanceTask ? {
+    id: maintenanceTask.id || "task-bootstrap-refresh-projections",
+    title: maintenanceTask.title || "Verify and refresh dashboard projections",
+    status: maintenanceTask.status || "waiting",
+    owner: maintenanceTask.owner || "harness-dashboard-operator",
+    lane: maintenanceTask.lane || "agent-maintenance",
+    queueVisibility: maintenanceTask.queueVisibility || "agent-only",
+    evidenceRefs: maintenanceTask.evidenceRefs || ["event-000001-bootstrap"],
+    blockingClaimIds: maintenanceTask.blockingClaimIds ? [...maintenanceTask.blockingClaimIds] : [],
+    nextActionRef: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+  } : {
+    id: "task-bootstrap-refresh-projections",
+    status: "waiting",
+    title: "Verify and refresh dashboard projections",
+    owner: "harness-dashboard-operator",
+    lane: "agent-maintenance",
+    queueVisibility: "agent-only",
+    evidenceRefs: ["event-000001-bootstrap"],
+    blockingClaimIds: ["claim.world-model.bootstrap"],
+    nextActionRef: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+  };
+  const sessionTask = {
+    id: "session-0001",
+    status: "running",
+    title: "Bootstrap projection maintenance session",
+    lane: "agent-maintenance",
+    owner: "harness-dashboard-operator",
+    queueVisibility: "agent-only",
+    evidenceRefs: ["event-000001-bootstrap"],
+    blockingClaimIds: [],
+    nextActionRef: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+  };
+  state.taskQueues.waiting = Array.from(new Set([...(Array.isArray(state.taskQueues?.waiting) ? state.taskQueues.waiting : []), bootstrapTask.id, sessionTask.id]));
+  state.userTaskBoard.remaining = Array.from(new Set([...(Array.isArray(state.userTaskBoard?.remaining) ? state.userTaskBoard.remaining : []), bootstrapTask.id, sessionTask.id]));
+  state.governedSessions = state.governedSessions || [];
+  if (!state.governedSessions.some((session) => session && session.id === sessionTask.id)) {
+    state.governedSessions.push(sessionTask);
+  }
+  state.agile = state.agile || {};
+  state.agile.backlog = state.agile.backlog || [];
+  state.agileCadence = state.agileCadence || {};
+  state.agileCadence.backlog = state.agileCadence.backlog || [];
+  state.workTimeline = state.workTimeline || {};
+  state.workTimeline.items = state.workTimeline.items || [];
+  state.workReadinessMap = state.workReadinessMap || {};
+  state.workReadinessMap.rows = state.workReadinessMap.rows || [];
+  state.sessionLog = state.sessionLog || [];
+  const hasTask = (items, id) => Array.isArray(items) && items.some((item) => String((item || {}).id || item || "") === id);
+  if (!hasTask(state.agile.backlog, bootstrapTask.id)) {
+    state.agile.backlog.push(bootstrapTask);
+  }
+  if (!hasTask(state.agileCadence.backlog, bootstrapTask.id)) {
+    state.agileCadence.backlog.push(bootstrapTask);
+  }
+  if (!hasTask(state.workTimeline.items, bootstrapTask.id)) {
+    state.workTimeline.items.push(bootstrapTask);
+  }
+  if (!hasTask(state.workReadinessMap.rows, bootstrapTask.id)) {
+    state.workReadinessMap.rows.push(bootstrapTask);
+  }
+  if (!hasTask(state.sessionLog, bootstrapTask.id)) {
+    state.sessionLog.push(bootstrapTask);
+  }
+  if (!hasTask(state.agile.backlog, sessionTask.id)) {
+    state.agile.backlog.push(sessionTask);
+  }
+  if (!hasTask(state.agileCadence.backlog, sessionTask.id)) {
+    state.agileCadence.backlog.push(sessionTask);
+  }
+  if (!hasTask(state.workTimeline.items, sessionTask.id)) {
+    state.workTimeline.items.push(sessionTask);
+  }
+  if (!hasTask(state.workReadinessMap.rows, sessionTask.id)) {
+    state.workReadinessMap.rows.push(sessionTask);
+  }
+  if (!hasTask(state.sessionLog, sessionTask.id)) {
+    state.sessionLog.push(sessionTask);
+  }
+  state.agentTaskQueues = state.agentTaskQueues || {};
+  state.agentTaskQueues.waiting = Array.from(new Set([...(Array.isArray(state.agentTaskQueues.waiting) ? state.agentTaskQueues.waiting : []), sessionTask.id]));
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + "\n", "utf-8");
+
   const scriptPath = path.join(root, "docs/ai-harness/dashboard/scripts/dashboard-ops.mjs");
   const port = await getAvailablePort();
   const child = spawn(process.execPath, [scriptPath, "listen", "--port", String(port)], {
@@ -1712,40 +1914,82 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     const tokenPath = path.join(root, "docs/ai-harness/dashboard/state/api-token");
     await waitForFile(tokenPath);
     const token = fs.readFileSync(tokenPath, "utf-8").trim();
+    const authHeaders = { "x-harness-dashboard-token": token };
+    const apiUrl = (pathAndQuery) =>
+      `http://127.0.0.1:${port}/api/harness-dashboard/v1/${pathAndQuery}`;
 
-    const runtimeResponse = await fetch(
-      `http://127.0.0.1:${port}/api/harness-dashboard/v1/runtime?token=${token}`
-    );
+    const runtimeQueryTokenResponse = await fetch(apiUrl(`runtime?token=${token}`));
+    assert.equal(runtimeQueryTokenResponse.status, 401);
+
+    const runtimeResponse = await fetch(apiUrl("runtime"), { headers: authHeaders });
     assert.equal(runtimeResponse.status, 200);
     const runtime = await runtimeResponse.json();
     assert.equal(runtime.readOnly, true);
     assert.equal(runtime.apiVersion, "v1");
     assert.equal(runtime.payload.listener.status, "listening");
 
-    const rejected = await fetch(
-      `http://127.0.0.1:${port}/api/harness-dashboard/v1/runtime`
-    );
+    const rejected = await fetch(apiUrl("runtime"));
     assert.equal(rejected.status, 401);
 
-    const query = await fetch(
-      `http://127.0.0.1:${port}/api/harness-dashboard/v1/query?q=world&token=${token}`
-    ).then((response) => response.json());
+    const query = await fetch(apiUrl("query?q=world"), { headers: authHeaders }).then((response) => response.json());
     assert.equal(query.readOnly, true);
     assert.ok(query.payload.resultCount > 0);
+    const allQuery = await fetch(apiUrl("query?q=task-bootstrap-refresh-projections"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(allQuery.readOnly, true);
+    assert.equal(allQuery.payload.resultCount, 0);
+    assert.equal(allQuery.payload.results.every((item) => typeof item.text === "string" && !item.text.includes("task-bootstrap-refresh-projections")), true);
+    assert.equal(allQuery.payload.results.every((item) => typeof item.text === "string" && !item.text.includes("session-0001")), true);
 
-    const briefingResponse = await fetch(
-      `http://127.0.0.1:${port}/api/harness-dashboard/v1/briefing?token=${token}`
-    );
+    const decisionsQuery = await fetch(apiUrl("query?scope=decisions&q=redacted-local-path"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(decisionsQuery.readOnly, true);
+    assert.equal(JSON.stringify(decisionsQuery.payload).includes(root), false);
+    assert.equal(JSON.stringify(decisionsQuery.payload).includes("task-bootstrap-refresh-projections"), false);
+
+    const evidenceQuery = await fetch(apiUrl("query?scope=evidence&q=redacted-local-path"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(evidenceQuery.readOnly, true);
+    assert.equal(JSON.stringify(evidenceQuery.payload).includes(root), false);
+    assert.equal(JSON.stringify(evidenceQuery.payload).includes("task-bootstrap-refresh-projections"), false);
+
+    const tasksPayload = await fetch(apiUrl("tasks"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(tasksPayload.readOnly, true);
+    assert.equal(JSON.stringify(tasksPayload.payload).includes("task-bootstrap-refresh-projections"), false);
+    assert.equal(JSON.stringify(tasksPayload.payload).includes("Verify and refresh dashboard projections"), false);
+
+    const snapshotPayload = await fetch(apiUrl("snapshot"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(snapshotPayload.readOnly, true);
+    assert.equal(JSON.stringify(snapshotPayload.payload).includes("task-bootstrap-refresh-projections"), false);
+    assert.equal(JSON.stringify(snapshotPayload.payload).includes("session-0001"), false);
+    assert.equal(JSON.stringify(snapshotPayload.payload).includes(root), false);
+    assert.match(JSON.stringify(snapshotPayload.payload), /\[redacted-local-path\]/);
+
+    const taskQuery = await fetch(apiUrl("query?scope=tasks&q=bootstrap-refresh"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(taskQuery.readOnly, true);
+    assert.equal(taskQuery.payload.resultCount, 0);
+
+    const agentTasksPayload = await fetch(apiUrl("agent-tasks"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(agentTasksPayload.readOnly, true);
+    assert.equal(JSON.stringify(agentTasksPayload.payload).includes("task-bootstrap-refresh-projections"), true);
+    assert.equal(JSON.stringify(agentTasksPayload.payload).includes("session-0001"), true);
+
+    const sessionsPayload = await fetch(apiUrl("sessions"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(sessionsPayload.readOnly, true);
+    assert.equal(JSON.stringify(sessionsPayload.payload).includes("task-bootstrap-refresh-projections"), false);
+    assert.equal(JSON.stringify(sessionsPayload.payload).includes("session-0001"), false);
+    assert.equal(JSON.stringify(sessionsPayload.payload).includes(root), false);
+
+    const briefingResponse = await fetch(apiUrl("briefing"), { headers: authHeaders });
     assert.equal(briefingResponse.status, 200);
     const briefingPayload = await briefingResponse.json();
     assert.equal(briefingPayload.readOnly, true);
     assert.equal(briefingPayload.payload.manifest.focus, "today");
     assert.match(briefingPayload.payload.briefingMarkdown, /Harness Dashboard Briefing/);
 
-    await waitForSseEvent(
+    const snapshotEvent = await waitForSseEvent(
       `http://127.0.0.1:${port}/api/harness-dashboard/v1/events?token=${token}`,
       "harness.snapshot"
     );
+    assert.equal(snapshotEvent.includes("task-bootstrap-refresh-projections"), false);
+    assert.equal(snapshotEvent.includes("session-0001"), false);
   } finally {
     await terminateProcess(child);
   }

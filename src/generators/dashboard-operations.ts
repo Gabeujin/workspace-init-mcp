@@ -12,7 +12,7 @@ import {
 function buildDashboardOpsReadme(): string {
   return `# Harness Dashboard Operations
 
-The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6.3 Hypertext Project World Model.
+The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6.4 Hypertext Project World Model.
 It treats the JSONL event ledger as canonical, the JSON state files as disposable projections,
 and the HTML file as a portable stakeholder projection.
 
@@ -46,11 +46,13 @@ and the HTML file as a portable stakeholder projection.
 ## API
 
 The listener exposes read-only v1 routes under \`/api/harness-dashboard/v1/\`:
-\`snapshot\`, \`index\`, \`tasks\`, \`sessions\`, \`dictionary\`, \`version-control\`,
+\`snapshot\`, \`index\`, \`tasks\`, \`agent-tasks\`, \`sessions\`, \`dictionary\`, \`version-control\`,
 \`runtime\`, \`briefing\`, \`health\`, \`events\`, and deterministic \`query\`.
 
-Default protections: local token required, loopback Host/Origin only, CORS disabled,
-DNS rebinding protection, strict CSP for served HTML, and no shell/file-write/LLM calls from \`query\`.
+Default protections: local token required by \`x-harness-dashboard-token\` or Bearer auth for REST routes;
+query-string tokens are accepted only for the SSE \`events\` route because browser EventSource cannot set
+custom headers. Host/Origin must be loopback, CORS is disabled, CSP is strict for served HTML, and
+there are no shell/file-write/LLM calls from \`query\`.
 `;
 }
 
@@ -533,6 +535,62 @@ function validateState(state) {
   for (const optionalKey of ["realWorld", "failed"]) {
     if (queues[optionalKey] != null && (!Array.isArray(queues[optionalKey]) || queues[optionalKey].some((entry) => typeof entry !== "string"))) {
       errors.push("taskQueues." + optionalKey + " must contain only string ids when present");
+    }
+  }
+  const agentQueues = requireValidationObject(errors, "dashboardState.agentTaskQueues", state.agentTaskQueues) || {};
+  for (const key of ["waiting", "inProgress", "completed", "blocked"]) {
+    if (!Array.isArray(agentQueues[key])) {
+      errors.push("agentTaskQueues." + key + " must be an array");
+    } else if (agentQueues[key].some((entry) => typeof entry !== "string")) {
+      errors.push("agentTaskQueues." + key + " must contain only string ids");
+    }
+  }
+  if (agentQueues.hiddenFromUserTaskBoard != null && (!Array.isArray(agentQueues.hiddenFromUserTaskBoard) || agentQueues.hiddenFromUserTaskBoard.some((entry) => typeof entry !== "string"))) {
+    errors.push("agentTaskQueues.hiddenFromUserTaskBoard must contain only string ids when present");
+  }
+  const userTaskBoard = requireValidationObject(errors, "dashboardState.userTaskBoard", state.userTaskBoard) || {};
+  for (const key of ["current", "remaining", "completed", "hiddenAgentTaskIds"]) {
+    if (!Array.isArray(userTaskBoard[key])) {
+      errors.push("userTaskBoard." + key + " must be an array");
+    } else if (userTaskBoard[key].some((entry) => typeof entry !== "string")) {
+      errors.push("userTaskBoard." + key + " must contain only string ids");
+    }
+  }
+  for (const optionalKey of ["blocked", "needsUser"]) {
+    if (userTaskBoard[optionalKey] != null && (!Array.isArray(userTaskBoard[optionalKey]) || userTaskBoard[optionalKey].some((entry) => typeof entry !== "string"))) {
+      errors.push("userTaskBoard." + optionalKey + " must contain only string ids when present");
+    }
+  }
+  const readArray = (value) => Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
+  const agentHiddenIds = [
+    ...readArray(agentQueues.hiddenFromUserTaskBoard),
+    ...readArray(agentQueues.waiting),
+    ...readArray(agentQueues.inProgress),
+    ...readArray(agentQueues.completed),
+    ...readArray(agentQueues.blocked)
+  ];
+  const userHiddenIds = readArray(userTaskBoard.hiddenAgentTaskIds);
+  const hiddenAgentIds = new Set([...agentHiddenIds, ...userHiddenIds, "task-bootstrap-refresh-projections", "session-0001"]);
+  const userHiddenSet = new Set(userHiddenIds);
+  for (const taskId of agentHiddenIds) {
+    if (!userHiddenSet.has(taskId)) {
+      errors.push("userTaskBoard.hiddenAgentTaskIds is missing agent-only task: " + taskId);
+    }
+  }
+  const idsFromObjects = (items) => (Array.isArray(items) ? items : []).map((item) => item && typeof item === "object" ? String(item.id || "") : String(item || ""));
+  const publicSurfaces = [
+    ["taskQueues", ["waiting", "inProgress", "completed", "blocked", "needsUser"].flatMap((key) => readArray(queues[key]))],
+    ["userTaskBoard", ["current", "remaining", "completed", "blocked", "needsUser"].flatMap((key) => readArray(userTaskBoard[key]))],
+    ["agile.backlog", idsFromObjects((state.agile || {}).backlog)],
+    ["agileCadence.backlog", idsFromObjects((state.agileCadence || {}).backlog)],
+    ["workTimeline.items", idsFromObjects(((state.workTimeline || {}).items))],
+    ["workReadinessMap.rows", idsFromObjects(((state.workReadinessMap || {}).rows))]
+  ];
+  for (const [surfacePath, ids] of publicSurfaces) {
+    for (const taskId of ids) {
+      if (hiddenAgentIds.has(taskId)) {
+        errors.push(surfacePath + " must not expose agent-only task: " + taskId);
+      }
     }
   }
   const matrix = requireValidationObject(errors, "dashboardState.claimEvidenceMatrix", state.claimEvidenceMatrix) || {};
@@ -1378,6 +1436,7 @@ function handleRecordAgentPlatforms() {
 function deriveIndex(state) {
   const meta = state.meta || {};
   const queues = state.taskQueues || {};
+  const agentQueues = state.agentTaskQueues || {};
   const stakeholderBrief = state.stakeholderBrief || {};
   const agentResumeBrief = state.agentResumeBrief || {};
   const claimEvidenceMatrix = state.claimEvidenceMatrix || {};
@@ -1417,7 +1476,9 @@ function deriveIndex(state) {
       unsupportedClaimCount: claims.filter((claim) => ["missing-evidence", "contradicted", "stale"].includes(String(claim.claimStatus || ""))).length
     },
     agentContextPacks: state.agentContextPacks || {},
+    userTaskBoard: state.userTaskBoard || {},
     taskCounts: Object.fromEntries(Object.entries(queues).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0])),
+    agentTaskCounts: Object.fromEntries(Object.entries(agentQueues).filter(([, value]) => Array.isArray(value)).map(([key, value]) => [key, value.length])),
     currentGoal: stakeholderBrief.currentGoal || "",
     nextAction: agentResumeBrief.nextSafestAction || "",
     criticalRisks: Array.isArray((state.projectWorldModel || {}).risks) ? state.projectWorldModel.risks.map((risk) => risk.id || risk.summary).slice(0, 10) : [],
@@ -1426,6 +1487,7 @@ function deriveIndex(state) {
       "/api/harness-dashboard/v1/snapshot",
       "/api/harness-dashboard/v1/index",
       "/api/harness-dashboard/v1/tasks",
+      "/api/harness-dashboard/v1/agent-tasks",
       "/api/harness-dashboard/v1/sessions",
       "/api/harness-dashboard/v1/dictionary",
       "/api/harness-dashboard/v1/version-control",
@@ -1669,6 +1731,89 @@ function normalizeTimelineStatus(value) {
   return status;
 }
 
+function isAgentOnlyTaskLike(item) {
+  const id = String((item || {}).id || (item || {}).resolutionTaskId || "");
+  const visibility = String((item || {}).queueVisibility || (item || {}).audience || (item || {}).visibility || "").toLowerCase();
+  return id === "task-bootstrap-refresh-projections" ||
+    id === "session-0001" ||
+    visibility.includes("agent-only") ||
+    (item || {}).userVisible === false ||
+    (item || {}).agentOnly === true;
+}
+
+function defaultAgentMaintenanceTasks() {
+  return [{
+    id: "task-bootstrap-refresh-projections",
+    status: "waiting",
+    title: "Verify and refresh dashboard projections",
+    owner: "harness-dashboard-operator",
+    queueVisibility: "agent-only",
+    audience: "agent",
+    userVisible: false,
+    evidenceRefs: ["event-000001-bootstrap"],
+    blocksClaimIds: ["claim.world-model.bootstrap"],
+    nextActionRef: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+    exitCriteria: "Projection verification and refresh complete without stale/corrupt projection warnings."
+  }];
+}
+
+function ensureAgentTaskQueues(state) {
+  const existing = state.agentTaskQueues || {};
+  const maintenance = Array.isArray(existing.maintenance) && existing.maintenance.length > 0
+    ? existing.maintenance
+    : defaultAgentMaintenanceTasks();
+  const maintenanceIds = maintenance.map((item) => String((item || {}).id || "")).filter(Boolean);
+  const hiddenIds = Array.from(new Set([
+    ...maintenanceIds,
+    ...(Array.isArray(existing.hiddenFromUserTaskBoard) ? existing.hiddenFromUserTaskBoard : []),
+    "session-0001"
+  ]));
+  state.agentTaskQueues = Object.assign({}, existing, {
+    schemaVersion: SCHEMA_VERSION,
+    visibilityPolicy: existing.visibilityPolicy || "Agent-only dashboard maintenance tasks stay out of stakeholder task boards, reports, and presentation inputs.",
+    waiting: Array.from(new Set([...(Array.isArray(existing.waiting) ? existing.waiting : []), ...maintenanceIds])).filter((id) => id !== "session-0001"),
+    inProgress: Array.isArray(existing.inProgress) ? existing.inProgress : [],
+    completed: Array.isArray(existing.completed) ? existing.completed : [],
+    blocked: Array.isArray(existing.blocked) ? existing.blocked : [],
+    maintenance,
+    hiddenFromUserTaskBoard: hiddenIds
+  });
+  return hiddenIds;
+}
+
+function deriveUserTaskBoard(state, rows) {
+  const hiddenAgentTaskIds = ensureAgentTaskQueues(state);
+  const hidden = new Set(hiddenAgentTaskIds);
+  const visibleRows = (Array.isArray(rows) ? rows : [])
+    .filter((row) => row && !hidden.has(String(row.id || "")) && !isAgentOnlyTaskLike(row));
+  const current = [];
+  const remaining = [];
+  const completed = [];
+  const blocked = [];
+  for (const row of visibleRows) {
+    const id = String(row.id || "");
+    if (!id) continue;
+    const status = normalizeTimelineStatus(row.status);
+    if (status === "in-progress" || status === "active") current.push(id);
+    else if (["complete", "completed", "closed"].includes(status)) completed.push(id);
+    else remaining.push(id);
+    if (["blocked", "failed"].includes(status)) blocked.push(id);
+  }
+  state.userTaskBoard = Object.assign({}, state.userTaskBoard || {}, {
+    schemaVersion: SCHEMA_VERSION,
+    source: "syncWorkProjections:user-visible rows",
+    generatedAt: now(),
+    visibilityPolicy: "Show user-owned project work only; dashboard bootstrap, listener, projection, and indexing chores are AI Agent maintenance.",
+    current: Array.from(new Set(current)),
+    remaining: Array.from(new Set(remaining)),
+    completed: Array.from(new Set(completed)),
+    blocked: Array.from(new Set(blocked)),
+    needsUser: Array.isArray((state.taskQueues || {}).needsUser) ? Array.from(new Set((state.taskQueues || {}).needsUser)) : [],
+    hiddenAgentTaskIds,
+    emptyState: (state.userTaskBoard || {}).emptyState || "No project task is active yet. Confirm the first governed goal or add domain work before treating the board as operational."
+  });
+}
+
 function synchronizeActiveSessionAndWorkMap(state) {
   const sessions = Array.isArray(state.governedSessions) ? state.governedSessions : [];
   const originalQueues = Object.assign({}, state.taskQueues || {});
@@ -1683,6 +1828,9 @@ function synchronizeActiveSessionAndWorkMap(state) {
   }
   const rows = [];
   const addRow = (item, sourceType) => {
+    if (isAgentOnlyTaskLike(item)) {
+      return;
+    }
     const status = normalizeTimelineStatus(item.status);
     rows.push({
       id: String(item.id || item.title || sourceType),
@@ -1744,15 +1892,18 @@ function synchronizeActiveSessionAndWorkMap(state) {
   if (activeSession && !derivedQueues.inProgress.includes(String(activeSession.id))) {
     derivedQueues.inProgress.push(String(activeSession.id));
   }
+  const hiddenAgentTaskIds = ensureAgentTaskQueues(state);
+  const hiddenAgentTaskSet = new Set(hiddenAgentTaskIds);
   state.taskQueues = Object.assign({}, originalQueues, {
-    waiting: Array.from(new Set(derivedQueues.waiting)),
-    inProgress: Array.from(new Set(derivedQueues.inProgress)),
-    completed: Array.from(new Set(derivedQueues.completed)),
-    blocked: Array.from(new Set(derivedQueues.blocked)),
-    needsUser: Array.from(new Set(derivedQueues.needsUser)),
+    waiting: Array.from(new Set(derivedQueues.waiting)).filter((id) => !hiddenAgentTaskSet.has(String(id))),
+    inProgress: Array.from(new Set(derivedQueues.inProgress)).filter((id) => !hiddenAgentTaskSet.has(String(id))),
+    completed: Array.from(new Set(derivedQueues.completed)).filter((id) => !hiddenAgentTaskSet.has(String(id))),
+    blocked: Array.from(new Set(derivedQueues.blocked)).filter((id) => !hiddenAgentTaskSet.has(String(id))),
+    needsUser: Array.from(new Set(derivedQueues.needsUser)).filter((id) => !hiddenAgentTaskSet.has(String(id))),
     realWorld: Array.from(new Set(derivedQueues.realWorld)),
     failed: Array.from(new Set(derivedQueues.failed))
   });
+  deriveUserTaskBoard(state, rows);
   state.workReadinessMap = Object.assign({}, state.workReadinessMap || {}, {
     schemaVersion: SCHEMA_VERSION,
     source: "projected-from-workTimeline-backlog-sessions-evidence",
@@ -2570,7 +2721,9 @@ function requestToken(request, url) {
   const header = String(request.headers["x-harness-dashboard-token"] || "");
   const auth = String(request.headers.authorization || "");
   const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7) : "";
-  return header || bearer || String(url.searchParams.get("token") || "");
+  const routeAllowsQueryToken = String(url.pathname || "").endsWith("/events");
+  const queryToken = routeAllowsQueryToken ? String(url.searchParams.get("token") || "") : "";
+  return header || bearer || queryToken;
 }
 
 function sendJson(response, status, value) {
@@ -2594,17 +2747,149 @@ function sendHtml(response, html) {
   response.end(html);
 }
 
+function hiddenAgentTaskIdSet(state) {
+  const agentQueues = state.agentTaskQueues || {};
+  const userTaskBoard = state.userTaskBoard || {};
+  const readArray = (value) => Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
+  return new Set([
+    ...readArray(agentQueues.hiddenFromUserTaskBoard),
+    ...readArray(userTaskBoard.hiddenAgentTaskIds),
+    ...readArray(agentQueues.waiting),
+    ...readArray(agentQueues.inProgress),
+    ...readArray(agentQueues.completed),
+    ...readArray(agentQueues.blocked),
+    ...((Array.isArray(agentQueues.maintenance) ? agentQueues.maintenance : []).map((item) => String((item || {}).id || "")).filter(Boolean)),
+    "task-bootstrap-refresh-projections",
+    "session-0001"
+  ]);
+}
+
+function filterPublicTaskIds(value, hidden) {
+  return Array.isArray(value) ? value.filter((id) => !hidden.has(String(id))) : value;
+}
+
+function filterPublicTaskObjects(value, hidden) {
+  return Array.isArray(value)
+    ? value.filter((item) => {
+      const id = typeof item === "string" ? item : String((item || {}).id || (item || {}).resolutionTaskId || "");
+      return !hidden.has(id) && !isAgentOnlyTaskLike(item);
+    })
+    : [];
+}
+
+function sanitizePublicTextForHiddenTasks(value, hidden) {
+  const safeIds = Array.from(hidden);
+  if (typeof value === "string") {
+    let masked = value;
+    for (const id of safeIds) {
+      if (!id) continue;
+      const marker = id;
+      masked = masked.split(marker).join("[redacted-task-id]");
+    }
+    return masked;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizePublicTextForHiddenTasks(item, hidden));
+  }
+  if (value && typeof value === "object") {
+    const output = {};
+    for (const [key, item] of Object.entries(value)) {
+      output[key] = sanitizePublicTextForHiddenTasks(item, hidden);
+    }
+    return output;
+  }
+  return value;
+}
+
+function publicSnapshotPayload(state) {
+  const hidden = hiddenAgentTaskIdSet(state);
+  const queues = Object.assign({}, state.taskQueues || {});
+  for (const key of ["waiting", "inProgress", "completed", "blocked", "needsUser", "realWorld", "failed"]) {
+    queues[key] = filterPublicTaskIds(queues[key], hidden);
+  }
+  const userTaskBoard = Object.assign({}, state.userTaskBoard || {});
+  for (const key of ["current", "remaining", "completed", "blocked", "needsUser"]) {
+    userTaskBoard[key] = filterPublicTaskIds(userTaskBoard[key], hidden);
+  }
+  userTaskBoard.hiddenAgentTaskCount = hidden.size;
+  userTaskBoard.hiddenAgentTaskIds = [];
+  const agile = Object.assign({}, state.agile || {}, {
+    backlog: filterPublicTaskObjects(((state.agile || {}).backlog), hidden)
+  });
+  const agileCadence = Object.assign({}, state.agileCadence || {}, {
+    backlog: filterPublicTaskObjects(((state.agileCadence || {}).backlog), hidden)
+  });
+  const workTimeline = Object.assign({}, state.workTimeline || {}, {
+    items: filterPublicTaskObjects(((state.workTimeline || {}).items), hidden)
+  });
+  const workReadinessMap = Object.assign({}, state.workReadinessMap || {}, {
+    rows: filterPublicTaskObjects(((state.workReadinessMap || {}).rows), hidden)
+  });
+  const governedSessions = filterPublicTaskObjects(((state.governedSessions || [])), hidden);
+  const sessionLog = filterPublicTaskObjects(((state.sessionLog || [])), hidden);
+  const agentTaskQueues = Object.assign({}, state.agentTaskQueues || {});
+  for (const key of ["waiting", "inProgress", "completed", "blocked"]) {
+    agentTaskQueues[key] = filterPublicTaskIds(agentTaskQueues[key], hidden);
+  }
+  const agentMaintenance = Array.isArray(agentTaskQueues.maintenance)
+    ? agentTaskQueues.maintenance.filter((item) => {
+      const id = String((item || {}).id || "");
+      return id && !hidden.has(id) && !isAgentOnlyTaskLike(item);
+    })
+    : [];
+  agentTaskQueues.maintenance = agentMaintenance;
+  agentTaskQueues.hiddenFromUserTaskBoard = [];
+  const filteredState = Object.assign({}, state, {
+    taskQueues: queues,
+    userTaskBoard,
+    agile,
+    agileCadence,
+    workTimeline,
+    workReadinessMap,
+    governedSessions,
+    sessionLog,
+    agentTaskQueues,
+  });
+  return sanitizePublic(sanitizePublicTextForHiddenTasks(filteredState, hidden));
+}
+
+function publicTasksPayload(state) {
+  const hidden = hiddenAgentTaskIdSet(state);
+  const queues = Object.assign({}, state.taskQueues || {});
+  for (const key of ["waiting", "inProgress", "completed", "blocked", "needsUser", "realWorld", "failed"]) {
+    queues[key] = filterPublicTaskIds(queues[key], hidden);
+  }
+  const userTaskBoard = Object.assign({}, state.userTaskBoard || {});
+  for (const key of ["current", "remaining", "completed", "blocked", "needsUser"]) {
+    userTaskBoard[key] = filterPublicTaskIds(userTaskBoard[key], hidden);
+  }
+  userTaskBoard.hiddenAgentTaskCount = hidden.size;
+  userTaskBoard.hiddenAgentTaskIds = [];
+  const agile = Object.assign({}, state.agile || {}, {
+    backlog: filterPublicTaskObjects(((state.agile || {}).backlog), hidden)
+  });
+  const workTimeline = Object.assign({}, state.workTimeline || {}, {
+    items: filterPublicTaskObjects(((state.workTimeline || {}).items), hidden)
+  });
+  const workReadinessMap = Object.assign({}, state.workReadinessMap || {}, {
+    rows: filterPublicTaskObjects(((state.workReadinessMap || {}).rows), hidden)
+  });
+  return sanitizePublic(sanitizePublicTextForHiddenTasks({ taskQueues: queues, userTaskBoard, agile, workTimeline, workReadinessMap }, hidden));
+}
+
 function apiPayload(routeName) {
   const state = loadState();
-  if (routeName === "snapshot") return state;
-  if (routeName === "index") return loadJsonOrFallback(indexPath, deriveIndex(state));
-  if (routeName === "tasks") return { taskQueues: state.taskQueues, agile: state.agile, workTimeline: state.workTimeline, workReadinessMap: state.workReadinessMap };
-  if (routeName === "sessions") return { sessionLog: state.sessionLog, governedSessions: state.governedSessions, agentResumeBrief: state.agentResumeBrief };
-  if (routeName === "dictionary") return { dictionary: state.dictionary, ontology: state.ontology };
-  if (routeName === "version-control") return { versionControl: state.versionControl, vcsChangeRecords: state.vcsChangeRecords };
-  if (routeName === "runtime") return loadJsonOrFallback(runtimePath, deriveRuntime(state));
-  if (routeName === "briefing") return buildReportPack(state, { audience: "maintainer", focus: "today", public: false });
-  if (routeName === "health") return { ok: true, mode: "Local Live", statePathHash: fileHash(statePath), generatedAt: now() };
+  const publicState = publicSnapshotPayload(state);
+  if (routeName === "snapshot") return publicSnapshotPayload(state);
+  if (routeName === "index") return sanitizePublic(loadJsonOrFallback(indexPath, deriveIndex(state)));
+  if (routeName === "tasks") return publicTasksPayload(state);
+  if (routeName === "agent-tasks") return sanitizePublic({ agentTaskQueues: state.agentTaskQueues, agentResumeBrief: state.agentResumeBrief });
+  if (routeName === "sessions") return { sessionLog: publicState.sessionLog, governedSessions: publicState.governedSessions, agentResumeBrief: publicState.agentResumeBrief };
+  if (routeName === "dictionary") return sanitizePublic({ dictionary: state.dictionary, ontology: state.ontology });
+  if (routeName === "version-control") return sanitizePublic({ versionControl: state.versionControl, vcsChangeRecords: state.vcsChangeRecords });
+  if (routeName === "runtime") return sanitizePublic(loadJsonOrFallback(runtimePath, deriveRuntime(state)));
+  if (routeName === "briefing") return buildReportPack(publicState, { audience: "maintainer", focus: "today", public: true });
+  if (routeName === "health") return sanitizePublic({ ok: true, mode: "Local Live", statePathHash: fileHash(statePath), generatedAt: now() });
   return null;
 }
 
@@ -2616,10 +2901,12 @@ function deterministicQuery(url) {
   }
   const started = Date.now();
   const state = loadState();
-  const source = scope === "tasks" ? { taskQueues: state.taskQueues, agile: state.agile }
-    : scope === "decisions" ? { decisionContracts: state.decisionContracts }
-    : scope === "evidence" ? { artifacts: state.artifacts, governanceEvidenceBrief: state.governanceEvidenceBrief, versionControl: state.versionControl }
-    : state;
+  const publicState = publicSnapshotPayload(state);
+  const source = scope === "tasks" ? publicTasksPayload(state)
+    : scope === "agent-tasks" ? sanitizePublic({ agentTaskQueues: state.agentTaskQueues, agentResumeBrief: state.agentResumeBrief })
+    : scope === "decisions" ? { decisionContracts: publicState.decisionContracts }
+    : scope === "evidence" ? { artifacts: publicState.artifacts, governanceEvidenceBrief: publicState.governanceEvidenceBrief, versionControl: publicState.versionControl }
+    : publicState;
   const lines = JSON.stringify(source, null, 2).split("\\n");
   const results = [];
   for (const [index, line] of lines.entries()) {
@@ -2646,7 +2933,7 @@ function serveEvents(request, response, token) {
   }
   let lastStateHash = fileHash(statePath);
   try {
-    send("harness.snapshot", loadState());
+    send("harness.snapshot", publicSnapshotPayload(loadState()));
   } catch (error) {
     send("harness.error", { at: now(), error: String(error && error.message || error), statePathHash: lastStateHash });
   }
@@ -2655,7 +2942,7 @@ function serveEvents(request, response, token) {
       const currentStateHash = fileHash(statePath);
       if (currentStateHash !== lastStateHash) {
         lastStateHash = currentStateHash;
-        send("harness.changed", loadState());
+        send("harness.changed", publicSnapshotPayload(loadState()));
       }
       send("harness.heartbeat", { at: now(), statePathHash: currentStateHash, tokenPath: path.relative(workspaceRoot, tokenPath).replace(/\\\\/g, "/") });
     } catch (error) {
@@ -2747,8 +3034,8 @@ async function requestRuntime(url, token) {
   return await new Promise((resolve) => {
     const parsed = new URL(url);
     parsed.pathname = "/api/harness-dashboard/v1/runtime";
-    parsed.searchParams.set("token", token);
-    const request = http.get(parsed, { timeout: 1500 }, (response) => {
+    parsed.searchParams.delete("token");
+    const request = http.get(parsed, { timeout: 1500, headers: { "x-harness-dashboard-token": token } }, (response) => {
       let body = "";
       response.setEncoding("utf-8");
       response.on("data", (chunk) => body += chunk);
@@ -2960,7 +3247,8 @@ function reportItemsForFocus(state, focusValue) {
   const focus = normalizeReportFocus(focusValue);
   const workMapRows = (((state.workReadinessMap || {}).rows) || []);
   const timelineItems = (((state.workTimeline || {}).items) || []);
-  const sourceRows = Array.isArray(workMapRows) && workMapRows.length > 0 ? workMapRows : timelineItems;
+  const sourceRows = (Array.isArray(workMapRows) && workMapRows.length > 0 ? workMapRows : timelineItems)
+    .filter((item) => item && !isAgentOnlyTaskLike(item));
   return sourceRows.filter((item) => {
     const status = normalizeTimelineStatus(item && item.status);
     if (focus === "all") return true;

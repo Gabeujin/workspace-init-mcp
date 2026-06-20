@@ -1444,6 +1444,30 @@ function buildDashboardState(params: WorkspaceInitParams) {
       authoritativeFiles.push(filePath);
     }
   }
+  const agentMaintenanceTasks = [
+    {
+      id: "task-bootstrap-refresh-projections",
+      status: "waiting",
+      title: "Verify and refresh dashboard projections",
+      owner: "harness-dashboard-operator",
+      queueVisibility: "agent-only",
+      audience: "agent",
+      userVisible: false,
+      evidenceRefs: ["event-000001-bootstrap"],
+      blocksClaimIds: ["claim.world-model.bootstrap"],
+      nextActionRef:
+        "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+      exitCriteria:
+        "Projection verification and refresh complete without stale/corrupt projection warnings.",
+    },
+  ];
+  const userTaskBoardRemainingIds = domainStress.workItems
+    .filter((item) =>
+      !["complete", "completed", "closed"].includes(
+        String(item.status || "").toLowerCase()
+      )
+    )
+    .map((item) => item.id);
   const artifacts = [
     {
       id: "dashboard-html",
@@ -1795,7 +1819,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
       claims: [
         {
           claimId: "claim.world-model.bootstrap",
-          statement: "The Harness Dashboard 4.6.3 world model exists for this workspace.",
+          statement: "The Harness Dashboard 4.6.4 world model exists for this workspace.",
           subjectRef: `workspace:${workspaceId}`,
           claimStatus: "supported",
           confidence: 0.78,
@@ -1813,7 +1837,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
             "Reject this claim if index.html, dashboard-state.json, or event-000001-bootstrap is missing.",
             "Reject this claim if ledger-manifest.json does not include sequence 1.",
           ],
-          nextActionRef: "task-bootstrap-refresh-projections",
+          nextActionRef: "agentTaskQueues.maintenance.task-bootstrap-refresh-projections",
         },
         {
           claimId: "claim.service.operational-readiness",
@@ -2351,7 +2375,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     stakeholderBrief: {
       currentGoal: params.purpose,
       whatChangedSinceLastReview:
-        "Workspace initialized with the Harness Dashboard 4.6.3 Hypertext Project World Model.",
+        "Workspace initialized with the Harness Dashboard 4.6.4 Hypertext Project World Model.",
       whyItMatters:
         "Stakeholders and AI Agents now share a durable, evidence-backed view of project reality.",
       currentRisk:
@@ -2453,15 +2477,6 @@ function buildDashboardState(params: WorkspaceInitParams) {
         goal: params.purpose,
       },
       backlog: [
-        {
-          id: "task-bootstrap-refresh-projections",
-          status: "waiting",
-          title: "Verify and refresh dashboard projections",
-          owner: "harness-dashboard-operator",
-          evidenceRefs: ["event-000001-bootstrap"],
-          blocksClaimIds: ["claim.world-model.bootstrap"],
-          exitCriteria: "verify-projections and refresh complete without stale/corrupt projection warnings",
-        },
         ...domainStress.workItems,
       ],
       review: { status: "not-started", dueAt: "TBD" },
@@ -2478,15 +2493,6 @@ function buildDashboardState(params: WorkspaceInitParams) {
         goal: params.purpose,
       },
       backlog: [
-        {
-          id: "task-bootstrap-refresh-projections",
-          status: "waiting",
-          title: "Verify and refresh dashboard projections",
-          owner: "harness-dashboard-operator",
-          evidenceRefs: ["event-000001-bootstrap"],
-          blocksClaimIds: ["claim.world-model.bootstrap"],
-          exitCriteria: "verify-projections and refresh complete without stale/corrupt projection warnings",
-        },
         ...domainStress.workItems,
       ],
       review: { status: "not-started", dueAt: "TBD" },
@@ -2497,7 +2503,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
       gates: contracts.serviceCreationContract.readinessGates,
     },
     taskQueues: {
-      waiting: ["task-bootstrap-refresh-projections"],
+      waiting: [],
       inProgress: [],
       completed: [],
       blocked: domainStress.workItems.map((item) => item.id),
@@ -2507,6 +2513,43 @@ function buildDashboardState(params: WorkspaceInitParams) {
       ],
       realWorld: [],
       failed: [],
+    },
+    agentTaskQueues: {
+      schemaVersion: DASHBOARD_SCHEMA_VERSION,
+      visibilityPolicy:
+        "Agent-only dashboard maintenance tasks stay out of stakeholder task boards, reports, and presentation inputs.",
+      waiting: agentMaintenanceTasks.map((item) => item.id),
+      inProgress: [],
+      completed: [],
+      blocked: [],
+      maintenance: agentMaintenanceTasks,
+      hiddenFromUserTaskBoard: [
+        ...agentMaintenanceTasks.map((item) => item.id),
+        "session-0001",
+      ],
+    },
+    userTaskBoard: {
+      schemaVersion: DASHBOARD_SCHEMA_VERSION,
+      source: "taskQueues/workTimeline filtered to user-visible work",
+      generatedAt: BOOTSTRAP_TIME,
+      visibilityPolicy:
+        "Show user-owned project work only; dashboard bootstrap, listener, projection, and indexing chores are AI Agent maintenance.",
+      current: [],
+      remaining: userTaskBoardRemainingIds,
+      completed: [],
+      blocked: domainStress.workItems
+        .filter((item) => String(item.status || "").toLowerCase() === "blocked")
+        .map((item) => item.id),
+      needsUser: [
+        "decision-first-governed-goal",
+        ...domainStress.decisionContracts.map((decision) => decision.id),
+      ],
+      hiddenAgentTaskIds: [
+        ...agentMaintenanceTasks.map((item) => item.id),
+        "session-0001",
+      ],
+      emptyState:
+        "No project task is active yet. Confirm the first governed goal or add domain work before treating the board as operational.",
     },
     workTimeline: {
       schemaVersion: DASHBOARD_SCHEMA_VERSION,
@@ -2526,27 +2569,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         "wip-aging",
         "handover-latency",
       ],
-      items: [
-        {
-          id: "task-bootstrap-refresh-projections",
-          title: "Verify and refresh dashboard projections",
-          status: "waiting",
-          lane: "Harness Bootstrap",
-          owner: "harness-dashboard-operator",
-          startAt: BOOTSTRAP_TIME,
-          plannedStartAt: BOOTSTRAP_TIME,
-          plannedEndAt: "after-first-refresh",
-          endAt: null,
-          progressPercent: 15,
-          kpiTags: ["projection-freshness", "world-model-completeness"],
-          evidenceRefs: ["event-000001-bootstrap"],
-          nextActionRef: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
-          blockingClaimIds: ["claim.world-model.bootstrap"],
-          exitCriteria:
-            "Projection verification and refresh complete without stale/corrupt projection warnings.",
-        },
-        ...domainStress.workItems,
-      ],
+      items: [...domainStress.workItems],
       openSourceAdapters: [
         {
           name: "Frappe Gantt",
@@ -2570,7 +2593,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         },
       ],
       singleFileConstraint:
-        "the 4.6.3 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
+        "the 4.6.4 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
     },
     listener: {
       workspaceId,
@@ -2596,7 +2619,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.3", "world model"],
+          aliases: ["Harness Dashboard 4.6.4", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -2661,7 +2684,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.3", "world model"],
+          aliases: ["Harness Dashboard 4.6.4", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -2752,7 +2775,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         type: "dashboard-bootstrap",
         status: "complete",
         occurredAt: BOOTSTRAP_TIME,
-        summary: "Harness Dashboard 4.6.3 world model bootstrap generated.",
+        summary: "Harness Dashboard 4.6.4 world model bootstrap generated.",
         evidenceRefs: ["event-000001-bootstrap"],
       },
     ],
@@ -2829,7 +2852,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         completeness: "partial",
       },
     },
-    // Runtime-facing facade fields projected from the 4.6.3 world model.
+    // Runtime-facing facade fields projected from the 4.6.4 world model.
     executiveSummary: {
       headline: `${params.workspaceName} Project World Model`,
       overallStatus: "bootstrap",
@@ -2862,7 +2885,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     },
     governanceState: {
       policyId: "project-world-model-4-6",
-      policyLabel: "Harness Dashboard 4.6.3 Hypertext Project World Model",
+      policyLabel: "Harness Dashboard 4.6.4 Hypertext Project World Model",
       status: "active",
       sessionGovernanceRule:
         "Every meaningful AI session must append canonical events, refresh projections, and leave an agent resume brief.",
@@ -3006,7 +3029,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     timeline: [
       {
         id: "timeline-bootstrap",
-        label: "dashboard 4.6.3 Bootstrap",
+        label: "dashboard 4.6.4 Bootstrap",
         type: "governance",
         status: "complete",
         owner: "workspace-init-mcp",
@@ -3032,7 +3055,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     versionLedger: [
       {
         id: "harness-dashboard-4-6",
-        label: "Harness Dashboard 4.6.3",
+        label: "Harness Dashboard 4.6.4",
         status: "bootstrap",
         scope: "Project World Model",
         progressPercent: 8,
@@ -3072,7 +3095,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           actor: "initializer",
           action: "bootstrap",
           outcome: "project-world-model-created",
-          note: "dashboard 4.6.3 projections and canonical ledger initialized.",
+          note: "dashboard 4.6.4 projections and canonical ledger initialized.",
         },
       ],
     },
@@ -3145,6 +3168,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
 
 function buildDashboardIndex(state: Record<string, unknown>) {
   const taskQueues = state.taskQueues as Record<string, string[]>;
+  const agentTaskQueues = state.agentTaskQueues as Record<string, string[]>;
   const agentResumeBrief = state.agentResumeBrief as Record<string, unknown>;
   const stakeholderBrief = state.stakeholderBrief as Record<string, unknown>;
   const meta = state.meta as Record<string, unknown>;
@@ -3199,8 +3223,14 @@ function buildDashboardIndex(state: Record<string, unknown>) {
       ).length,
     },
     agentContextPacks: state.agentContextPacks,
+    userTaskBoard: state.userTaskBoard,
     taskCounts: Object.fromEntries(
       Object.entries(taskQueues).map(([key, value]) => [key, value.length])
+    ),
+    agentTaskCounts: Object.fromEntries(
+      Object.entries(agentTaskQueues)
+        .filter(([, value]) => Array.isArray(value))
+        .map(([key, value]) => [key, value.length])
     ),
     timelineSummary: {
       itemCount: timelineItems.length,
@@ -3215,6 +3245,7 @@ function buildDashboardIndex(state: Record<string, unknown>) {
       "/api/harness-dashboard/v1/snapshot",
       "/api/harness-dashboard/v1/index",
       "/api/harness-dashboard/v1/tasks",
+      "/api/harness-dashboard/v1/agent-tasks",
       "/api/harness-dashboard/v1/sessions",
       "/api/harness-dashboard/v1/dictionary",
       "/api/harness-dashboard/v1/version-control",
@@ -3360,6 +3391,39 @@ function buildDashboardStateSchema(): string {
       needsUser: { type: "array", items: { type: "string" } },
       realWorld: { type: "array", items: { type: "string" } },
       failed: { type: "array", items: { type: "string" } },
+    },
+  };
+  properties.agentTaskQueues = {
+    type: "object",
+    required: ["waiting", "inProgress", "completed", "blocked"],
+    additionalProperties: true,
+    properties: {
+      waiting: { type: "array", items: { type: "string" } },
+      inProgress: { type: "array", items: { type: "string" } },
+      completed: { type: "array", items: { type: "string" } },
+      blocked: { type: "array", items: { type: "string" } },
+      hiddenFromUserTaskBoard: { type: "array", items: { type: "string" } },
+      maintenance: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["id", "status", "title", "owner", "queueVisibility"],
+          additionalProperties: true,
+        },
+      },
+    },
+  };
+  properties.userTaskBoard = {
+    type: "object",
+    required: ["current", "remaining", "completed", "hiddenAgentTaskIds"],
+    additionalProperties: true,
+    properties: {
+      current: { type: "array", items: { type: "string" } },
+      remaining: { type: "array", items: { type: "string" } },
+      completed: { type: "array", items: { type: "string" } },
+      blocked: { type: "array", items: { type: "string" } },
+      needsUser: { type: "array", items: { type: "string" } },
+      hiddenAgentTaskIds: { type: "array", items: { type: "string" } },
     },
   };
   properties.claimEvidenceMatrix = {
@@ -3580,7 +3644,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
-    <title>${workspaceName} Harness Dashboard 4.6.3</title>
+    <title>${workspaceName} Harness Dashboard 4.6.4</title>
     <style>
       :root {
         --bg: #f6f8fb;
@@ -3677,6 +3741,20 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       .decision-cell { border: 1px solid var(--line); border-radius: 8px; background: #fbfcfd; padding: 10px; }
       .decision-cell.ok { border-color: rgba(31, 122, 77, 0.3); background: #f3fbf6; }
       .decision-cell.risk { border-color: rgba(180, 35, 24, 0.28); background: #fff7f5; }
+      .reality-action-hub { display: grid; gap: 14px; }
+      .hub-brief { border: 1px solid rgba(23, 105, 170, 0.24); border-radius: 8px; background: #f5f9ff; padding: 14px; display: grid; gap: 8px; }
+      .hub-brief strong { font-size: 1.25rem; overflow-wrap: anywhere; }
+      .hub-grid { display: grid; grid-template-columns: minmax(0, 0.62fr) minmax(280px, 0.38fr); gap: 12px; align-items: start; }
+      .hub-list { display: grid; gap: 8px; }
+      .hub-item { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; display: grid; gap: 6px; }
+      .hub-item strong { overflow-wrap: anywhere; }
+      .hub-item.warn { border-color: rgba(154, 103, 0, 0.28); background: #fffaf0; }
+      .hub-item.risk { border-color: rgba(180, 35, 24, 0.28); background: #fff7f5; }
+      .hub-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      .hub-action-button { border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); padding: 7px 10px; font-weight: 800; cursor: pointer; }
+      .hub-action-button:hover, .hub-action-button:focus-visible { border-color: var(--accent); color: var(--accent); }
+      .api-route-list { display: flex; flex-wrap: wrap; gap: 6px; }
+      .route-chip { border: 1px solid var(--line); border-radius: 999px; background: #f8fafc; padding: 4px 8px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.72rem; overflow-wrap: anywhere; }
       .trust-boundary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
       .trust-boundary .metric { border-top: 4px solid var(--accent); }
       .signal-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -3711,6 +3789,15 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       .work-card.completed { border-color: rgba(31, 122, 77, 0.28); background: #f3fbf6; }
       .work-title { font-weight: 800; overflow-wrap: anywhere; }
       .work-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--muted); font-size: 0.78rem; }
+      .task-board { display: grid; gap: 12px; }
+      .task-board-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+      .task-column { border: 1px solid var(--line); border-radius: 8px; background: #fbfcfd; padding: 12px; min-width: 0; display: grid; gap: 9px; align-content: start; }
+      .task-column h3 { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin: 0; }
+      .task-mini-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; display: grid; gap: 6px; }
+      .task-mini-card strong { overflow-wrap: anywhere; }
+      .agent-maintenance-board { display: grid; gap: 10px; }
+      .maintenance-card { border: 1px dashed rgba(82, 96, 109, 0.34); border-radius: 8px; background: #f7f8fa; color: var(--muted); padding: 12px; display: grid; gap: 6px; }
+      .maintenance-card strong { color: var(--text); overflow-wrap: anywhere; }
       .progress-track { height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
       .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--ok)); }
       .progress-fill.blocked { background: var(--risk); }
@@ -3868,7 +3955,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       .hidden { display: none !important; }
       .mono { font-family: Consolas, "Courier New", monospace; }
       @media (max-width: 900px) {
-        .hero, .control-grid, .overview-guide, .guide-strip, .judgment-console, .judgment-actions, .score-duo, .actionability, .decision-strip, .trust-boundary, .status-rail, .metric-grid, .card-grid, .signal-grid, .open-work-grid, .work-hero, .stack-grid, .architecture-map, .platform-intake, .platform-grid, .deck-slide, .deck-metrics, .gantt-axis, .gantt-row, .ops-command-hero { grid-template-columns: 1fr; }
+        .hero, .control-grid, .overview-guide, .guide-strip, .hub-grid, .task-board-columns, .judgment-console, .judgment-actions, .score-duo, .actionability, .decision-strip, .trust-boundary, .status-rail, .metric-grid, .card-grid, .signal-grid, .open-work-grid, .work-hero, .stack-grid, .architecture-map, .platform-intake, .platform-grid, .deck-slide, .deck-metrics, .gantt-axis, .gantt-row, .ops-command-hero { grid-template-columns: 1fr; }
         .panel, .panel-wide { grid-column: span 12; }
         .control-card { min-width: 0; }
         .slide-deck { padding: 12px; }
@@ -3897,7 +3984,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <div class="shell">
       <header class="hero">
         <div>
-          <p class="eyebrow">Harness Dashboard 4.6.3</p>
+          <p class="eyebrow">Harness Dashboard 4.6.4</p>
           <h1 id="dashboard-title" data-workspace="${workspaceName}">${workspaceName} Project World Model</h1>
           <p class="lede" id="dashboard-lede">A canonical, ledger-backed view of project reality for stakeholders, AI Agents, and maintainers.</p>
         </div>
@@ -4114,6 +4201,18 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "trustContinuity": "Trust And Continuity Snapshot",
           "ledgerTrust": "Ledger Projection Trust Boundary",
           "realityGoalCompass": "Reality And Goal Compass",
+          "realityNextActionsHub": "Reality & Next Actions Hub",
+          "hubCurrentRead": "Current operating read",
+          "hubCurrentReadCopy": "This combines reality, goal, risks, evidence, API health, and the next safe action without requiring raw JSON or chat history.",
+          "hubPrimaryNextActions": "Primary next actions",
+          "hubEvidenceTargets": "Evidence targets",
+          "hubLocalApi": "Local listener API",
+          "hubApiCopy": "Read-only loopback endpoints are useful for local tools, dashboards, and deterministic search.",
+          "hubOpenWorkTab": "Open Work",
+          "hubOpenEvidenceTab": "Open Evidence",
+          "hubOpenSystemTab": "Open Operations",
+          "hubNoAction": "No user-facing action is active yet.",
+          "hubNoEvidenceTarget": "No evidence target is currently listed.",
           "currentReality": "Current Reality",
           "goalState": "Goal State",
           "topGaps": "Top 3 Gaps",
@@ -4133,6 +4232,16 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "lastSafeCheckpoint": "Last safe checkpoint",
           "openWork": "Open Work",
           "openWorkHint": "Only work that is still waiting, active, or blocked. Completed work moves into the timeline and KPI history.",
+          "userTaskBoard": "User Task Board",
+          "userTaskBoardHint": "This board shows project work only: what is active now, what remains, and what has been completed.",
+          "userTaskEmpty": "No project task is active yet. Confirm the first governed goal or add domain work before treating the board as operational.",
+          "currentWork": "Current work",
+          "remainingWork": "Remaining work",
+          "completedWork": "Completed work",
+          "agentMaintenanceTasks": "Agent Maintenance Tasks",
+          "agentOnly": "agent-only",
+          "hiddenAgentTasks": "Hidden agent tasks",
+          "maintenanceHint": "Dashboard projection, listener, indexing, and refresh chores are kept here for AI Agents and excluded from user task metrics.",
           "operationalQueue": "Operational Command Queue",
           "kanban": "Status lanes",
           "gantt": "Timeline",
@@ -4326,6 +4435,18 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "trustContinuity": "신뢰와 연속성 스냅샷",
           "ledgerTrust": "원장-프로젝션 신뢰 경계",
           "realityGoalCompass": "현실과 목표 나침반",
+          "realityNextActionsHub": "현실과 다음 행동 허브",
+          "hubCurrentRead": "현재 운영 판독",
+          "hubCurrentReadCopy": "원시 JSON이나 채팅 기록 없이 현실, 목표, 위험, 증거, API 상태, 다음 안전 행동을 한곳에 모읍니다.",
+          "hubPrimaryNextActions": "주요 다음 행동",
+          "hubEvidenceTargets": "증거 대상",
+          "hubLocalApi": "로컬 리스너 API",
+          "hubApiCopy": "읽기 전용 루프백 엔드포인트는 로컬 도구, 대시보드, 결정적 검색에 사용할 수 있습니다.",
+          "hubOpenWorkTab": "작업 열기",
+          "hubOpenEvidenceTab": "근거 열기",
+          "hubOpenSystemTab": "운영 열기",
+          "hubNoAction": "아직 사용자에게 보이는 활성 행동이 없습니다.",
+          "hubNoEvidenceTarget": "현재 표시할 증거 대상이 없습니다.",
           "currentReality": "현재 현실",
           "goalState": "목표 상태",
           "topGaps": "상위 3개 간극",
@@ -4345,6 +4466,16 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "lastSafeCheckpoint": "마지막 안전 체크포인트",
           "openWork": "열려 있는 작업",
           "openWorkHint": "아직 대기, 진행, 차단 상태인 작업입니다. 완료된 작업은 타임라인과 KPI 기록으로 이동합니다.",
+          "userTaskBoard": "사용자 작업판",
+          "userTaskBoardHint": "프로젝트 작업만 보여줍니다. 지금 진행 중인 작업, 남은 작업, 완료된 작업을 분리합니다.",
+          "userTaskEmpty": "아직 활성화된 프로젝트 작업이 없습니다. 첫 governed 목표를 확정하거나 도메인 작업을 추가한 뒤 운영 작업판으로 보세요.",
+          "currentWork": "진행 중인 작업",
+          "remainingWork": "남은 작업",
+          "completedWork": "완료된 작업",
+          "agentMaintenanceTasks": "에이전트 정비 작업",
+          "agentOnly": "에이전트 전용",
+          "hiddenAgentTasks": "숨겨진 에이전트 작업",
+          "maintenanceHint": "대시보드 투영, 리스너, 인덱싱, 새로고침 정비는 AI Agent용으로만 유지하고 사용자 작업 지표에서는 제외합니다.",
           "operationalQueue": "운영 명령 큐",
           "kanban": "상태 레인",
           "gantt": "타임라인",
@@ -4480,8 +4611,11 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           return;
         }
         try {
-          const snapshotUrl = localApiToken ? "./api/harness-dashboard/v1/snapshot?token=" + encodeURIComponent(localApiToken) : "./state/dashboard-state.json";
-          const response = await fetch(snapshotUrl, { cache: "no-store" });
+          const snapshotUrl = localApiToken ? "./api/harness-dashboard/v1/snapshot" : "./state/dashboard-state.json";
+          const response = await fetch(snapshotUrl, {
+            cache: "no-store",
+            headers: localApiToken ? { "x-harness-dashboard-token": localApiToken } : {},
+          });
           if (!response.ok) throw new Error("state fetch failed");
           const loaded = await response.json();
           app.state = loaded.payload || loaded;
@@ -4647,6 +4781,41 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         }
         return timelineItems;
       }
+      function hiddenAgentTaskIds() {
+        const state = app.state || {};
+        const userBoard = state.userTaskBoard || {};
+        const agentQueues = state.agentTaskQueues || {};
+        const ids = [
+          ...((userBoard.hiddenAgentTaskIds || [])),
+          ...((agentQueues.hiddenFromUserTaskBoard || [])),
+          ...((agentQueues.maintenance || []).map((item) => item && item.id)),
+        ].filter(Boolean).map((item) => String(item));
+        ids.push("task-bootstrap-refresh-projections");
+        ids.push("session-0001");
+        return Array.from(new Set(ids));
+      }
+      function isAgentOnlyTask(item) {
+        const id = String((item || {}).id || (item || {}).resolutionTaskId || "");
+        const visibility = String((item || {}).queueVisibility || (item || {}).audience || (item || {}).visibility || "").toLowerCase();
+        const hidden = new Set(hiddenAgentTaskIds());
+        return hidden.has(id) ||
+          visibility.includes("agent-only") ||
+          (item || {}).userVisible === false ||
+          (item || {}).agentOnly === true;
+      }
+      function userVisibleTimelineItems(items) {
+        return (items || []).filter((item) => !isAgentOnlyTask(item));
+      }
+      function workItemsForAudience(items) {
+        return getAudienceMode() === "agent" ? (items || []) : userVisibleTimelineItems(items || []);
+      }
+      function filterTaskQueueIds(queues) {
+        const hidden = new Set(hiddenAgentTaskIds());
+        return Object.fromEntries(Object.entries(queues || {}).map(([key, value]) => [
+          key,
+          Array.isArray(value) ? value.filter((id) => !hidden.has(String(id))) : value,
+        ]));
+      }
       function rangeWindow(items) {
         const now = new Date();
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -4683,7 +4852,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         return itemTouchesToday(item);
       }
       function buildReportItems() {
-        const items = buildTimelineItems();
+        const items = workItemsForAudience(buildTimelineItems());
         const scoped = items.filter((item) => itemMatchesReportFocus(item, app.reportFocus));
         app.reportScopeFallback = scoped.length === 0;
         return scoped.length > 0 ? scoped : items.filter((item) => !["complete", "completed", "closed"].includes(String(item.status || "").toLowerCase())).slice(0, 8);
@@ -4692,7 +4861,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         app.uiEvents = [{ at: new Date().toLocaleTimeString(), label, detail }, ...app.uiEvents].slice(0, 6);
       }
       function selectedWorkItem(items) {
-        const pool = items && items.length ? items : buildTimelineItems();
+        const pool = items && items.length ? items : workItemsForAudience(buildTimelineItems());
         if (app.selectedWorkId) {
           const selected = pool.find((item) => String(item.id) === String(app.selectedWorkId));
           if (selected) return selected;
@@ -4876,6 +5045,70 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           const blockers = (item.blockingClaimIds || item.blocksClaimIds || []).slice(0, 2).join(", ") || t("none");
           return '<article class="work-card ' + esc(status) + '"><div><span class="badge ' + (status === "blocked" ? "risk" : status === "in-progress" ? "info" : "warn") + '">' + esc(statusText(status)) + '</span></div><span class="work-title">' + esc(item.title || item.id) + '</span><div class="work-meta"><span class="lane-pill">' + esc(item.lane || "Work") + '</span><span>' + esc(item.owner || "unassigned") + '</span></div>' + progressBar(item) + '<p class="source"><strong>' + esc(t("blocks")) + ':</strong> ' + esc(blockers) + '</p><p class="source"><strong>' + esc(t("exit")) + ':</strong> ' + esc(item.exitCriteria || item.nextActionRef || t("notDeclared")) + '</p></article>';
         }).join("") + '</div>';
+      }
+      function taskBoardGroups(items) {
+        const groups = { current: [], remaining: [], completed: [] };
+        for (const item of userVisibleTimelineItems(items || [])) {
+          const status = normalizeTimelineStatus(item.status);
+          if (isActiveTimelineStatus(status)) groups.current.push(item);
+          else if (["complete", "completed", "closed"].includes(status)) groups.completed.push(item);
+          else groups.remaining.push(item);
+        }
+        return groups;
+      }
+      function renderTaskColumn(label, rows, emptyLabel) {
+        return '<section class="task-column"><h3><span>' + esc(label) + '</span><span class="badge">' + esc(rows.length) + '</span></h3>' +
+          (rows.length ? rows.slice(0, rowLimit(8)).map((item) => {
+            const status = normalizeTimelineStatus(item.status);
+            return '<article class="task-mini-card"><strong>' + esc(item.title || item.id) + '</strong><span>' + badge(statusText(status)) + ' ' + esc(item.owner || "unassigned") + '</span><span class="source">' + esc(item.nextActionRef || item.exitCriteria || t("notDeclared")) + '</span></article>';
+          }).join("") : '<p class="muted">' + esc(emptyLabel || t("none")) + '</p>') +
+          '</section>';
+      }
+      function renderUserTaskBoard(items) {
+        const visible = userVisibleTimelineItems(items || []);
+        const groups = taskBoardGroups(visible);
+        const empty = visible.length === 0 ? '<p class="muted">' + esc(((app.state.userTaskBoard || {}).emptyState) || t("userTaskEmpty")) + '</p>' : "";
+        return '<div class="task-board"><p class="muted">' + esc(t("userTaskBoardHint")) + '</p>' + metricGrid([
+          [t("currentWork"), groups.current.length, "in progress"],
+          [t("remainingWork"), groups.remaining.length, "waiting / blocked"],
+          [t("completedWork"), groups.completed.length, "done"],
+          [t("needsUser"), ((app.state.taskQueues || {}).needsUser || []).length, "decisions"],
+        ]) + empty + '<div class="task-board-columns">' +
+          renderTaskColumn(t("currentWork"), groups.current, t("noOpenWork")) +
+          renderTaskColumn(t("remainingWork"), groups.remaining, t("none")) +
+          renderTaskColumn(t("completedWork"), groups.completed, t("none")) +
+          '</div></div>';
+      }
+      function agentMaintenanceItems() {
+        const agentQueues = app.state.agentTaskQueues || {};
+        const seen = new Set();
+        const items = [];
+        for (const item of agentQueues.maintenance || []) {
+          const id = String((item || {}).id || "");
+          if (!id || seen.has(id)) continue;
+          items.push(item);
+          seen.add(id);
+        }
+        for (const item of buildTimelineItems().filter((entry) => isAgentOnlyTask(entry))) {
+          const id = String((item || {}).id || "");
+          if (!id || seen.has(id)) continue;
+          items.push(item);
+          seen.add(id);
+        }
+        return items;
+      }
+      function renderAgentMaintenanceTasks() {
+        const items = agentMaintenanceItems();
+        const hidden = hiddenAgentTaskIds();
+        const cards = items.map((item) =>
+          '<article class="maintenance-card"><span class="badge info">' + esc(t("agentOnly")) + '</span><strong>' + esc(item.title || item.id) + '</strong><span class="source">' + esc(item.nextActionRef || item.exitCriteria || "") + '</span><span class="source">' + esc(item.owner || "harness-dashboard-operator") + '</span></article>'
+        ).join("");
+        return '<div class="agent-maintenance-board"><p class="muted">' + esc(t("maintenanceHint")) + '</p>' + metricGrid([
+          [t("agentMaintenanceTasks"), items.length, "agentTaskQueues"],
+          [t("hiddenAgentTasks"), hidden.length, "not in user task board"],
+          [t("waiting"), ((app.state.agentTaskQueues || {}).waiting || []).length, "maintenance waiting"],
+          [t("closedItems"), ((app.state.agentTaskQueues || {}).completed || []).length, "maintenance done"],
+        ]) + (cards || '<p class="muted">' + esc(t("none")) + '</p>') + '</div>';
       }
       function renderWorkViewSwitch() {
         return '<div class="toolbar"><div class="view-switch" role="group" aria-label="Work view mode"><button type="button" class="segment" data-work-view="kanban" aria-pressed="' + String(app.workView === "kanban") + '">' + esc(t("kanban")) + '</button><button type="button" class="segment" data-work-view="gantt" aria-pressed="' + String(app.workView === "gantt") + '">' + esc(t("gantt")) + '</button></div><span class="source">' + esc(t("purpose.work")) + '</span></div>';
@@ -5073,7 +5306,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const state = app.state;
         const brief = state.stakeholderBrief || {};
         const evidence = state.governanceEvidenceBrief || {};
-        const timelineItems = buildTimelineItems();
+        const timelineItems = userVisibleTimelineItems(buildTimelineItems());
         const open = timelineItems.filter((item) => !["complete", "completed", "closed"].includes(String(item.status || "").toLowerCase()));
         const blocked = open.filter((item) => ["blocked", "failed"].includes(String(item.status || "").toLowerCase()));
         const averageProgress = open.length ? Math.round(open.reduce((sum, item) => sum + progressPercent(item), 0) / open.length) : 100;
@@ -5093,6 +5326,109 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           '<article class="guide-card ok"><span class="rail-label">' + esc(t("goalState")) + '</span><strong>' + esc(compass.goalState || t("notDeclared")) + '</strong></article>' +
           '<article class="guide-card warn"><span class="rail-label">' + esc(t("topGaps")) + '</span><ul>' + gaps.map((gap) => '<li><strong>' + esc(gap.label || gap.id) + '</strong><br><span class="source">' + esc(gap.nextActionRef || "") + '</span></li>').join("") + '</ul></article>' +
           '<article class="guide-card risk"><span class="rail-label">' + esc(t("nextSafeMove")) + '</span><strong>' + esc(compass.nextSafeMove || (app.state.agentResumeBrief || {}).nextSafestAction || t("notDeclared")) + '</strong></article>' +
+          '</div>';
+      }
+      function renderRealityNextActionsHub() {
+        const state = app.state || {};
+        const compass = state.goalCompass || {};
+        const phaseGate = compass.phaseGate || {};
+        const judgment = state.judgmentConsole || {};
+        const evidence = state.governanceEvidenceBrief || {};
+        const matrix = state.claimEvidenceMatrix || {};
+        const listener = state.listener || ((state.dashboardRuntime || {}).listener) || {};
+        const timelineItems = userVisibleTimelineItems(buildTimelineItems());
+        const openWork = timelineItems
+          .filter((item) => !["complete", "completed", "closed"].includes(String(item.status || "").toLowerCase()))
+          .slice(0, 4);
+        const gaps = (compass.topGaps || []).slice(0, 3);
+        const actions = [];
+        if (compass.nextSafeMove || (state.agentResumeBrief || {}).nextSafestAction) {
+          actions.push({
+            label: compass.nextSafeMove || (state.agentResumeBrief || {}).nextSafestAction,
+            status: phaseGate.status || judgment.currentJudgment || "next",
+            owner: phaseGate.owner || judgment.owner || "harness-dashboard-operator",
+            evidenceRefs: phaseGate.requiredChecks || compass.alignmentChecks || [],
+            next: judgment.nextRequiredDecisionLabel || judgment.nextRequiredDecision || "",
+          });
+        }
+        for (const item of openWork) {
+          actions.push({
+            label: item.title || item.id,
+            status: item.status || "open",
+            owner: item.owner || "unassigned",
+            evidenceRefs: item.evidenceRefs || [],
+            next: item.nextActionRef || item.exitCriteria || "",
+          });
+        }
+        for (const gap of gaps) {
+          actions.push({
+            label: gap.label || gap.id,
+            status: gap.status || "gap",
+            owner: gap.owner || "unassigned",
+            evidenceRefs: gap.evidenceNeeded || [],
+            next: gap.nextActionRef || "",
+          });
+        }
+        const seen = new Set();
+        const uniqueActions = actions.filter((item) => {
+          const key = String(item.label || "").toLowerCase();
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        }).slice(0, 5);
+        const missingEvidence = (matrix.missingEvidenceItems || []).slice(0, 5).map((item) => ({
+          label: item.label || item.id,
+          status: item.blocksReadiness === false ? "tracking" : "missing-evidence",
+          owner: item.owner || "unassigned",
+          target: item.requiredEvidenceType || item.resolutionTaskId || "",
+          refs: item.blocksClaimIds || [],
+        }));
+        const decisions = (state.decisionContracts || [])
+          .filter((item) => !["approved", "accepted", "closed"].includes(String(item.status || "").toLowerCase()))
+          .slice(0, 3)
+          .map((item) => ({
+            label: item.decision || item.summary || item.id,
+            status: item.status || "decision-needed",
+            owner: item.owner || "unassigned",
+            target: (item.evidence || []).join(", "),
+            refs: [item.id],
+          }));
+        const evidenceTargets = [...missingEvidence, ...decisions].slice(0, 6);
+        const routeFallback = [
+          "/api/harness-dashboard/v1/snapshot",
+          "/api/harness-dashboard/v1/tasks",
+          "/api/harness-dashboard/v1/briefing",
+          "/api/harness-dashboard/v1/health",
+          "/api/harness-dashboard/v1/events",
+          "/api/harness-dashboard/v1/query",
+        ];
+        const routes = (((state.dashboardRuntime || {}).apiRoutes) || ((state.dashboardIndex || {}).apiRoutes) || routeFallback).slice(0, 8);
+        const actionCards = uniqueActions.length
+          ? uniqueActions.map((item) =>
+              '<article class="hub-item ' + (String(item.status || "").includes("blocked") ? "risk" : "warn") + '"><strong>' + esc(item.label) + '</strong>' +
+              '<span>' + badge(statusText(item.status)) + ' ' + esc(item.owner || "unassigned") + '</span>' +
+              '<span class="source"><strong>' + esc(t("evidence")) + ':</strong> ' + esc((item.evidenceRefs || []).slice(0, 3).join(", ") || t("notDeclared")) + '</span>' +
+              '<span class="source"><strong>' + esc(t("nextSafestAction")) + ':</strong> ' + esc(item.next || item.label || t("notDeclared")) + '</span></article>'
+            ).join("")
+          : '<p class="muted">' + esc(t("hubNoAction")) + '</p>';
+        const evidenceCards = evidenceTargets.length
+          ? evidenceTargets.map((item) =>
+              '<article class="hub-item"><strong>' + esc(item.label) + '</strong><span>' + badge(statusText(item.status)) + ' ' + esc(item.owner || "unassigned") + '</span>' +
+              '<span class="source">' + esc(item.target || t("notDeclared")) + '</span><span class="source">' + esc((item.refs || []).slice(0, 4).join(", ") || t("notDeclared")) + '</span></article>'
+            ).join("")
+          : '<p class="muted">' + esc(t("hubNoEvidenceTarget")) + '</p>';
+        const apiRoutes = routes.map((route) => '<span class="route-chip">' + esc(route) + '</span>').join("");
+        return '<div class="reality-action-hub">' +
+          '<div class="hub-brief"><span class="rail-label">' + esc(t("hubCurrentRead")) + '</span><strong>' + esc(compass.currentReality || (state.worldJudgment || {}).summary || t("notDeclared")) + '</strong><p>' + esc(t("hubCurrentReadCopy")) + '</p>' +
+          metricGrid([
+            [t("goalState"), compass.goalState || t("notDeclared"), "goalCompass"],
+            [t("risk"), judgment.currentJudgment || (state.worldJudgment || {}).status || "unknown", "judgmentConsole"],
+            [t("evidence"), evidence.evidenceCoverage || ((matrix.missingEvidenceItems || []).length + " gaps"), "claimEvidenceMatrix"],
+            [t("hubLocalApi"), listener.status || "not-started", listener.url || "loopback listener"],
+          ]) +
+          '<div class="hub-actions"><button type="button" class="hub-action-button" data-jump-tab="view-work">' + esc(t("hubOpenWorkTab")) + '</button><button type="button" class="hub-action-button" data-jump-tab="view-evidence">' + esc(t("hubOpenEvidenceTab")) + '</button><button type="button" class="hub-action-button" data-jump-tab="view-system">' + esc(t("hubOpenSystemTab")) + '</button></div></div>' +
+          '<div class="hub-grid"><section class="hub-list"><h3>' + esc(t("hubPrimaryNextActions")) + '</h3>' + actionCards + '</section>' +
+          '<section class="hub-list"><h3>' + esc(t("hubEvidenceTargets")) + '</h3>' + evidenceCards + '<div class="hub-item"><strong>' + esc(t("hubLocalApi")) + '</strong><span class="source">' + esc(t("hubApiCopy")) + '</span><div class="api-route-list">' + apiRoutes + '</div></div></section></div>' +
           '</div>';
       }
       function renderRealityGraph(nodes, edges) {
@@ -5231,7 +5567,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const slo = app.state.sloSli || {};
         const db = app.state.databaseReadiness || {};
         const listener = app.state.listener || ((app.state.dashboardRuntime || {}).listener) || {};
-        const timelineItems = buildTimelineItems();
+        const timelineItems = userVisibleTimelineItems(buildTimelineItems());
         const reportItems = buildReportItems();
         const counts = workFlowCounts(timelineItems);
         const focus = selectedWorkItem(reportItems) || {};
@@ -5294,6 +5630,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const mode = getAudienceMode();
         if (mode === "agent") {
           document.getElementById("view-overview").innerHTML =
+            panel(t("realityNextActionsHub"), renderRealityNextActionsHub(), true) +
             panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
             panel(t("agentResumeBoard"), renderAgentResumeBoard(), true) +
             panel(t("contextRotMonitor"), renderContextRotMonitor(), true) +
@@ -5304,6 +5641,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         }
         if (mode === "maintainer") {
           document.getElementById("view-overview").innerHTML =
+            panel(t("realityNextActionsHub"), renderRealityNextActionsHub(), true) +
             panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
             panel(t("maintainerHealthBoard"), renderMaintainerHealthBoard(), true) +
             panel(t("projectWorldMap"), renderProjectWorldMap(), true) +
@@ -5318,6 +5656,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           return;
         }
         document.getElementById("view-overview").innerHTML =
+          panel(t("realityNextActionsHub"), renderRealityNextActionsHub(), true) +
           panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
           panel(t("stakeholderReport"), renderStakeholderReport(), true) +
           panel(t("projectWorldMap"), renderProjectWorldMap(), true) +
@@ -5338,10 +5677,10 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           panel(t("ledgerTrust"), renderTrustBoundary(), true);
       }
       function renderWork() {
-        const queues = app.state.taskQueues || {};
+        const queues = filterTaskQueueIds(app.state.taskQueues || {});
         const agile = app.state.agile || app.state.agileCadence || {};
-        const backlog = agile.backlog || [];
-        const timelineItems = buildTimelineItems();
+        const backlog = (agile.backlog || []).filter((item) => !isAgentOnlyTask(item));
+        const timelineItems = userVisibleTimelineItems(buildTimelineItems());
         const activeItems = timelineItems.filter((item) => isActiveTimelineStatus(item.status));
         const activeCount = activeItems.length;
         const completedCount = timelineItems.filter((item) => ["complete", "completed", "closed"].includes(String(item.status || "").toLowerCase())).length;
@@ -5365,21 +5704,23 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
             + table([t("tab.work"), "Status", t("owner")], backlog.slice(0, rowLimit(30)).map((item) => [esc(item.title || item.id), badge(item.status), esc(item.owner || "")])), true);
         if (getAudienceMode() === "stakeholder") {
           document.getElementById("view-work").innerHTML =
-            panel(t("openWork"), renderOpenWorkList(timelineItems), true) +
+            panel(t("userTaskBoard"), renderUserTaskBoard(timelineItems), true) +
             kpis +
             board;
           return;
         }
         if (getAudienceMode() === "maintainer") {
           document.getElementById("view-work").innerHTML =
+            panel(t("userTaskBoard"), renderUserTaskBoard(timelineItems), true) +
             kpis +
             board +
             details;
           return;
         }
         document.getElementById("view-work").innerHTML =
+          panel(t("agentMaintenanceTasks"), renderAgentMaintenanceTasks(), true) +
           details +
-          panel(t("openWork"), renderOpenWorkList(timelineItems), true) +
+          panel(t("userTaskBoard"), renderUserTaskBoard(timelineItems), true) +
           board +
           kpis;
       }
@@ -5641,7 +5982,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const agent = state.agentResumeBrief || {};
         const evidence = state.governanceEvidenceBrief || {};
         const queues = state.taskQueues || {};
-        const allItems = buildTimelineItems();
+        const allItems = workItemsForAudience(buildTimelineItems());
         const items = buildReportItems();
         const evidenceBlockers = evidenceBlockerCount();
         const open = items.filter((item) => !["complete", "completed", "closed"].includes(String(item.status || "").toLowerCase()));
@@ -6142,7 +6483,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
 }
 
 function buildDashboardReadme(): string {
-  return `# Harness Dashboard 4.6.3: Project World Model
+  return `# Harness Dashboard 4.6.4: Project World Model
 
 The dashboard is a ledger-backed Project World Model, not a Markdown-derived report page.
 
@@ -6220,7 +6561,7 @@ function buildDesignFrameworkHtml(): string {
 <meta charset="utf-8" />
 <title>Harness Dashboard Design Framework</title>
 <body>
-  <h1>Harness Dashboard 4.6.3 Design Framework</h1>
+  <h1>Harness Dashboard 4.6.4 Design Framework</h1>
   <p>Executive Overview first. Same data, different density for Stakeholder, AI Agent, and Maintainer modes.</p>
   <ul>
     <li>Modes: Local Live, Static Snapshot, Degraded Offline.</li>
@@ -6240,7 +6581,7 @@ function buildBackendBlueprintHtml(): string {
 <title>Optional Backend Dashboard Blueprint</title>
 <body>
   <h1>Optional Backend Dashboard Blueprint</h1>
-  <p>The default 4.6.3 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
+  <p>The default 4.6.4 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
   <ul>
     <li>Must preserve ledger-first governance.</li>
     <li>Must not replace the local single-file dashboard contract.</li>
@@ -6380,7 +6721,7 @@ export function generateDashboardFiles(
         "Specification for future opt-in backend dashboard implementation.",
       nonGoals: [
         "No backend dashboard app is generated by default.",
-        "No database is required for 4.6.3 MVP.",
+        "No database is required for 4.6.4 MVP.",
         "No persistent UI writes are allowed by default.",
       ],
     }),

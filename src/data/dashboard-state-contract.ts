@@ -34,6 +34,8 @@ export const DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS = [
   "agentResumeBrief",
   "governanceEvidenceBrief",
   "taskQueues",
+  "agentTaskQueues",
+  "userTaskBoard",
   "workTimeline",
   "decisionContracts",
   "agile",

@@ -863,6 +863,7 @@ function mergeGeneratedState(baseValue: unknown, existingValue: unknown): unknow
 }
 
 const DASHBOARD_BOOTSTRAP_NOISE_TASK_IDS = new Set([
+  "task-bootstrap-refresh-projections",
   "task-confirm-agent-platforms",
   "task-collect-service-health",
   "task-map-deployment-target",
@@ -871,6 +872,7 @@ const DASHBOARD_BOOTSTRAP_NOISE_TASK_IDS = new Set([
 ]);
 
 const DASHBOARD_BOOTSTRAP_TASK_REF_REPLACEMENTS = new Map<string, string>([
+  ["task-bootstrap-refresh-projections", "agentTaskQueues.maintenance.task-bootstrap-refresh-projections"],
   ["task-confirm-agent-platforms", "agentPlatformGovernance.intake"],
   ["task-collect-service-health", "missing.service-health"],
   ["task-map-deployment-target", "missing.deployment-target"],
@@ -879,6 +881,7 @@ const DASHBOARD_BOOTSTRAP_TASK_REF_REPLACEMENTS = new Map<string, string>([
 ]);
 
 const GENERATED_DASHBOARD_NOISE_TITLES = new Map<string, string[]>([
+  ["task-bootstrap-refresh-projections", ["verify and refresh dashboard projections"]],
   ["task-confirm-agent-platforms", ["confirm active ai agent platforms", "legacy noisy platform task"]],
   ["task-collect-service-health", ["collect service health", "legacy noisy service health task"]],
   ["task-map-deployment-target", ["map deployment target", "legacy noisy deployment task"]],
@@ -888,6 +891,7 @@ const GENERATED_DASHBOARD_NOISE_TITLES = new Map<string, string[]>([
 
 const GENERATED_DASHBOARD_NOISE_REFS = new Set([
   "event-000001-bootstrap",
+  "claim.world-model.bootstrap",
   "missing.service-health",
   "missing.deployment-target",
   "missing.database-readiness",
@@ -970,7 +974,27 @@ function looksLikeGeneratedDashboardNoiseEntry(entry: Record<string, unknown>): 
   const explicitStatusSignal = !statusLooksGenerated;
   const provenance = String(entry.provenance || entry.source || entry.createdBy || "").toLowerCase();
   const explicitUserProvenance = provenance.includes("user") || provenance.includes("manual");
+  if (id === "task-bootstrap-refresh-projections") {
+    return !explicitUserProvenance;
+  }
   return titleLooksGenerated && !explicitUserSignals && !explicitEvidenceSignals && !explicitStatusSignal && !explicitUserProvenance;
+}
+
+function dashboardBootstrapMaintenanceTask(): Record<string, unknown> {
+  return {
+    id: "task-bootstrap-refresh-projections",
+    status: "waiting",
+    title: "Verify and refresh dashboard projections",
+    owner: "harness-dashboard-operator",
+    queueVisibility: "agent-only",
+    audience: "agent",
+    userVisible: false,
+    evidenceRefs: ["event-000001-bootstrap"],
+    blocksClaimIds: ["claim.world-model.bootstrap"],
+    nextActionRef: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+    exitCriteria:
+      "Projection verification and refresh complete without stale/corrupt projection warnings.",
+  };
 }
 
 function markMissingEvidenceAsEvidenceOnly(value: unknown): unknown {
@@ -1050,6 +1074,76 @@ function normalizeMergedDashboardState(value: unknown): unknown {
       );
     }
     state.taskQueues = queues;
+  }
+
+  const maintenanceTask = dashboardBootstrapMaintenanceTask();
+  const maintenanceTaskId = String(maintenanceTask.id);
+  const existingAgentTaskQueues = isPlainObject(state.agentTaskQueues)
+    ? state.agentTaskQueues
+    : {};
+  const existingMaintenance = Array.isArray(existingAgentTaskQueues.maintenance)
+    ? existingAgentTaskQueues.maintenance.filter(isPlainObject)
+    : [];
+  const maintenanceById = new Map<string, Record<string, unknown>>(
+    existingMaintenance.map((entry) => [String(entry.id || ""), entry])
+  );
+  maintenanceById.set(maintenanceTaskId, {
+    ...maintenanceTask,
+    ...(maintenanceById.get(maintenanceTaskId) ?? {}),
+    queueVisibility: "agent-only",
+    userVisible: false,
+  });
+  const hiddenFromUserTaskBoard = uniqueStrings([
+    ...(Array.isArray(existingAgentTaskQueues.hiddenFromUserTaskBoard)
+      ? existingAgentTaskQueues.hiddenFromUserTaskBoard.filter((entry): entry is string => typeof entry === "string")
+      : []),
+    maintenanceTaskId,
+    "session-0001",
+  ]);
+  state.agentTaskQueues = {
+    ...existingAgentTaskQueues,
+    schemaVersion: String(state.meta && isPlainObject(state.meta) ? state.meta.schemaVersion || "4.6.4" : "4.6.4"),
+    visibilityPolicy:
+      typeof existingAgentTaskQueues.visibilityPolicy === "string"
+        ? existingAgentTaskQueues.visibilityPolicy
+        : "Agent-only dashboard maintenance tasks stay out of stakeholder task boards, reports, and presentation inputs.",
+    waiting: uniqueStrings([
+      ...(Array.isArray(existingAgentTaskQueues.waiting)
+        ? existingAgentTaskQueues.waiting.filter((entry): entry is string => typeof entry === "string")
+        : []),
+      maintenanceTaskId,
+    ]),
+    inProgress: Array.isArray(existingAgentTaskQueues.inProgress)
+      ? existingAgentTaskQueues.inProgress.filter((entry): entry is string => typeof entry === "string")
+      : [],
+    completed: Array.isArray(existingAgentTaskQueues.completed)
+      ? existingAgentTaskQueues.completed.filter((entry): entry is string => typeof entry === "string")
+      : [],
+    blocked: Array.isArray(existingAgentTaskQueues.blocked)
+      ? existingAgentTaskQueues.blocked.filter((entry): entry is string => typeof entry === "string")
+      : [],
+    maintenance: Array.from(maintenanceById.values()),
+    hiddenFromUserTaskBoard,
+  };
+
+  if (isPlainObject(state.userTaskBoard)) {
+    const board = { ...state.userTaskBoard };
+    for (const key of ["current", "remaining", "completed", "blocked", "needsUser"]) {
+      if (Array.isArray(board[key])) {
+        board[key] = withoutDashboardBootstrapNoiseIds(
+          board[key],
+          `userTaskBoard.${key}`,
+          reconcileClassifications
+        );
+      }
+    }
+    board.hiddenAgentTaskIds = uniqueStrings([
+      ...(Array.isArray(board.hiddenAgentTaskIds)
+        ? board.hiddenAgentTaskIds.filter((entry): entry is string => typeof entry === "string")
+        : []),
+      ...hiddenFromUserTaskBoard,
+    ]);
+    state.userTaskBoard = board;
   }
 
   for (const key of ["agile", "agileCadence"]) {
