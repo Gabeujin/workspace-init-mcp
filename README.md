@@ -5,7 +5,7 @@
 
 `workspace-init-mcp` installs a non-destructive AI Work Harness that lets humans and agents plan, resume, verify, and hand off project work from durable evidence instead of chat history.
 
-Version `4.6.4` separates user-facing project work from AI-Agent-only dashboard maintenance. The dashboard now keeps current, remaining, and completed user tasks clean while moving projection refresh, listener, indexing, and bootstrap chores into explicit agent maintenance queues. It also keeps the domain-independent, model-durable world-model harness from 4.6.x: state-externalizing working-memory contracts, extensible domain stress profiles, and a persisted work-review-improve loop.
+Version `4.6.5` adds dashboard-first traceability and projection confidence: users can see what was requested, what process ran, what result was recorded, what evidence backs it, what residual risk remains, and whether the projection is still bootstrap/debt-limited without reading raw JSON or chat history. It keeps the 4.6.x domain-independent world-model harness: state-externalizing working-memory contracts, extensible domain stress profiles, and a persisted work-review-improve loop.
 
 ---
 
@@ -30,7 +30,7 @@ The harness is designed for both new services and existing projects that already
 
 ---
 
-## 4.6.4 Highlights
+## 4.6.5 Highlights
 
 ### Stateful Cognitive Offloading
 
@@ -104,7 +104,7 @@ UI work follows current Chrome/Google I/O modern web guidance as progressive enh
 
 ### Domain Stress And Briefing Packs
 
-4.6.4 keeps the built-in service profiles and adds custom profile support so the harness can fit a web application, learning plan, research corpus, documentation program, or other governed domain without hard-coding the world around commerce or release work.
+4.6.5 keeps the built-in service profiles and adds custom profile support so the harness can fit a web application, learning plan, research corpus, documentation program, or other governed domain without hard-coding the world around commerce or release work.
 
 - `identity-commerce-operations`: credential/auth, payment, refund, fulfillment, and operational evidence gates.
 - `legacy-modernization-governance`: AS-IS/TO-BE mapping, migration, rollback, ownership, and compatibility evidence gates.
@@ -277,6 +277,7 @@ The listener exposes read-only routes under:
 /api/harness-dashboard/v1/index
 /api/harness-dashboard/v1/tasks
 /api/harness-dashboard/v1/agent-tasks
+/api/harness-dashboard/v1/traceability
 /api/harness-dashboard/v1/sessions
 /api/harness-dashboard/v1/dictionary
 /api/harness-dashboard/v1/version-control
@@ -360,7 +361,7 @@ Main MCP tools include:
 
 ## Quality And Safety Baseline
 
-Version `4.6.4` includes these guardrails:
+Version `4.6.5` includes these guardrails:
 
 - Absolute `workspacePath` enforcement.
 - Non-destructive adoption for legacy projects.
@@ -424,10 +425,14 @@ npm pack --dry-run
 
 ---
 
-## 4.6.4 Release Notes
+## 4.6.5 Release Notes
 
 Major changes:
 
+- Added a persistent dashboard projection-confidence rail that summarizes completeness, staleness, trust boundary status, missing evidence count, open decisions, last refresh, listener status, and the action gate before users treat projections as operational truth.
+- Added `sessionTraceability` and `projectionConfidence` dashboard state contracts, schema coverage, generated validation, dashboard context exposure, and a read-only `/api/harness-dashboard/v1/traceability` listener route.
+- Rendered session trace cards in the dashboard so stakeholders and agents can read original request, process summary, result summary, trace integrity, evidence refs, residual risk, and next step without raw JSON or chat history.
+- Propagated runtime task trace integrity and evaluator residual risk into dashboard session logs, governed sessions, stakeholder briefs, agent resume briefs, governance evidence, and projection confidence.
 - Split user task management from AI-Agent-only dashboard maintenance so generated bootstrap chores no longer appear as stakeholder waiting or blocked work.
 - Added `userTaskBoard` and `agentTaskQueues` state contracts, validation gates, reconcile cleanup, public `/tasks`, and explicit `/agent-tasks` listener routes.
 - Filtered stakeholder reports, work KPIs, Gantt/status lanes, and slide decks so internal projection refresh tasks cannot become visible open work or "now doing" items.

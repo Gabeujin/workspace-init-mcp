@@ -997,6 +997,141 @@ function dashboardBootstrapMaintenanceTask(): Record<string, unknown> {
   };
 }
 
+function backfillDashboardProjectionConfidence(state: Record<string, unknown>): void {
+  if (isPlainObject(state.projectionConfidence)) {
+    return;
+  }
+  const meta = isPlainObject(state.meta) ? state.meta : {};
+  const evidence = isPlainObject(state.governanceEvidenceBrief)
+    ? state.governanceEvidenceBrief
+    : {};
+  const trust = isPlainObject(state.trustBoundary) ? state.trustBoundary : {};
+  const missingEvidenceClaims = Array.isArray(evidence.missingEvidenceClaims)
+    ? evidence.missingEvidenceClaims
+    : [];
+  const unresolvedDecisions = Array.isArray(evidence.unresolvedDecisions)
+    ? evidence.unresolvedDecisions
+    : [];
+  state.projectionConfidence = {
+    schemaVersion: String(meta.schemaVersion || "4.6.5"),
+    status: "projection-debt",
+    completeness: String(meta.completeness || "legacy-backfill"),
+    staleness: String(meta.staleness || "legacy-backfill"),
+    trustBoundaryStatus: String(trust.status || "legacy-refresh-required"),
+    missingEvidenceCount: missingEvidenceClaims.length,
+    openDecisionCount: unresolvedDecisions.length,
+    lastSuccessfulRefreshAt: null,
+    lastSourceEventSequence: Number(meta.sourceEventSequence || 0),
+    localListenerStatus: String(
+      isPlainObject(state.listener) ? state.listener.status || "not-started" : "not-started"
+    ),
+    actionGate:
+      "Run dashboard-ops refresh before treating this legacy projection as operational truth.",
+    userMessage:
+      "This dashboard state predates projection-confidence fields and was backfilled during reconcile.",
+    requiredActions: [
+      "Run dashboard-ops verify-projections",
+      "Run dashboard-ops refresh",
+      "Record a governed session with request/process/result trace",
+    ],
+    evidenceRefs: ["legacy-dashboard-state"],
+  };
+}
+
+function backfillDashboardSessionTraceability(state: Record<string, unknown>): void {
+  if (
+    isPlainObject(state.sessionTraceability) &&
+    Array.isArray(state.sessionTraceability.entries) &&
+    state.sessionTraceability.entries.length > 0
+  ) {
+    return;
+  }
+  const workspace = isPlainObject(state.workspace) ? state.workspace : {};
+  const purpose = String(workspace.purpose || "Recover legacy dashboard projection.");
+  const workspaceName = String(workspace.name || workspace.id || "Legacy dashboard");
+  const governedSessions = Array.isArray(state.governedSessions)
+    ? state.governedSessions
+    : [];
+  const sessionLog = Array.isArray(state.sessionLog) ? state.sessionLog : [];
+  const sourceSessions = governedSessions.length > 0 ? governedSessions : sessionLog;
+  const entries = sourceSessions.length > 0
+    ? sourceSessions.slice(0, 10).map((entry) => {
+        const session = isPlainObject(entry) ? entry : {};
+        const trace = isPlainObject(session.taskTrace) ? session.taskTrace : {};
+        const evidenceRefs = Array.isArray(session.outputs)
+          ? session.outputs.filter((output): output is string => typeof output === "string")
+          : ["legacy-dashboard-state"];
+        return {
+          sessionId: String(session.id || session.sessionId || "legacy-session"),
+          title: String(session.title || session.goal || workspaceName),
+          status: String(session.status || "legacy-backfill"),
+          phase: String(session.phase || session.stage || "legacy-backfill"),
+          originalRequest: String(trace.originalRequest || session.goal || purpose),
+          processSummary: String(
+            trace.processSummary ||
+              session.note ||
+              "Legacy dashboard session was backfilled; process summary was not recorded in the old projection."
+          ),
+          resultSummary: String(
+            trace.resultSummary ||
+              session.note ||
+              "Legacy dashboard session requires refresh before result claims are trusted."
+          ),
+          traceIntegrity: {
+            status: "legacy-fallback",
+            missingFields: isPlainObject(session.taskTrace) ? [] : ["taskTrace"],
+            source: "legacy-dashboard-state",
+            warning:
+              "Backfilled traceability keeps validation migration-safe but is not verified request/process/result evidence.",
+          },
+          residualRisk:
+            "Legacy projection may not preserve full request/process/result trace until refreshed.",
+          evidenceRefs,
+          nextStep: String(
+            session.nextStep || "Run dashboard-ops refresh and record the next governed session."
+          ),
+          recordedAt: String(session.endedAt || session.startedAt || "legacy-backfill"),
+          source: "legacy-dashboard-state",
+        };
+      })
+    : [
+        {
+          sessionId: "legacy-dashboard-state",
+          title: workspaceName,
+          status: "legacy-backfill",
+          phase: "legacy-refresh-required",
+          originalRequest: purpose,
+          processSummary:
+            "Legacy dashboard state was loaded without session traceability fields.",
+          resultSummary:
+            "Backfilled traceability enables validation and refresh, but real session trace evidence is still required.",
+          traceIntegrity: {
+            status: "legacy-fallback",
+            missingFields: ["sessionTraceability"],
+            source: "legacy-dashboard-state",
+            warning: "No governed session trace was present in this legacy projection.",
+          },
+          residualRisk:
+            "Legacy projection may not preserve full request/process/result trace until refreshed.",
+          evidenceRefs: ["legacy-dashboard-state"],
+          nextStep: "Run dashboard-ops refresh and start or resume a governed session.",
+          recordedAt: "legacy-backfill",
+          source: "legacy-dashboard-state",
+        },
+      ];
+  state.sessionTraceability = {
+    schemaVersion: String(
+      isPlainObject(state.meta) ? state.meta.schemaVersion || "4.6.5" : "4.6.5"
+    ),
+    status: "trace-debt",
+    purpose: "Backfilled compatibility projection for request/process/result traceability.",
+    source: "legacy-dashboard-state",
+    integrityPolicy:
+      "Legacy backfills are migration aids only; refreshed governed sessions must record taskTrace directly.",
+    entries,
+  };
+}
+
 function markMissingEvidenceAsEvidenceOnly(value: unknown): unknown {
   if (!Array.isArray(value)) {
     return value;
@@ -1102,7 +1237,7 @@ function normalizeMergedDashboardState(value: unknown): unknown {
   ]);
   state.agentTaskQueues = {
     ...existingAgentTaskQueues,
-    schemaVersion: String(state.meta && isPlainObject(state.meta) ? state.meta.schemaVersion || "4.6.4" : "4.6.4"),
+    schemaVersion: String(state.meta && isPlainObject(state.meta) ? state.meta.schemaVersion || "4.6.5" : "4.6.5"),
     visibilityPolicy:
       typeof existingAgentTaskQueues.visibilityPolicy === "string"
         ? existingAgentTaskQueues.visibilityPolicy
@@ -1236,6 +1371,9 @@ function normalizeMergedDashboardState(value: unknown): unknown {
       })),
     ];
   }
+
+  backfillDashboardProjectionConfidence(state);
+  backfillDashboardSessionTraceability(state);
 
   return state;
 }

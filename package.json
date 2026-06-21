@@ -1,6 +1,6 @@
 {
   "name": "workspace-init-mcp",
-  "version": "4.6.4",
+  "version": "4.6.5",
   "description": "MCP server that installs an AI governance harness with hypertext dashboard, agent instructions, Project World Model, and safe workspace reconcile",
   "type": "module",
   "main": "dist/index.js",

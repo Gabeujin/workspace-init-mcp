@@ -1533,6 +1533,26 @@ function buildDashboardState(params: WorkspaceInitParams) {
       owner: "harness-doc-writer",
     },
   ];
+  const bootstrapSessionEvidenceRefs = [
+    "docs/ai-harness/dashboard/events/harness-events.jsonl",
+    "docs/ai-harness/dashboard/state/dashboard-state.json",
+    "docs/ai-harness/dashboard/index.html",
+  ];
+  const bootstrapTaskTrace = {
+    originalRequest: params.purpose,
+    processSummary:
+      "workspace-init-mcp generated the Project World Model ledger, projections, dashboard, runtime scaffolding, and governance files.",
+    resultSummary:
+      "Bootstrap dashboard and harness state are installed, but real VCS, service, owner, release, and operations evidence still need to be connected.",
+    recordedAt: BOOTSTRAP_TIME,
+    source: "initialize_workspace bootstrap projection",
+  };
+  const bootstrapTraceIntegrity = {
+    status: "complete",
+    missingFields: [],
+    policy:
+      "Dashboard session trace cards must show missing taskTrace fields explicitly instead of silently reconstructing them from notes or chat history.",
+  };
 
   return {
     meta: {
@@ -1819,7 +1839,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
       claims: [
         {
           claimId: "claim.world-model.bootstrap",
-          statement: "The Harness Dashboard 4.6.4 world model exists for this workspace.",
+          statement: "The Harness Dashboard 4.6.5 world model exists for this workspace.",
           subjectRef: `workspace:${workspaceId}`,
           claimStatus: "supported",
           confidence: 0.78,
@@ -2375,7 +2395,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     stakeholderBrief: {
       currentGoal: params.purpose,
       whatChangedSinceLastReview:
-        "Workspace initialized with the Harness Dashboard 4.6.4 Hypertext Project World Model.",
+        "Workspace initialized with the Harness Dashboard 4.6.5 Hypertext Project World Model.",
       whyItMatters:
         "Stakeholders and AI Agents now share a durable, evidence-backed view of project reality.",
       currentRisk:
@@ -2435,6 +2455,63 @@ function buildDashboardState(params: WorkspaceInitParams) {
       ],
       staleProjections: ["dashboard-state.json"],
       failedValidations: [],
+    },
+    projectionConfidence: {
+      schemaVersion: DASHBOARD_SCHEMA_VERSION,
+      status: "projection-debt",
+      completeness: "partial",
+      staleness: "bootstrap",
+      trustBoundaryStatus: "bootstrap-warning",
+      missingEvidenceCount: 5 + domainStress.missingEvidenceItems.length,
+      openDecisionCount: 2 + domainStress.decisionContracts.length,
+      lastSuccessfulRefreshAt: null,
+      lastSourceEventSequence: BOOTSTRAP_SEQUENCE,
+      localListenerStatus: "not-started",
+      actionGate:
+        "Use planning, evidence review, and dashboard verification now; defer release, operate, or reality-complete claims until refresh and evidence gates pass.",
+      userMessage:
+        "This dashboard is usable for orientation, planning, and handoff, but it is still a bootstrap projection with missing real project evidence.",
+      requiredActions: [
+        "Run dashboard-ops.mjs verify-projections",
+        "Run dashboard-ops.mjs refresh",
+        "Record the first governed session with original request, process summary, and result summary",
+        "Link VCS, service, owner, release, and operations evidence before claiming operational truth",
+      ],
+      evidenceRefs: [
+        "trustBoundary",
+        "governanceEvidenceBrief",
+        "claimEvidenceMatrix",
+        "dashboardQualityScorecard",
+      ],
+    },
+    sessionTraceability: {
+      schemaVersion: DASHBOARD_SCHEMA_VERSION,
+      status: "bootstrap-trace-complete",
+      purpose:
+        "Let users understand what was requested, what process ran, what result was recorded, what evidence backs it, and what should happen next without opening raw runtime JSON or chat history.",
+      source:
+        "Projected from governedSessions, runtime events, execution receipts, and session summaries.",
+      integrityPolicy:
+        "Missing taskTrace data must be flagged as projection debt; fallback notes may explain context but must not be presented as verified original/process/result trace.",
+      entries: [
+        {
+          sessionId: "session-0001",
+          title: "Workspace bootstrap",
+          status: "complete",
+          phase: "governance-open",
+          originalRequest: bootstrapTaskTrace.originalRequest,
+          processSummary: bootstrapTaskTrace.processSummary,
+          resultSummary: bootstrapTaskTrace.resultSummary,
+          traceIntegrity: bootstrapTraceIntegrity,
+          residualRisk:
+            "Bootstrap projections are not real service, VCS, release, owner, or operations evidence.",
+          evidenceRefs: bootstrapSessionEvidenceRefs,
+          nextStep:
+            "Verify projections, connect VCS evidence, and open the first governed session.",
+          recordedAt: BOOTSTRAP_TIME,
+          source: bootstrapTaskTrace.source,
+        },
+      ],
     },
     decisionContracts: [
       {
@@ -2593,7 +2670,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         },
       ],
       singleFileConstraint:
-        "the 4.6.4 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
+        "the 4.6.5 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
     },
     listener: {
       workspaceId,
@@ -2619,7 +2696,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.4", "world model"],
+          aliases: ["Harness Dashboard 4.6.5", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -2684,7 +2761,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.4", "world model"],
+          aliases: ["Harness Dashboard 4.6.5", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -2775,7 +2852,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         type: "dashboard-bootstrap",
         status: "complete",
         occurredAt: BOOTSTRAP_TIME,
-        summary: "Harness Dashboard 4.6.4 world model bootstrap generated.",
+        summary: "Harness Dashboard 4.6.5 world model bootstrap generated.",
         evidenceRefs: ["event-000001-bootstrap"],
       },
     ],
@@ -2852,7 +2929,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         completeness: "partial",
       },
     },
-    // Runtime-facing facade fields projected from the 4.6.4 world model.
+    // Runtime-facing facade fields projected from the 4.6.5 world model.
     executiveSummary: {
       headline: `${params.workspaceName} Project World Model`,
       overallStatus: "bootstrap",
@@ -2885,7 +2962,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     },
     governanceState: {
       policyId: "project-world-model-4-6",
-      policyLabel: "Harness Dashboard 4.6.4 Hypertext Project World Model",
+      policyLabel: "Harness Dashboard 4.6.5 Hypertext Project World Model",
       status: "active",
       sessionGovernanceRule:
         "Every meaningful AI session must append canonical events, refresh projections, and leave an agent resume brief.",
@@ -2968,11 +3045,9 @@ function buildDashboardState(params: WorkspaceInitParams) {
         startedAt: BOOTSTRAP_TIME,
         endedAt: BOOTSTRAP_TIME,
         owner: "workspace-init-mcp",
-        outputs: [
-          "docs/ai-harness/dashboard/events/harness-events.jsonl",
-          "docs/ai-harness/dashboard/state/dashboard-state.json",
-          "docs/ai-harness/dashboard/index.html",
-        ],
+        outputs: bootstrapSessionEvidenceRefs,
+        taskTrace: bootstrapTaskTrace,
+        traceIntegrity: bootstrapTraceIntegrity,
         note: "Initial project world model, ledger, projections, and dashboard generated.",
       },
     ],
@@ -3008,10 +3083,11 @@ function buildDashboardState(params: WorkspaceInitParams) {
           branch: "TBD",
           commit: "TBD",
         },
-        outputs: [
-          "docs/ai-harness/dashboard/events/harness-events.jsonl",
-          "docs/ai-harness/dashboard/index.html",
-        ],
+        outputs: bootstrapSessionEvidenceRefs,
+        taskTrace: bootstrapTaskTrace,
+        traceIntegrity: bootstrapTraceIntegrity,
+        residualRisk:
+          "Bootstrap projections are not real service, VCS, release, owner, or operations evidence.",
         nextStep:
           "Verify projections, connect VCS evidence, and open the first governed session.",
       },
@@ -3029,7 +3105,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     timeline: [
       {
         id: "timeline-bootstrap",
-        label: "dashboard 4.6.4 Bootstrap",
+        label: "dashboard 4.6.5 Bootstrap",
         type: "governance",
         status: "complete",
         owner: "workspace-init-mcp",
@@ -3055,7 +3131,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     versionLedger: [
       {
         id: "harness-dashboard-4-6",
-        label: "Harness Dashboard 4.6.4",
+        label: "Harness Dashboard 4.6.5",
         status: "bootstrap",
         scope: "Project World Model",
         progressPercent: 8,
@@ -3095,7 +3171,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           actor: "initializer",
           action: "bootstrap",
           outcome: "project-world-model-created",
-          note: "dashboard 4.6.4 projections and canonical ledger initialized.",
+          note: "dashboard 4.6.5 projections and canonical ledger initialized.",
         },
       ],
     },
@@ -3202,6 +3278,8 @@ function buildDashboardIndex(state: Record<string, unknown>) {
     readinessJudgments: state.readinessJudgments,
     trustBoundary: state.trustBoundary,
     dashboardQualityScorecard: state.dashboardQualityScorecard,
+    projectionConfidence: state.projectionConfidence,
+    sessionTraceability: state.sessionTraceability,
     governanceActionabilityScore: state.governanceActionabilityScore,
     agentPlatformGovernance: state.agentPlatformGovernance,
     audienceLens: state.audienceLens,
@@ -3246,6 +3324,7 @@ function buildDashboardIndex(state: Record<string, unknown>) {
       "/api/harness-dashboard/v1/index",
       "/api/harness-dashboard/v1/tasks",
       "/api/harness-dashboard/v1/agent-tasks",
+      "/api/harness-dashboard/v1/traceability",
       "/api/harness-dashboard/v1/sessions",
       "/api/harness-dashboard/v1/dictionary",
       "/api/harness-dashboard/v1/version-control",
@@ -3597,6 +3676,72 @@ function buildDashboardStateSchema(): string {
       },
     },
   };
+  properties.projectionConfidence = {
+    type: "object",
+    required: [
+      "status",
+      "completeness",
+      "staleness",
+      "trustBoundaryStatus",
+      "missingEvidenceCount",
+      "openDecisionCount",
+      "actionGate",
+      "requiredActions",
+    ],
+    additionalProperties: true,
+    properties: {
+      status: { type: "string" },
+      completeness: { type: "string" },
+      staleness: { type: "string" },
+      trustBoundaryStatus: { type: "string" },
+      missingEvidenceCount: { type: "number" },
+      openDecisionCount: { type: "number" },
+      actionGate: { type: "string" },
+      userMessage: { type: "string" },
+      requiredActions: { type: "array", items: { type: "string" } },
+      evidenceRefs: { type: "array", items: { type: "string" } },
+    },
+  };
+  properties.sessionTraceability = {
+    type: "object",
+    required: ["status", "purpose", "integrityPolicy", "entries"],
+    additionalProperties: true,
+    properties: {
+      status: { type: "string" },
+      purpose: { type: "string" },
+      integrityPolicy: { type: "string" },
+      entries: {
+        type: "array",
+        items: {
+          type: "object",
+          required: [
+            "sessionId",
+            "status",
+            "phase",
+            "originalRequest",
+            "processSummary",
+            "resultSummary",
+            "traceIntegrity",
+            "evidenceRefs",
+            "nextStep",
+          ],
+          additionalProperties: true,
+          properties: {
+            sessionId: { type: "string" },
+            status: { type: "string" },
+            phase: { type: "string" },
+            originalRequest: { type: "string" },
+            processSummary: { type: "string" },
+            resultSummary: { type: "string" },
+            traceIntegrity: { type: "object" },
+            residualRisk: { type: "string" },
+            evidenceRefs: { type: "array", items: { type: "string" } },
+            nextStep: { type: "string" },
+          },
+        },
+      },
+    },
+  };
   properties.dashboardQualityScorecard = {
     type: "object",
     required: ["targetScore", "uiUxDesignScore", "projectEvidenceScore", "qaEvidence", "modernWebUiPolicy"],
@@ -3644,7 +3789,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
-    <title>${workspaceName} Harness Dashboard 4.6.4</title>
+    <title>${workspaceName} Harness Dashboard 4.6.5</title>
     <style>
       :root {
         --bg: #f6f8fb;
@@ -3951,11 +4096,25 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       .insight-item.warn { border-left: 5px solid var(--warn); }
       .insight-item.ok { border-left: 5px solid var(--ok); }
       .report-brief-preview { border: 1px solid var(--line); border-radius: 8px; background: #0f1720; color: #e8f4ff; padding: 12px; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .projection-confidence { display: grid; gap: 10px; border: 1px solid rgba(154,103,0,0.28); border-left: 5px solid var(--warn); border-radius: 8px; background: #fffaf0; padding: 14px; margin: 12px 0; box-shadow: var(--shadow); }
+      .projection-confidence.ok { border-left-color: var(--ok); background: #f3fbf6; }
+      .projection-confidence.debt, .projection-confidence.risk { border-left-color: var(--risk); background: #fff4f4; }
+      .projection-confidence-head { display: flex; gap: 10px; align-items: start; justify-content: space-between; flex-wrap: wrap; }
+      .projection-confidence-head strong { font-size: 1rem; overflow-wrap: anywhere; }
+      .projection-confidence .metric-grid { margin-top: 0; }
+      .trace-card { border: 1px solid var(--line); border-radius: 8px; background: #fbfcfd; padding: 14px; display: grid; gap: 10px; }
+      .trace-card.warn { border-left: 5px solid var(--warn); }
+      .trace-card.risk { border-left: 5px solid var(--risk); }
+      .trace-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+      .trace-step { border: 1px solid rgba(23,105,170,0.16); border-radius: 8px; background: #fff; padding: 10px; min-width: 0; }
+      .trace-step strong { display: block; margin-bottom: 5px; }
+      .trace-step p { margin: 0; overflow-wrap: anywhere; }
+      .trace-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
       .projection-warning { border: 1px solid rgba(197, 76, 76, 0.35); border-left: 5px solid var(--risk); border-radius: 8px; background: #fff4f4; color: #742626; padding: 12px; margin: 12px 0; font-weight: 800; }
       .hidden { display: none !important; }
       .mono { font-family: Consolas, "Courier New", monospace; }
       @media (max-width: 900px) {
-        .hero, .control-grid, .overview-guide, .guide-strip, .hub-grid, .task-board-columns, .judgment-console, .judgment-actions, .score-duo, .actionability, .decision-strip, .trust-boundary, .status-rail, .metric-grid, .card-grid, .signal-grid, .open-work-grid, .work-hero, .stack-grid, .architecture-map, .platform-intake, .platform-grid, .deck-slide, .deck-metrics, .gantt-axis, .gantt-row, .ops-command-hero { grid-template-columns: 1fr; }
+        .hero, .control-grid, .overview-guide, .guide-strip, .hub-grid, .task-board-columns, .judgment-console, .judgment-actions, .score-duo, .actionability, .decision-strip, .trust-boundary, .status-rail, .metric-grid, .card-grid, .signal-grid, .open-work-grid, .work-hero, .stack-grid, .architecture-map, .platform-intake, .platform-grid, .trace-flow, .deck-slide, .deck-metrics, .gantt-axis, .gantt-row, .ops-command-hero { grid-template-columns: 1fr; }
         .panel, .panel-wide { grid-column: span 12; }
         .control-card { min-width: 0; }
         .slide-deck { padding: 12px; }
@@ -3984,7 +4143,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <div class="shell">
       <header class="hero">
         <div>
-          <p class="eyebrow">Harness Dashboard 4.6.4</p>
+          <p class="eyebrow">Harness Dashboard 4.6.5</p>
           <h1 id="dashboard-title" data-workspace="${workspaceName}">${workspaceName} Project World Model</h1>
           <p class="lede" id="dashboard-lede">A canonical, ledger-backed view of project reality for stakeholders, AI Agents, and maintainers.</p>
         </div>
@@ -4023,6 +4182,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         </div>
       </header>
       <section id="mode-banner" class="mode-banner" aria-live="polite"></section>
+      <section id="projection-confidence" class="projection-confidence" aria-live="polite"></section>
       <section id="status-rail" class="status-rail" aria-label="Persistent project status rail"></section>
       <nav class="tablist" role="tablist" aria-label="Dashboard views">
         <button class="tab" role="tab" id="tab-overview" aria-controls="view-overview" aria-selected="true" data-purpose="Executive view: world judgment, critical signals, required decision, risk, and trustworthiness.">Overview</button>
@@ -4120,6 +4280,19 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "printReport": "Print / PDF",
           "copiedReportBrief": "Report brief copied",
           "projectionWarning": "Projection warning",
+          "projectionConfidence": "Projection Confidence",
+          "projectionDebt": "Projection debt",
+          "actionGate": "Action gate",
+          "lastRefresh": "Last refresh",
+          "trust": "Trust",
+          "openEvidence": "Open evidence",
+          "openDecisions": "Open decisions",
+          "sessionTraceability": "Session Traceability",
+          "traceIntegrity": "Trace integrity",
+          "originalRequest": "Original request",
+          "processSummary": "Process summary",
+          "resultSummary": "Result summary",
+          "residualRisk": "Residual risk",
           "reportScopeFallback": "Scope fallback applied",
           "reportScopeStrictEmpty": "No rows matched the selected scope.",
           "startPresentation": "Start fullscreen",
@@ -4643,6 +4816,53 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           '<span><strong>' + esc(t("projection")) + ':</strong> ' + esc(meta.projectionVersion || meta.schemaVersion || "unknown") + '</span>' +
           '<span><strong>' + esc(t("freshness")) + ':</strong> ' + esc(meta.staleness || "unknown") + '</span>' +
           (app.projectionError ? '<span class="projection-warning"><strong>' + esc(t("projectionWarning")) + ':</strong> ' + esc(app.projectionError) + '</span>' : "");
+      }
+      function projectionConfidenceState() {
+        const state = app.state || {};
+        const meta = state.meta || {};
+        const confidence = state.projectionConfidence || {};
+        const evidence = state.governanceEvidenceBrief || {};
+        const trust = state.trustBoundary || {};
+        const listener = state.listener || ((state.dashboardRuntime || {}).listener) || {};
+        const missingEvidenceCount = Number(confidence.missingEvidenceCount ?? ((evidence.missingEvidenceClaims || []).length || 0));
+        const openDecisionCount = Number(confidence.openDecisionCount ?? ((evidence.unresolvedDecisions || []).length || 0));
+        const staleness = String(confidence.staleness || meta.staleness || (app.stale ? "stale" : "fresh"));
+        const trustStatus = String(confidence.trustBoundaryStatus || trust.status || "unknown");
+        const status = String(confidence.status || (missingEvidenceCount > 0 || /bootstrap|warning|stale|partial/i.test(staleness + " " + trustStatus) ? "projection-debt" : "current"));
+        return {
+          status,
+          completeness: confidence.completeness || ((state.worldModelCompleteness || {}).status) || meta.completeness || "unknown",
+          staleness,
+          trustStatus,
+          missingEvidenceCount,
+          openDecisionCount,
+          lastSuccessfulRefreshAt: confidence.lastSuccessfulRefreshAt || meta.generatedAt || t("notDeclared"),
+          sourceSequence: confidence.lastSourceEventSequence || meta.sourceEventSequence || 0,
+          listenerStatus: confidence.localListenerStatus || listener.status || "not-started",
+          userMessage: confidence.userMessage || t("projectionDebt"),
+          actionGate: confidence.actionGate || "Review evidence debt before treating this projection as operational truth.",
+          requiredActions: confidence.requiredActions || [],
+        };
+      }
+      function renderProjectionConfidence() {
+        const target = document.getElementById("projection-confidence");
+        if (!target) return;
+        const confidence = projectionConfidenceState();
+        const hasDebt = /debt|warning|bootstrap|partial|stale|blocked|risk/i.test(confidence.status + " " + confidence.staleness + " " + confidence.trustStatus) || confidence.missingEvidenceCount > 0 || confidence.openDecisionCount > 0;
+        target.className = "projection-confidence " + (hasDebt ? "debt" : "ok");
+        const actions = (confidence.requiredActions || []).slice(0, 4).map((item) => '<li>' + esc(item) + '</li>').join("");
+        target.innerHTML =
+          '<div class="projection-confidence-head"><div><span class="rail-label">' + esc(t("projectionConfidence")) + '</span><strong>' + esc(confidence.userMessage) + '</strong></div>' + badge(hasDebt ? t("projectionDebt") : confidence.status) + '</div>' +
+          metricGrid([
+            [t("freshness"), confidence.staleness, "projection state"],
+            [t("trust"), confidence.trustStatus, "trustBoundary"],
+            [t("openEvidence"), confidence.missingEvidenceCount, "missing claims"],
+            [t("openDecisions"), confidence.openDecisionCount, "unresolved decisions"],
+            [t("lastRefresh"), confidence.lastSuccessfulRefreshAt || t("notDeclared"), "source event " + confidence.sourceSequence],
+            ["Listener", confidence.listenerStatus, "local API"],
+          ]) +
+          '<p><strong>' + esc(t("actionGate")) + ':</strong> ' + esc(confidence.actionGate) + '</p>' +
+          (actions ? '<ul>' + actions + '</ul>' : "");
       }
       function renderRail() {
         const state = app.state;
@@ -5217,6 +5437,63 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           ["QA Evidence", qa.status || "not-declared", "browser gate"],
         ]) + '<p class="muted">' + esc(scorecard.scoringPolicy || "") + '</p><div class="quality-meter">' + rows + '</div><h3>QA contract</h3><p class="muted">' + esc(qa.note || "") + '</p><ul>' + qaRows + '</ul><h3>Evaluator provenance</h3><ul>' + provenance + '</ul><h3>Why not 9.5 yet</h3><ul>' + whyNot + '</ul>';
       }
+      function normalizeTraceEntry(entry) {
+        const trace = entry.taskTrace || entry;
+        const integrity = entry.traceIntegrity || trace.traceIntegrity || {};
+        return {
+          sessionId: entry.sessionId || entry.id || "session",
+          title: entry.title || entry.goal || entry.sessionId || entry.id || "Session",
+          status: entry.status || "unknown",
+          phase: entry.phase || entry.stage || entry.currentPhase || "unknown",
+          originalRequest: trace.originalRequest || entry.originalRequest || entry.goal || t("notDeclared"),
+          processSummary: trace.processSummary || entry.processSummary || entry.note || t("notDeclared"),
+          resultSummary: trace.resultSummary || entry.resultSummary || entry.note || t("notDeclared"),
+          integrityStatus: integrity.status || trace.integrityStatus || "unknown",
+          missingFields: integrity.missingFields || trace.missingFields || [],
+          residualRisk: entry.residualRisk || trace.residualRisk || "",
+          evidenceRefs: entry.evidenceRefs || entry.outputs || [],
+          nextStep: entry.nextStep || entry.nextAction || t("notDeclared"),
+          recordedAt: entry.recordedAt || trace.recordedAt || entry.endedAt || entry.startedAt || "",
+          source: entry.source || trace.source || "",
+        };
+      }
+      function renderSessionTraceability() {
+        const traceRoot = app.state.sessionTraceability || {};
+        const projectedEntries = Array.isArray(traceRoot.entries) ? traceRoot.entries : [];
+        const governedEntries = (app.state.governedSessions || []).map((session) => ({
+          ...session,
+          sessionId: session.id,
+          phase: session.stage || session.currentPhase,
+          evidenceRefs: session.outputs || [],
+        }));
+        const seen = new Set();
+        const entries = [...projectedEntries, ...governedEntries]
+          .map(normalizeTraceEntry)
+          .filter((entry) => {
+            const key = entry.sessionId + ":" + entry.phase + ":" + entry.recordedAt;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .slice(0, rowLimit(8));
+        const cards = entries.map((entry) => {
+          const hasMissing = (entry.missingFields || []).length > 0 || /missing|fallback|unknown/i.test(String(entry.integrityStatus));
+          return '<article class="trace-card ' + (hasMissing ? 'warn' : '') + '"><div class="trace-meta">' +
+            badge(entry.status) + badge(entry.phase) + '<span class="source">' + esc(entry.sessionId) + '</span><span class="source">' + esc(t("traceIntegrity")) + ': ' + esc(entry.integrityStatus) + '</span></div>' +
+            '<h3>' + esc(entry.title) + '</h3>' +
+            '<div class="trace-flow">' +
+            '<div class="trace-step"><strong>' + esc(t("originalRequest")) + '</strong><p>' + esc(entry.originalRequest) + '</p></div>' +
+            '<div class="trace-step"><strong>' + esc(t("processSummary")) + '</strong><p>' + esc(entry.processSummary) + '</p></div>' +
+            '<div class="trace-step"><strong>' + esc(t("resultSummary")) + '</strong><p>' + esc(entry.resultSummary) + '</p></div>' +
+            '</div>' +
+            (entry.residualRisk ? '<p><strong>' + esc(t("residualRisk")) + ':</strong> ' + esc(entry.residualRisk) + '</p>' : '') +
+            '<p><strong>' + esc(t("evidence")) + ':</strong> ' + esc((entry.evidenceRefs || []).slice(0, 6).join(", ") || t("noEvidence")) + '</p>' +
+            '<p><strong>' + esc(t("nextOperatorMove")) + ':</strong> ' + esc(entry.nextStep) + '</p>' +
+            (hasMissing ? '<p class="projection-warning">' + esc(t("traceIntegrity")) + ': ' + esc((entry.missingFields || []).join(", ") || entry.integrityStatus) + '</p>' : '') +
+            '</article>';
+        }).join("");
+        return '<p class="muted">' + esc(traceRoot.purpose || "Session trace cards summarize governed work without raw JSON or chat history.") + '</p>' + (cards || '<p class="muted">' + esc(t("none")) + '</p>');
+      }
       function renderActionabilityScore() {
         const score = app.state.governanceActionabilityScore || {};
         const setupScore = Number(score.onboardingScore ?? score.score ?? 0);
@@ -5397,6 +5674,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const routeFallback = [
           "/api/harness-dashboard/v1/snapshot",
           "/api/harness-dashboard/v1/tasks",
+          "/api/harness-dashboard/v1/traceability",
           "/api/harness-dashboard/v1/briefing",
           "/api/harness-dashboard/v1/health",
           "/api/harness-dashboard/v1/events",
@@ -5631,6 +5909,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         if (mode === "agent") {
           document.getElementById("view-overview").innerHTML =
             panel(t("realityNextActionsHub"), renderRealityNextActionsHub(), true) +
+            panel(t("sessionTraceability"), renderSessionTraceability(), true) +
             panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
             panel(t("agentResumeBoard"), renderAgentResumeBoard(), true) +
             panel(t("contextRotMonitor"), renderContextRotMonitor(), true) +
@@ -5642,6 +5921,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         if (mode === "maintainer") {
           document.getElementById("view-overview").innerHTML =
             panel(t("realityNextActionsHub"), renderRealityNextActionsHub(), true) +
+            panel(t("sessionTraceability"), renderSessionTraceability(), true) +
             panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
             panel(t("maintainerHealthBoard"), renderMaintainerHealthBoard(), true) +
             panel(t("projectWorldMap"), renderProjectWorldMap(), true) +
@@ -5657,6 +5937,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         }
         document.getElementById("view-overview").innerHTML =
           panel(t("realityNextActionsHub"), renderRealityNextActionsHub(), true) +
+          panel(t("sessionTraceability"), renderSessionTraceability(), true) +
           panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
           panel(t("stakeholderReport"), renderStakeholderReport(), true) +
           panel(t("projectWorldMap"), renderProjectWorldMap(), true) +
@@ -5748,6 +6029,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         if (getAudienceMode() === "stakeholder") {
           document.getElementById("view-evidence").innerHTML =
             coveragePanel +
+            panel(t("sessionTraceability"), renderSessionTraceability(), true) +
             inventoryPanel;
           return;
         }
@@ -5755,6 +6037,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           document.getElementById("view-evidence").innerHTML =
             vcsPanel +
             coveragePanel +
+            panel(t("sessionTraceability"), renderSessionTraceability(), true) +
             inventoryPanel +
             artifactPanel;
           return;
@@ -5762,6 +6045,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         document.getElementById("view-evidence").innerHTML =
           panel("Claim Evidence Matrix", renderClaimMatrix(), true) +
           coveragePanel +
+          panel(t("sessionTraceability"), renderSessionTraceability(), true) +
           vcsPanel +
           inventoryPanel +
           artifactPanel;
@@ -6160,6 +6444,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       function render() {
         renderChromeText();
         renderMode();
+        renderProjectionConfidence();
         renderRail();
         renderOverview();
         renderWork();
@@ -6483,7 +6768,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
 }
 
 function buildDashboardReadme(): string {
-  return `# Harness Dashboard 4.6.4: Project World Model
+  return `# Harness Dashboard 4.6.5: Project World Model
 
 The dashboard is a ledger-backed Project World Model, not a Markdown-derived report page.
 
@@ -6561,7 +6846,7 @@ function buildDesignFrameworkHtml(): string {
 <meta charset="utf-8" />
 <title>Harness Dashboard Design Framework</title>
 <body>
-  <h1>Harness Dashboard 4.6.4 Design Framework</h1>
+  <h1>Harness Dashboard 4.6.5 Design Framework</h1>
   <p>Executive Overview first. Same data, different density for Stakeholder, AI Agent, and Maintainer modes.</p>
   <ul>
     <li>Modes: Local Live, Static Snapshot, Degraded Offline.</li>
@@ -6581,7 +6866,7 @@ function buildBackendBlueprintHtml(): string {
 <title>Optional Backend Dashboard Blueprint</title>
 <body>
   <h1>Optional Backend Dashboard Blueprint</h1>
-  <p>The default 4.6.4 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
+  <p>The default 4.6.5 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
   <ul>
     <li>Must preserve ledger-first governance.</li>
     <li>Must not replace the local single-file dashboard contract.</li>
@@ -6721,7 +7006,7 @@ export function generateDashboardFiles(
         "Specification for future opt-in backend dashboard implementation.",
       nonGoals: [
         "No backend dashboard app is generated by default.",
-        "No database is required for 4.6.4 MVP.",
+        "No database is required for 4.6.5 MVP.",
         "No persistent UI writes are allowed by default.",
       ],
     }),

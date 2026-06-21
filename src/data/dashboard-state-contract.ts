@@ -33,6 +33,8 @@ export const DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS = [
   "stakeholderBrief",
   "agentResumeBrief",
   "governanceEvidenceBrief",
+  "projectionConfidence",
+  "sessionTraceability",
   "taskQueues",
   "agentTaskQueues",
   "userTaskBoard",

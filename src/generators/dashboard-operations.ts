@@ -12,7 +12,7 @@ import {
 function buildDashboardOpsReadme(): string {
   return `# Harness Dashboard Operations
 
-The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6.4 Hypertext Project World Model.
+The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6.5 Hypertext Project World Model.
 It treats the JSONL event ledger as canonical, the JSON state files as disposable projections,
 and the HTML file as a portable stakeholder projection.
 
@@ -46,7 +46,7 @@ and the HTML file as a portable stakeholder projection.
 ## API
 
 The listener exposes read-only v1 routes under \`/api/harness-dashboard/v1/\`:
-\`snapshot\`, \`index\`, \`tasks\`, \`agent-tasks\`, \`sessions\`, \`dictionary\`, \`version-control\`,
+\`snapshot\`, \`index\`, \`tasks\`, \`agent-tasks\`, \`traceability\`, \`sessions\`, \`dictionary\`, \`version-control\`,
 \`runtime\`, \`briefing\`, \`health\`, \`events\`, and deterministic \`query\`.
 
 Default protections: local token required by \`x-harness-dashboard-token\` or Bearer auth for REST routes;
@@ -198,6 +198,95 @@ function loadJsonOrFallback(fullPath, fallback) {
   }
 }
 
+function backfillProjectionConfidence(state, workspaceId) {
+  if (isPlainObject(state.projectionConfidence)) return;
+  const meta = state.meta || {};
+  const evidence = state.governanceEvidenceBrief || {};
+  const trust = state.trustBoundary || {};
+  const missingEvidenceClaims = Array.isArray(evidence.missingEvidenceClaims) ? evidence.missingEvidenceClaims : [];
+  const unresolvedDecisions = Array.isArray(evidence.unresolvedDecisions) ? evidence.unresolvedDecisions : [];
+  state.projectionConfidence = {
+    schemaVersion: SCHEMA_VERSION,
+    status: "projection-debt",
+    completeness: String(meta.completeness || "legacy-backfill"),
+    staleness: String(meta.staleness || "legacy-backfill"),
+    trustBoundaryStatus: String(trust.status || "legacy-refresh-required"),
+    missingEvidenceCount: missingEvidenceClaims.length,
+    openDecisionCount: unresolvedDecisions.length,
+    lastSuccessfulRefreshAt: null,
+    lastSourceEventSequence: Number(meta.sourceEventSequence || 0),
+    localListenerStatus: String((state.listener || {}).status || "not-started"),
+    actionGate: "Run dashboard-ops refresh before treating this legacy projection as operational truth.",
+    userMessage: "This dashboard state predates projection-confidence fields and was backfilled for safe validation.",
+    requiredActions: [
+      "Run dashboard-ops verify-projections",
+      "Run dashboard-ops refresh",
+      "Record a governed session with request/process/result trace"
+    ],
+    evidenceRefs: ["legacy-dashboard-state", workspaceId]
+  };
+}
+
+function backfillSessionTraceability(state, workspaceId, workspaceName, purpose) {
+  if (isPlainObject(state.sessionTraceability) && Array.isArray(state.sessionTraceability.entries) && state.sessionTraceability.entries.length > 0) return;
+  const governedSessions = Array.isArray(state.governedSessions) ? state.governedSessions : [];
+  const sessionLog = Array.isArray(state.sessionLog) ? state.sessionLog : [];
+  const sourceSessions = governedSessions.length > 0 ? governedSessions : sessionLog;
+  const entries = sourceSessions.length > 0
+    ? sourceSessions.slice(0, 10).map((session) => {
+        const trace = isPlainObject(session.taskTrace) ? session.taskTrace : {};
+        const evidenceRefs = Array.isArray(session.outputs) ? session.outputs.filter((entry) => typeof entry === "string") : ["legacy-dashboard-state"];
+        return {
+          sessionId: String(session.id || session.sessionId || "legacy-session"),
+          title: String(session.title || session.goal || workspaceName),
+          status: String(session.status || "legacy-backfill"),
+          phase: String(session.phase || session.stage || "legacy-backfill"),
+          originalRequest: String(trace.originalRequest || session.goal || purpose),
+          processSummary: String(trace.processSummary || session.note || "Legacy dashboard session was backfilled; process summary was not recorded in the old projection."),
+          resultSummary: String(trace.resultSummary || session.note || "Legacy dashboard session requires refresh before result claims are trusted."),
+          traceIntegrity: {
+            status: "legacy-fallback",
+            missingFields: isPlainObject(session.taskTrace) ? [] : ["taskTrace"],
+            source: "legacy-dashboard-state",
+            warning: "Backfilled traceability keeps validation migration-safe but is not verified request/process/result evidence."
+          },
+          residualRisk: "Legacy projection may not preserve full request/process/result trace until refreshed.",
+          evidenceRefs,
+          nextStep: String(session.nextStep || "Run dashboard-ops refresh and record the next governed session."),
+          recordedAt: String(session.endedAt || session.startedAt || "legacy-backfill"),
+          source: "legacy-dashboard-state"
+        };
+      })
+    : [{
+        sessionId: "legacy-dashboard-state",
+        title: workspaceName,
+        status: "legacy-backfill",
+        phase: "legacy-refresh-required",
+        originalRequest: purpose,
+        processSummary: "Legacy dashboard state was loaded without session traceability fields.",
+        resultSummary: "Backfilled traceability enables validation and refresh, but real session trace evidence is still required.",
+        traceIntegrity: {
+          status: "legacy-fallback",
+          missingFields: ["sessionTraceability"],
+          source: "legacy-dashboard-state",
+          warning: "No governed session trace was present in this legacy projection."
+        },
+        residualRisk: "Legacy projection may not preserve full request/process/result trace until refreshed.",
+        evidenceRefs: ["legacy-dashboard-state"],
+        nextStep: "Run dashboard-ops refresh and start or resume a governed session.",
+        recordedAt: "legacy-backfill",
+        source: "legacy-dashboard-state"
+      }];
+  state.sessionTraceability = {
+    schemaVersion: SCHEMA_VERSION,
+    status: "trace-debt",
+    purpose: "Backfilled compatibility projection for request/process/result traceability.",
+    source: "legacy-dashboard-state",
+    integrityPolicy: "Legacy backfills are migration aids only; refreshed governed sessions must record taskTrace directly.",
+    entries
+  };
+}
+
 function normalizeDashboardStateForValidation(state) {
   if (Array.isArray(state.entities)) {
     state.entities = state.entities.map((entity) => {
@@ -221,6 +310,8 @@ function normalizeDashboardStateForValidation(state) {
   const products = Array.isArray((state.projectWorldModel || {}).products) ? state.projectWorldModel.products : [];
   const serviceId = String(((services[0] || {}).id) || "service-primary");
   const productId = String(((products[0] || {}).id) || "product-primary");
+  backfillProjectionConfidence(state, workspaceId);
+  backfillSessionTraceability(state, workspaceId, workspaceName, purpose);
   if (!isPlainObject(state.realityModel)) {
     state.realityModel = {
       schemaVersion: SCHEMA_VERSION,
@@ -413,6 +504,8 @@ function envelope(payload, extra = {}) {
       "snapshot",
       "index",
       "tasks",
+      "agent-tasks",
+      "traceability",
       "sessions",
       "dictionary",
       "version-control",
@@ -519,6 +612,7 @@ function validateState(state) {
   if (!isPlainObject(state)) {
     return ["dashboardState must be an object"];
   }
+  normalizeDashboardStateForValidation(state);
   for (const key of REQUIRED_TOP_LEVEL_KEYS) {
     if (!(key in state)) {
       errors.push("Missing required top-level dashboard key: " + key);
@@ -536,6 +630,32 @@ function validateState(state) {
     if (queues[optionalKey] != null && (!Array.isArray(queues[optionalKey]) || queues[optionalKey].some((entry) => typeof entry !== "string"))) {
       errors.push("taskQueues." + optionalKey + " must contain only string ids when present");
     }
+  }
+  const projectionConfidence = requireValidationObject(errors, "dashboardState.projectionConfidence", state.projectionConfidence) || {};
+  requireValidationString(errors, "dashboardState.projectionConfidence.status", projectionConfidence.status);
+  requireValidationString(errors, "dashboardState.projectionConfidence.completeness", projectionConfidence.completeness);
+  requireValidationString(errors, "dashboardState.projectionConfidence.staleness", projectionConfidence.staleness);
+  requireValidationString(errors, "dashboardState.projectionConfidence.trustBoundaryStatus", projectionConfidence.trustBoundaryStatus);
+  requireValidationNumber(errors, "dashboardState.projectionConfidence.missingEvidenceCount", projectionConfidence.missingEvidenceCount);
+  requireValidationNumber(errors, "dashboardState.projectionConfidence.openDecisionCount", projectionConfidence.openDecisionCount);
+  requireValidationString(errors, "dashboardState.projectionConfidence.actionGate", projectionConfidence.actionGate);
+  requireValidationStringArray(errors, "dashboardState.projectionConfidence.requiredActions", projectionConfidence.requiredActions);
+  const sessionTraceability = requireValidationObject(errors, "dashboardState.sessionTraceability", state.sessionTraceability) || {};
+  requireValidationString(errors, "dashboardState.sessionTraceability.status", sessionTraceability.status);
+  requireValidationString(errors, "dashboardState.sessionTraceability.purpose", sessionTraceability.purpose);
+  const traceEntries = Array.isArray(sessionTraceability.entries) ? sessionTraceability.entries : [];
+  if (!Array.isArray(sessionTraceability.entries) || traceEntries.length === 0) {
+    errors.push("dashboardState.sessionTraceability.entries must contain at least one trace entry");
+  }
+  for (const [index, traceEntry] of traceEntries.entries()) {
+    const tracePath = "dashboardState.sessionTraceability.entries[" + index + "]";
+    const item = requireValidationObject(errors, tracePath, traceEntry);
+    if (!item) continue;
+    for (const field of ["sessionId", "status", "phase", "originalRequest", "processSummary", "resultSummary", "nextStep"]) {
+      requireValidationString(errors, tracePath + "." + field, item[field]);
+    }
+    requireValidationObject(errors, tracePath + ".traceIntegrity", item.traceIntegrity);
+    requireValidationStringArray(errors, tracePath + ".evidenceRefs", item.evidenceRefs);
   }
   const agentQueues = requireValidationObject(errors, "dashboardState.agentTaskQueues", state.agentTaskQueues) || {};
   for (const key of ["waiting", "inProgress", "completed", "blocked"]) {
@@ -1461,6 +1581,8 @@ function deriveIndex(state) {
     readinessJudgments: state.readinessJudgments || [],
     trustBoundary: state.trustBoundary || null,
     dashboardQualityScorecard: state.dashboardQualityScorecard || null,
+    projectionConfidence: state.projectionConfidence || null,
+    sessionTraceability: state.sessionTraceability || null,
     governanceActionabilityScore: state.governanceActionabilityScore || null,
     agentPlatformGovernance: state.agentPlatformGovernance || null,
     audienceLens: state.audienceLens || null,
@@ -1488,6 +1610,7 @@ function deriveIndex(state) {
       "/api/harness-dashboard/v1/index",
       "/api/harness-dashboard/v1/tasks",
       "/api/harness-dashboard/v1/agent-tasks",
+      "/api/harness-dashboard/v1/traceability",
       "/api/harness-dashboard/v1/sessions",
       "/api/harness-dashboard/v1/dictionary",
       "/api/harness-dashboard/v1/version-control",
@@ -2242,6 +2365,7 @@ function deriveRuntime(state, previous = {}) {
     generatedAt: now(),
     completeness: state.worldModelCompleteness || "unknown",
     staleness: String(meta.staleness || "fresh"),
+    projectionConfidence: state.projectionConfidence || null,
     listener: Object.assign({
       status: "not-started",
       lifecycle: "auto-restored-on-harness-activity",
@@ -2884,7 +3008,8 @@ function apiPayload(routeName) {
   if (routeName === "index") return sanitizePublic(loadJsonOrFallback(indexPath, deriveIndex(state)));
   if (routeName === "tasks") return publicTasksPayload(state);
   if (routeName === "agent-tasks") return sanitizePublic({ agentTaskQueues: state.agentTaskQueues, agentResumeBrief: state.agentResumeBrief });
-  if (routeName === "sessions") return { sessionLog: publicState.sessionLog, governedSessions: publicState.governedSessions, agentResumeBrief: publicState.agentResumeBrief };
+  if (routeName === "traceability") return sanitizePublic({ projectionConfidence: state.projectionConfidence, sessionTraceability: state.sessionTraceability });
+  if (routeName === "sessions") return { sessionLog: publicState.sessionLog, governedSessions: publicState.governedSessions, sessionTraceability: publicState.sessionTraceability, agentResumeBrief: publicState.agentResumeBrief };
   if (routeName === "dictionary") return sanitizePublic({ dictionary: state.dictionary, ontology: state.ontology });
   if (routeName === "version-control") return sanitizePublic({ versionControl: state.versionControl, vcsChangeRecords: state.vcsChangeRecords });
   if (routeName === "runtime") return sanitizePublic(loadJsonOrFallback(runtimePath, deriveRuntime(state)));
@@ -2904,6 +3029,7 @@ function deterministicQuery(url) {
   const publicState = publicSnapshotPayload(state);
   const source = scope === "tasks" ? publicTasksPayload(state)
     : scope === "agent-tasks" ? sanitizePublic({ agentTaskQueues: state.agentTaskQueues, agentResumeBrief: state.agentResumeBrief })
+    : scope === "traceability" ? sanitizePublic({ projectionConfidence: state.projectionConfidence, sessionTraceability: state.sessionTraceability })
     : scope === "decisions" ? { decisionContracts: publicState.decisionContracts }
     : scope === "evidence" ? { artifacts: publicState.artifacts, governanceEvidenceBrief: publicState.governanceEvidenceBrief, versionControl: publicState.versionControl }
     : publicState;

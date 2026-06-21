@@ -239,11 +239,21 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(dashboardStateSchema.properties.claimEvidenceMatrix.properties.missingEvidenceItems);
   assert.ok(dashboardStateSchema.properties.dashboardQualityScorecard.properties.qaEvidence);
   assert.ok(dashboardStateSchema.properties.dashboardQualityScorecard.properties.modernWebUiPolicy);
+  assert.ok(dashboardStateSchema.properties.projectionConfidence.properties.requiredActions);
+  assert.ok(dashboardStateSchema.properties.sessionTraceability.properties.entries);
   for (const key of DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS) {
     assert.ok(key in state, `dashboard-state.json should include ${key}`);
   }
   assert.equal(state.meta.schemaVersion, CURRENT_VERSION);
   assert.equal(state.projectWorldModel.mission.statement, params.purpose);
+  const legacyShape = JSON.parse(JSON.stringify(state));
+  delete legacyShape.projectionConfidence;
+  delete legacyShape.sessionTraceability;
+  const legacyShapeValidation = validateDashboardStateShape(legacyShape);
+  assert.equal(legacyShapeValidation.valid, true, legacyShapeValidation.errors.join("\n"));
+  assert.equal(legacyShape.projectionConfidence.status, "projection-debt");
+  assert.equal(legacyShape.sessionTraceability.status, "trace-debt");
+  assert.equal(legacyShape.sessionTraceability.entries[0].traceIntegrity.status, "legacy-fallback");
   assert.equal(state.realityModel.nodes.some((node) => node.type === "repository"), true);
   assert.equal(state.realityModel.edges.some((edge) => edge.relation === "projects-world-model"), true);
   assert.match(state.goalCompass.currentReality, /Bootstrap harness/);
@@ -277,6 +287,18 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(Array.isArray(state.readinessJudgments));
   assert.equal(state.judgmentConsole.nextRequiredDecision, "decision-first-governed-goal");
   assert.equal(state.trustBoundary.status, "bootstrap-warning");
+  assert.equal(state.projectionConfidence.status, "projection-debt");
+  assert.equal(state.projectionConfidence.trustBoundaryStatus, "bootstrap-warning");
+  assert.equal(state.projectionConfidence.missingEvidenceCount > 0, true);
+  assert.ok(state.projectionConfidence.requiredActions.some((item) => /verify-projections/.test(item)));
+  assert.equal(state.sessionTraceability.status, "bootstrap-trace-complete");
+  assert.equal(state.sessionTraceability.entries[0].originalRequest, params.purpose);
+  assert.match(state.sessionTraceability.entries[0].processSummary, /generated the Project World Model ledger/);
+  assert.match(state.sessionTraceability.entries[0].resultSummary, /real VCS, service, owner, release, and operations evidence/);
+  assert.equal(state.sessionTraceability.entries[0].traceIntegrity.status, "complete");
+  assert.ok(state.sessionTraceability.entries[0].evidenceRefs.includes("docs/ai-harness/dashboard/index.html"));
+  assert.equal(state.governedSessions[0].taskTrace.originalRequest, params.purpose);
+  assert.equal(state.governedSessions[0].traceIntegrity.status, "complete");
   assert.equal(state.dashboardQualityScorecard.uiUxDesignScore < 9.5, true);
   assert.equal(
     state.dashboardQualityScorecard.dimensions.every((dimension) => dimension.score < 9.5),
@@ -370,6 +392,13 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(html, /data-report-copy/);
   assert.match(html, /report-brief-preview/);
   assert.match(html, /projection-warning/);
+  assert.match(html, /projection-confidence/);
+  assert.match(html, /Projection Confidence/);
+  assert.match(html, /Session Traceability/);
+  assert.match(html, /renderProjectionConfidence/);
+  assert.match(html, /renderSessionTraceability/);
+  assert.match(html, /originalRequest/);
+  assert.match(html, /traceIntegrity/);
   assert.match(html, /Maintainer Report Deck/);
   assert.match(html, /slide-deck/);
   assert.match(html, /world-prism/);
@@ -444,6 +473,7 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(html, /Static Snapshot/);
   assert.match(html, /Degraded Offline/);
   assert.match(html, /api\/harness-dashboard\/v1\/events/);
+  assert.match(html, /api\/harness-dashboard\/v1\/traceability/);
   assert.match(html, /setSlideDeckBackgroundIsolation/);
   assert.match(html, /document\.querySelector\(".shell"\)/);
   assert.match(html, /node\.inert = isIsolated/);
@@ -1201,6 +1231,19 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
 
 {
   const { root } = generateWorkspace();
+  const statePath = path.join(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  const legacyState = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  delete legacyState.projectionConfidence;
+  delete legacyState.sessionTraceability;
+  fs.writeFileSync(statePath, JSON.stringify(legacyState, null, 2) + "\n", "utf-8");
+  const scriptPath = path.join(root, "docs/ai-harness/dashboard/scripts/dashboard-ops.mjs");
+  const result = runNode([scriptPath, "validate"], { cwd: root });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /valid/);
+}
+
+{
+  const { root } = generateWorkspace();
   const scriptPath = path.join(root, "docs/ai-harness/dashboard/scripts/dashboard-ops.mjs");
 
   let result = runNode(["--check", scriptPath], { cwd: root });
@@ -1609,6 +1652,7 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
 
   const session = readJson(root, "docs/ai-harness/runtime/sessions/session-review-loop.session.json");
   const packet = readJson(root, "docs/ai-harness/runtime/work-packets/session-review-loop.work-packet.json");
+  const dashboardState = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
   const packetMarkdown = fs.readFileSync(
     path.join(root, "docs/ai-harness/runtime/work-packets/session-review-loop.md"),
     "utf-8"
@@ -1634,6 +1678,12 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(packet.workingMemory.curationRule, /Promote only evidence-backed/);
   assert.match(packetMarkdown, /Recent Negative Review \/ Improvement Records/);
   assert.match(packetMarkdown, /No assessment evidence is linked/);
+  assert.equal(dashboardState.stakeholderBrief.currentRisk, "Learning readiness remains unproven until the receipt is attached.");
+  assert.equal(dashboardState.agentResumeBrief.currentRisk, "Learning readiness remains unproven until the receipt is attached.");
+  assert.equal(
+    dashboardState.sessionTraceability.entries.find((entry) => entry.sessionId === "session-review-loop").residualRisk,
+    "Learning readiness remains unproven until the receipt is attached."
+  );
 }
 
 {
@@ -1733,6 +1783,9 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   const audit = auditHarnessRuntime(root);
   assert.equal(audit.valid, false);
   assert.match(audit.summary, /taskTrace/);
+  const degradedLog = getHarnessSessionLog(root, "session-traceability", 5);
+  assert.equal(degradedLog.events[0].traceIntegrity.status, "legacy-fallback");
+  assert.ok(degradedLog.events[0].traceIntegrity.missingFields.includes("taskTrace"));
 }
 
 {
@@ -1926,6 +1979,7 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     const runtime = await runtimeResponse.json();
     assert.equal(runtime.readOnly, true);
     assert.equal(runtime.apiVersion, "v1");
+    assert.ok(runtime.capabilities.includes("traceability"));
     assert.equal(runtime.payload.listener.status, "listening");
 
     const rejected = await fetch(apiUrl("runtime"));
@@ -1976,6 +2030,17 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     assert.equal(JSON.stringify(sessionsPayload.payload).includes("task-bootstrap-refresh-projections"), false);
     assert.equal(JSON.stringify(sessionsPayload.payload).includes("session-0001"), false);
     assert.equal(JSON.stringify(sessionsPayload.payload).includes(root), false);
+
+    const traceabilityPayload = await fetch(apiUrl("traceability"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(traceabilityPayload.readOnly, true);
+    assert.equal(traceabilityPayload.payload.projectionConfidence.status, "projection-debt");
+    assert.ok(traceabilityPayload.payload.sessionTraceability.entries[0].originalRequest);
+    assert.equal(traceabilityPayload.payload.sessionTraceability.entries[0].traceIntegrity.status, "complete");
+    assert.equal(JSON.stringify(traceabilityPayload.payload).includes(root), false);
+
+    const traceabilityQuery = await fetch(apiUrl("query?scope=traceability&q=originalRequest"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(traceabilityQuery.readOnly, true);
+    assert.equal(traceabilityQuery.payload.resultCount > 0, true);
 
     const briefingResponse = await fetch(apiUrl("briefing"), { headers: authHeaders });
     assert.equal(briefingResponse.status, 200);

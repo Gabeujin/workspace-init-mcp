@@ -133,6 +133,10 @@ export function getHarnessDashboardContext(
     fullState.harnessEvaluation ?? compactIndex.harnessEvaluation;
   const cognitiveOffloading =
     fullState.cognitiveOffloading ?? compactIndex.cognitiveOffloading;
+  const projectionConfidence =
+    fullState.projectionConfidence ?? compactIndex.projectionConfidence;
+  const sessionTraceability =
+    fullState.sessionTraceability ?? compactIndex.sessionTraceability;
   const agentResumeRecord =
     (agentResumeBrief as Record<string, unknown> | undefined) ?? {};
   const governanceEvidenceRecord =
@@ -159,6 +163,8 @@ export function getHarnessDashboardContext(
             contextRotMonitor,
             harnessEvaluation,
             cognitiveOffloading,
+            projectionConfidence,
+            sessionTraceability,
             worldJudgment: fullState.worldJudgment,
             audienceLens: fullState.audienceLens,
             criticalSignals: fullState.criticalSignals,
@@ -178,6 +184,8 @@ export function getHarnessDashboardContext(
               contextRotMonitor,
               harnessEvaluation,
               cognitiveOffloading,
+              projectionConfidence,
+              sessionTraceability,
               worldJudgment: fullState.worldJudgment,
               audienceLens: fullState.audienceLens,
               criticalSignals: fullState.criticalSignals,
@@ -227,6 +235,8 @@ export function getHarnessDashboardContext(
               contextRotMonitor,
               harnessEvaluation,
               cognitiveOffloading,
+              projectionConfidence,
+              sessionTraceability,
               worldJudgment: fullState.worldJudgment,
               criticalSignals: fullState.criticalSignals,
               readinessJudgments: fullState.readinessJudgments,

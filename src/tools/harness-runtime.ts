@@ -168,6 +168,7 @@ interface HarnessRuntimeEvent {
   note: string;
   artifactPaths: string[];
   taskTrace: HarnessTaskTrace;
+  traceIntegrity?: HarnessTaskTraceIntegrity;
 }
 
 interface HarnessTaskTrace {
@@ -176,6 +177,13 @@ interface HarnessTaskTrace {
   resultSummary: string;
   recordedAt: string;
   source: string;
+}
+
+interface HarnessTaskTraceIntegrity {
+  status: "complete" | "legacy-fallback" | "missing-taskTrace-fields";
+  missingFields: string[];
+  source: string;
+  warning: string | null;
 }
 
 interface HarnessRuntimeSessionState {
@@ -403,6 +411,7 @@ export interface HarnessSessionLogResult {
     note: string;
     artifactPaths: string[];
     taskTrace: HarnessTaskTrace;
+    traceIntegrity?: HarnessTaskTraceIntegrity;
   }>;
   evaluationHistory: NonNullable<
     HarnessRuntimeSessionState["chunk"]["evaluationLoop"]
@@ -4334,6 +4343,64 @@ function writeIdleExecutionBridge(workspacePath: string): void {
   });
 }
 
+function taskTraceIntegrity(event: HarnessRuntimeEvent): HarnessTaskTraceIntegrity {
+  if (!isPlainObject(event.taskTrace)) {
+    return {
+      status: "legacy-fallback",
+      missingFields: ["taskTrace"],
+      source: "legacy-event-fallback",
+      warning:
+        "This event predates strict taskTrace enforcement or was imported without taskTrace; request/process/result text is display fallback, not verified trace evidence.",
+    };
+  }
+  const missingFields = [
+    "originalRequest",
+    "processSummary",
+    "resultSummary",
+  ].filter((field) => !isString(event.taskTrace[field as keyof HarnessTaskTrace]));
+  return {
+    status: missingFields.length > 0 ? "missing-taskTrace-fields" : "complete",
+    missingFields,
+    source: event.taskTrace.source || "taskTrace",
+    warning:
+      missingFields.length > 0
+        ? "Task trace exists but is missing required request/process/result fields."
+        : null,
+  };
+}
+
+function displayTaskTrace(
+  event: HarnessRuntimeEvent,
+  requestRecord: HarnessRuntimeSessionState["requestRecord"]
+): HarnessTaskTrace {
+  return event.taskTrace ?? buildTaskTrace({
+    fallbackOriginalRequest: requestRecord.originalRequest,
+    fallbackProcessSummary: event.note,
+    fallbackResultSummary: event.outcome,
+    recordedAt: event.at,
+    source: "legacy-event-fallback",
+  });
+}
+
+function eventTraceRecord(
+  event: HarnessRuntimeEvent,
+  requestRecord: HarnessRuntimeSessionState["requestRecord"]
+) {
+  const taskTrace = displayTaskTrace(event, requestRecord);
+  const traceIntegrity = taskTraceIntegrity(event);
+  return {
+    at: event.at,
+    phase: event.phase,
+    actor: event.actor,
+    action: event.action,
+    originalRequest: taskTrace.originalRequest,
+    processSummary: taskTrace.processSummary,
+    resultSummary: taskTrace.resultSummary,
+    source: taskTrace.source,
+    traceIntegrity,
+  };
+}
+
 function writeWorkPacket(
   workspacePath: string,
   session: HarnessRuntimeSessionState,
@@ -4466,16 +4533,9 @@ function writeWorkPacket(
       "Use one logical change per commit and reference the session, chunk, plan, or issue when available.",
     roleBrief: buildRoleBrief(session),
     summary: `${session.session.nextActor} should continue ${session.session.currentPhase} for ${session.session.id} using the active artifact and approved governance boundaries.`,
-    recentTaskRecords: session.events.slice(-5).map((event) => ({
-      at: event.at,
-      phase: event.phase,
-      actor: event.actor,
-      action: event.action,
-      originalRequest: event.taskTrace?.originalRequest ?? requestRecord.originalRequest,
-      processSummary: event.taskTrace?.processSummary ?? event.note,
-      resultSummary: event.taskTrace?.resultSummary ?? event.outcome,
-      source: event.taskTrace?.source ?? "legacy-event-fallback",
-    })),
+    recentTaskRecords: session.events
+      .slice(-5)
+      .map((event) => eventTraceRecord(event, requestRecord)),
     recentEvents: session.events.slice(-5).map((event) => ({
       at: event.at,
       phase: event.phase,
@@ -4787,6 +4847,34 @@ function syncDashboardFromSession(
     "docs/ai-harness/runtime/state/active-session.json",
     workPacketPath,
   ]);
+  const requestRecord = getSessionRequestRecord(session);
+  const latestEvent = session.events[session.events.length - 1];
+  const latestTraceRecord =
+    latestEvent == null
+      ? {
+          originalRequest: requestRecord.originalRequest,
+          processSummary: session.notes.current,
+          resultSummary: session.notes.lastOutcome,
+          source: "session-request-record",
+          traceIntegrity: {
+            status: "legacy-fallback",
+            missingFields: ["event"],
+            source: "session-request-record",
+            warning:
+              "No runtime event was available for this dashboard projection; use the session request record as limited display context.",
+          } satisfies HarnessTaskTraceIntegrity,
+        }
+      : eventTraceRecord(latestEvent, requestRecord);
+  const evaluationHistory = session.chunk.evaluationLoop?.history ?? [];
+  const latestEvaluation =
+    evaluationHistory.length > 0
+      ? evaluationHistory[evaluationHistory.length - 1]
+      : null;
+  const residualRisk =
+    latestEvaluation?.residualRisk ??
+    (session.session.status === "blocked" ? session.notes.current : null);
+  const reviewFindings = latestEvaluation?.findings ?? [];
+  const requiredFixes = latestEvaluation?.requiredFixes ?? [];
 
   const sessionLog = Array.isArray(dashboardState.sessionLog)
     ? (dashboardState.sessionLog as Array<Record<string, unknown>>)
@@ -4801,6 +4889,15 @@ function syncDashboardFromSession(
     endedAt: session.session.updatedAt,
     owner: session.session.nextActor,
     outputs: sessionOutputs,
+    taskTrace: {
+      originalRequest: latestTraceRecord.originalRequest,
+      processSummary: latestTraceRecord.processSummary,
+      resultSummary: latestTraceRecord.resultSummary,
+      recordedAt: latestEvent?.at ?? updatedAt,
+      source: latestTraceRecord.source,
+    },
+    traceIntegrity: latestTraceRecord.traceIntegrity,
+    residualRisk,
     note: session.notes.current,
   };
   if (sessionLogIndex >= 0) {
@@ -4874,6 +4971,17 @@ function syncDashboardFromSession(
       ),
     },
     outputs: sessionOutputs,
+    taskTrace: {
+      originalRequest: latestTraceRecord.originalRequest,
+      processSummary: latestTraceRecord.processSummary,
+      resultSummary: latestTraceRecord.resultSummary,
+      recordedAt: latestEvent?.at ?? updatedAt,
+      source: latestTraceRecord.source,
+    },
+    traceIntegrity: latestTraceRecord.traceIntegrity,
+    residualRisk,
+    reviewFindings,
+    requiredFixes,
     nextStep: session.notes.current,
   };
   if (governedIndex >= 0) {
@@ -4885,6 +4993,65 @@ function syncDashboardFromSession(
     governedSessions.push(governedEntry);
   }
   dashboardState.governedSessions = governedSessions;
+
+  const traceabilityRoot = isPlainObject(dashboardState.sessionTraceability)
+    ? dashboardState.sessionTraceability
+    : {};
+  const traceEntries = Array.isArray(traceabilityRoot.entries)
+    ? (traceabilityRoot.entries as Array<Record<string, unknown>>)
+    : [];
+  const traceEntry = {
+    sessionId: session.session.id,
+    title: session.session.title,
+    status: session.session.status,
+    phase: currentPhase,
+    originalRequest: latestTraceRecord.originalRequest,
+    processSummary: latestTraceRecord.processSummary,
+    resultSummary: latestTraceRecord.resultSummary,
+    traceIntegrity: latestTraceRecord.traceIntegrity,
+    residualRisk,
+    findings: reviewFindings,
+    requiredFixes,
+    evidenceRefs: sessionOutputs,
+    nextStep: session.notes.current,
+    recordedAt: latestEvent?.at ?? updatedAt,
+    source: latestTraceRecord.source,
+  };
+  const traceIndex = traceEntries.findIndex(
+    (entry) => String(entry.sessionId || "") === session.session.id
+  );
+  if (traceIndex >= 0) {
+    traceEntries[traceIndex] = {
+      ...traceEntries[traceIndex],
+      ...traceEntry,
+    };
+  } else {
+    traceEntries.push(traceEntry);
+  }
+  dashboardState.sessionTraceability = {
+    schemaVersion: HARNESS_RUNTIME_VERSION,
+    status: traceEntries.some((entry) =>
+      String(
+        isPlainObject(entry.traceIntegrity)
+          ? entry.traceIntegrity.status
+          : "unknown"
+      ).includes("missing") ||
+      String(
+        isPlainObject(entry.traceIntegrity)
+          ? entry.traceIntegrity.status
+          : "unknown"
+      ).includes("fallback")
+    )
+      ? "trace-debt"
+      : "trace-complete",
+    purpose:
+      "Let users understand what was requested, what process ran, what result was recorded, what evidence backs it, and what should happen next without opening raw runtime JSON or chat history.",
+    source:
+      "Projected from governedSessions, runtime events, execution receipts, and session summaries.",
+    integrityPolicy:
+      "Missing taskTrace data must be flagged as projection debt; fallback notes may explain context but must not be presented as verified original/process/result trace.",
+    entries: traceEntries,
+  };
 
   const issues = Array.isArray(dashboardState.errors)
     ? (dashboardState.errors as Array<Record<string, unknown>>)
@@ -4935,6 +5102,11 @@ function syncDashboardFromSession(
     activeSession: setActive ? session.session.id : null,
     lastSafeCheckpoint: `Runtime phase ${currentPhase} recorded at ${updatedAt}.`,
     nextSafestAction: session.notes.current,
+    currentRisk:
+      residualRisk ??
+      (session.session.status === "blocked"
+        ? session.notes.current
+        : "No evaluator residual risk is recorded for the active harness session."),
     openDecisions: session.session.status === "blocked" ? [runtimeIssueId] : [],
     blockers: session.session.status === "blocked" ? [runtimeIssueId] : [],
     validationCommands: [
@@ -4964,9 +5136,10 @@ function syncDashboardFromSession(
     whyItMatters:
       "The project dashboard and AI runtime now share the same resumable work state.",
     currentRisk:
-      session.session.status === "blocked"
+      residualRisk ??
+      (session.session.status === "blocked"
         ? session.notes.current
-        : "No active blocker recorded in the harness runtime.",
+        : "No active blocker recorded in the harness runtime."),
     requiredDecision:
       session.session.status === "blocked"
         ? session.notes.current
@@ -5099,10 +5272,82 @@ function syncDashboardFromSession(
     evidenceCoverage: "runtime-current",
     unresolvedDecisions: session.session.status === "blocked" ? [runtimeIssueId] : [],
     staleProjections: [],
-    failedValidations:
-      session.verification.testsStatus === "failed"
+    failedValidations: uniqueStrings([
+      ...(session.verification.testsStatus === "failed"
         ? [`session-${session.session.id}`]
-        : [],
+        : []),
+      ...(latestTraceRecord.traceIntegrity.status === "complete"
+        ? []
+        : [`trace-${session.session.id}`]),
+    ]),
+  };
+
+  const missingEvidenceClaims = Array.isArray(
+    (dashboardState.governanceEvidenceBrief as Record<string, unknown>).missingEvidenceClaims
+  )
+    ? ((dashboardState.governanceEvidenceBrief as Record<string, unknown>).missingEvidenceClaims as unknown[])
+    : [];
+  const unresolvedDecisions = Array.isArray(
+    (dashboardState.governanceEvidenceBrief as Record<string, unknown>).unresolvedDecisions
+  )
+    ? ((dashboardState.governanceEvidenceBrief as Record<string, unknown>).unresolvedDecisions as unknown[])
+    : [];
+  const confidenceRoot = isPlainObject(dashboardState.projectionConfidence)
+    ? dashboardState.projectionConfidence
+    : {};
+  dashboardState.projectionConfidence = {
+    ...confidenceRoot,
+    schemaVersion: HARNESS_RUNTIME_VERSION,
+    status:
+      latestTraceRecord.traceIntegrity.status === "complete" &&
+      missingEvidenceClaims.length === 0 &&
+      unresolvedDecisions.length === 0
+        ? "runtime-current"
+        : "projection-debt",
+    completeness: String(
+      (isPlainObject(dashboardState.worldModelCompleteness)
+        ? dashboardState.worldModelCompleteness.status
+        : confidenceRoot.completeness) || "runtime-current"
+    ),
+    staleness: "runtime-current",
+    trustBoundaryStatus: String(
+      isPlainObject(dashboardState.trustBoundary)
+        ? dashboardState.trustBoundary.status || "runtime-updated"
+        : "runtime-updated"
+    ),
+    missingEvidenceCount: missingEvidenceClaims.length,
+    openDecisionCount: unresolvedDecisions.length,
+    lastSuccessfulRefreshAt: updatedAt,
+    lastSourceEventSequence: session.events.length,
+    localListenerStatus: String(
+      isPlainObject(dashboardState.listener)
+        ? dashboardState.listener.status || "not-started"
+        : "not-started"
+    ),
+    actionGate:
+      latestTraceRecord.traceIntegrity.status === "complete"
+        ? "Continue only from the current governed session, linked evidence, and refreshed projections."
+        : "Resolve trace integrity debt before using this projection for handoff or closeout.",
+    userMessage:
+      latestTraceRecord.traceIntegrity.status === "complete"
+        ? "Runtime session trace is current; remaining confidence depends on evidence and decision closure."
+        : "Runtime session has trace debt; request/process/result continuity needs repair before trusted handoff.",
+    requiredActions:
+      latestTraceRecord.traceIntegrity.status === "complete"
+        ? [
+            "Refresh projections after material changes",
+            "Link verification evidence before closeout",
+          ]
+        : [
+            "Run audit_harness_runtime",
+            "Repair missing taskTrace fields",
+            "Record a governed result with original request, process summary, and result summary",
+          ],
+    evidenceRefs: [
+      "sessionTraceability",
+      "governanceEvidenceBrief",
+      "runtimeOrchestration",
+    ],
   };
 
   writeJson(paths.dashboardStatePath, dashboardState);
@@ -6398,17 +6643,11 @@ function eventWithTrace(
   event: HarnessRuntimeEvent,
   requestRecord: HarnessRuntimeSessionState["requestRecord"]
 ): HarnessRuntimeEvent {
+  const traceIntegrity = taskTraceIntegrity(event);
   return {
     ...event,
-    taskTrace:
-      event.taskTrace ??
-      buildTaskTrace({
-        fallbackOriginalRequest: requestRecord.originalRequest,
-        fallbackProcessSummary: event.note,
-        fallbackResultSummary: event.outcome,
-        recordedAt: event.at,
-        source: "legacy-event-fallback",
-      }),
+    taskTrace: displayTaskTrace(event, requestRecord),
+    traceIntegrity,
   };
 }
 
