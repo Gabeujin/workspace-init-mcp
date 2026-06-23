@@ -416,6 +416,9 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(html, /lookupApiRoute/);
   assert.match(html, /api\/harness-dashboard\/v1\/evidence-ref/);
   assert.match(html, /evidenceStructuredResult/);
+  assert.match(html, /evidence-rank-strip/);
+  assert.match(html, /matchQuality/);
+  assert.match(html, /canonicalPath/);
   assert.match(html, /command-line/);
   assert.match(html, /api-preview/);
   assert.match(html, /slideDeckKeyboardHelp/);
@@ -1845,6 +1848,63 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
 
 {
   const { root } = generateWorkspace();
+  const sessionId = "session-close-trace";
+  startHarnessSession({
+    workspacePath: root,
+    goal: "Verify close trace preservation",
+    originalRequest: "Close a governed runtime session and keep the final trace visible in the dashboard.",
+    processSummary: "Created a close-path governed session for dashboard trace preservation.",
+    resultSummary: "Close-path session opened with request/process/result tracking.",
+    sessionId,
+    chunkId: "chunk-close-trace",
+    expectedWritePaths: ["docs/handovers/session-close-trace/governance-close.md"],
+    queueIfBusy: true,
+  });
+  const closeSteps = [
+    ["planner", "Plan completed for close trace review.", "Planner prepared the close trace plan.", "Plan moved to first review."],
+    ["evaluator", "Review approved close trace plan.", "Evaluator approved the close trace plan.", "Review moved to plan 2."],
+    ["planner", "Plan 2 completed.", "Planner refined close trace verification.", "Plan 2 moved to second review."],
+    ["evaluator", "Review 2 approved.", "Evaluator approved the second close trace plan.", "Review 2 moved to plan 3."],
+    ["planner", "Plan 3 completed.", "Planner finalized close trace scope.", "Plan 3 moved to final review."],
+    ["evaluator", "Review 3 approved.", "Evaluator approved close trace scope.", "Review 3 moved to goal freeze."],
+    ["planner", "Goal frozen.", "Planner froze the close trace goal.", "Goal freeze moved to contract proposal."],
+    ["generator", "Contract proposed.", "Generator drafted the close trace contract.", "Contract proposal moved to contract review."],
+    ["evaluator", "Contract approved.", "Evaluator approved the close trace contract.", "Contract review moved to implementation."],
+    ["generator", "Implementation completed.", "Generator implemented close trace verification work.", "Implementation moved to self-check."],
+    ["generator", "Self-check completed.", "Generator checked close trace evidence.", "Self-check moved to independent evaluation."],
+    ["evaluator", "Independent evaluation passed.", "Evaluator independently approved close trace evidence.", "Independent evaluation moved to verification."],
+    ["evaluator", "Verification passed.", "Evaluator verified close trace preservation.", "Verification moved to governance refresh."],
+    ["planner", "Governance refreshed.", "Planner refreshed governance records before close.", "Governance refresh moved to closeout."],
+    ["operator", "Final closeout completed.", "Operator closed governance with final request/process/result trace.", "Closed dashboard trace remains projected."],
+  ];
+  for (const [actorRole, note, processSummary, resultSummary] of closeSteps) {
+    advanceHarnessSession({
+      workspacePath: root,
+      sessionId,
+      action: "complete",
+      actorRole,
+      note,
+      processSummary,
+      resultSummary,
+      artifactPaths: ["docs/handovers/session-close-trace/governance-close.md"],
+    });
+  }
+  const closedSession = readJson(root, "docs/ai-harness/runtime/sessions/session-close-trace.session.json");
+  const dashboardState = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  const traceEntry = dashboardState.sessionTraceability.entries.find((entry) => entry.sessionId === sessionId);
+  const governedEntry = dashboardState.governedSessions.find((entry) => entry.id === sessionId);
+  assert.equal(closedSession.session.status, "closed");
+  assert.equal(traceEntry.status, "closed");
+  assert.equal(traceEntry.phase, "closed");
+  assert.match(traceEntry.processSummary, /Operator closed governance/);
+  assert.match(traceEntry.resultSummary, /Closed dashboard trace remains projected/);
+  assert.equal(traceEntry.traceIntegrity.status, "complete");
+  assert.equal(governedEntry.status, "closed");
+  assert.match(governedEntry.taskTrace.resultSummary, /Closed dashboard trace remains projected/);
+}
+
+{
+  const { root } = generateWorkspace();
   startHarnessSession({
     workspacePath: root,
     goal: "Verify strict trace enforcement",
@@ -2106,16 +2166,26 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     assert.equal(evidenceRefPayload.readOnly, true);
     assert.equal(evidenceRefPayload.payload.ref, "event-000001-bootstrap");
     assert.equal(evidenceRefPayload.payload.resultCount > 0, true);
+    assert.ok(evidenceRefPayload.payload.matchSummary.candidateCount > 0);
+    assert.ok(evidenceRefPayload.payload.matchSummary.exactMatchCount > 0);
     assert.ok(evidenceRefPayload.payload.results.some((item) => item.kind && item.sourcePath && item.title));
+    assert.equal(evidenceRefPayload.payload.results[0].matchQuality, "exact");
+    assert.ok(Number(evidenceRefPayload.payload.results[0].score) >= 100);
+    assert.ok(evidenceRefPayload.payload.results[0].canonicalPath);
+    assert.ok(evidenceRefPayload.payload.results[0].freshness);
+    assert.ok(evidenceRefPayload.payload.results[0].provenance);
     assert.equal(JSON.stringify(evidenceRefPayload.payload).includes(root), false);
 
     const traceabilityQuery = await fetch(apiUrl("query?scope=traceability&q=originalRequest"), { headers: authHeaders }).then((response) => response.json());
     assert.equal(traceabilityQuery.readOnly, true);
     assert.equal(traceabilityQuery.payload.resultCount > 0, true);
+    assert.ok(traceabilityQuery.payload.indexSummary.candidateCount > 0);
+    assert.ok(traceabilityQuery.payload.results[0].matchQuality);
 
     const realityCheckQuery = await fetch(apiUrl("query?scope=reality-check&q=verify-projections"), { headers: authHeaders }).then((response) => response.json());
     assert.equal(realityCheckQuery.readOnly, true);
     assert.equal(realityCheckQuery.payload.resultCount > 0, true);
+    assert.ok(realityCheckQuery.payload.results.every((item) => item.sourcePath && item.text));
     assert.equal(JSON.stringify(realityCheckQuery.payload).includes(root), false);
 
     const briefingResponse = await fetch(apiUrl("briefing"), { headers: authHeaders });

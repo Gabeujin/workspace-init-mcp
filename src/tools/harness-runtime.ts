@@ -6663,6 +6663,7 @@ export function advanceHarnessSession(
       queueSession: false,
       syncDashboard: false,
     });
+    syncDashboardFromSession(params.workspacePath, session, false);
     const promoted = promoteQueuedSessionIfAvailable(params.workspacePath);
     if (promoted == null) {
       syncDashboardWithoutActiveLease(params.workspacePath);

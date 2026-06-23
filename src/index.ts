@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * workspace-init-mcp MCP Server v4.6.6
+ * workspace-init-mcp MCP Server v4.6.7
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -487,7 +487,7 @@ This tool creates a complete workspace setup including:
 - .github/ai-harness/reconcile-policy.json (file-level reconcile safety policy for hold / merge / replace decisions)
 - .github/ai-harness/native-executor-overrides.json (workspace-local handoff and launch tuning for GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, and similar runtimes)
 - docs/ai-harness/readiness/ (remaining-work spec, scoring model, and readiness scorecard template)
-- docs/ai-harness/dashboard/ (Harness Dashboard 4.6.6 Hypertext Project World Model with ledger, projections, single-file HTML, and read-only local API)
+- docs/ai-harness/dashboard/ (Harness Dashboard 4.6.7 Hypertext Project World Model with ledger, projections, single-file HTML, and read-only local API)
 - docs/ai-harness/runtime/ (planner / generator / evaluator runtime state, prompts, and session ledgers)
 - docs/ai-harness/dashboard/scripts/dashboard-ops.mjs (projection rebuild, strict validation, read-only listener, SSE, VCS collection, and public export)
 - .vscode/settings.json (Copilot custom instruction references)
@@ -1234,7 +1234,7 @@ server.registerTool(
   "get_harness_dashboard_context",
   {
     title: "Get Harness Dashboard Context",
-    description: `Read the Harness Dashboard 4.6.6 Hypertext Project World Model projections for AI Agent resume context.
+    description: `Read the Harness Dashboard 4.6.7 Hypertext Project World Model projections for AI Agent resume context.
 
 This tool is intentionally read-only. It never starts listeners, refreshes VCS,
 mutates dashboard state, appends ledger events, runs shell commands, or calls an LLM.

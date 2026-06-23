@@ -12,7 +12,7 @@ import {
 function buildDashboardOpsReadme(): string {
   return `# Harness Dashboard Operations
 
-The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6.6 Hypertext Project World Model.
+The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6.7 Hypertext Project World Model.
 It treats the JSONL event ledger as canonical, the JSON state files as disposable projections,
 and the HTML file as a portable stakeholder projection.
 
@@ -3073,7 +3073,21 @@ function publicTasksPayload(state) {
   return sanitizePublic(sanitizePublicTextForHiddenTasks({ taskQueues: queues, userTaskBoard, agile, workTimeline, workReadinessMap }, hidden));
 }
 
-function evidenceCard(kind, ref, sourcePath, record, matchedFields = []) {
+function compactEvidenceText(value, max = 280) {
+  return String(value == null ? "" : value).split("\\r").join(" ").split("\\n").join(" ").trim().slice(0, max);
+}
+
+function evidenceFreshness(record) {
+  const value = record && (record.lastVerifiedAt || record.lastUpdatedAt || record.updatedAt || record.recordedAt || record.occurredAt || record.generatedAt || record.sourceEventSequence || "");
+  return String(value || "not-declared");
+}
+
+function evidenceProvenance(kind, sourcePath, record) {
+  const explicit = record && (record.source || record.sourceTool || record.provenance || record.eventType || "");
+  return compactEvidenceText(explicit || (kind + " from " + sourcePath), 180);
+}
+
+function evidenceCard(kind, ref, sourcePath, record, matchedFields = [], ranking = {}) {
   const title = String(record && (record.label || record.title || record.statement || record.decision || record.summary || record.id || record.claimId || ref) || ref);
   const status = String(record && (record.status || record.claimStatus || record.state || record.lifecycleState || "referenced") || "referenced");
   const owner = String(record && (record.owner || record.actor || record.agentId || "unassigned") || "unassigned");
@@ -3084,73 +3098,243 @@ function evidenceCard(kind, ref, sourcePath, record, matchedFields = []) {
       : Array.isArray(record && record.sourceRefs)
         ? record.sourceRefs
         : [];
+  const recordId = String(record && (record.id || record.claimId || record.sessionId || record.eventId || "") || "");
   return {
     kind,
     ref,
     sourcePath,
-    title,
+    canonicalPath: String(ranking.canonicalPath || (sourcePath + (recordId ? "#" + recordId : ""))),
+    title: compactEvidenceText(title, 180),
     status,
     owner,
-    summary: String(record && (record.whyItMatters || record.rationale || record.resultSummary || record.processSummary || record.answer || record.requiredEvidenceType || record.nextAction || record.nextStep || record.successSignal || "") || ""),
+    summary: compactEvidenceText(record && (record.whyItMatters || record.rationale || record.resultSummary || record.processSummary || record.answer || record.requiredEvidenceType || record.nextAction || record.nextStep || record.successSignal || "") || ""),
     evidenceRefs: evidenceRefs.map((entry) => String(entry)).slice(0, 12),
     matchedFields,
-    recordId: String(record && (record.id || record.claimId || record.sessionId || record.eventId || "") || "")
+    recordId,
+    score: Number(ranking.score || 0),
+    matchQuality: String(ranking.matchQuality || "unranked"),
+    matchReason: String(ranking.matchReason || "contains requested reference"),
+    freshness: String(ranking.freshness || evidenceFreshness(record)),
+    provenance: String(ranking.provenance || evidenceProvenance(kind, sourcePath, record)),
+    text: compactEvidenceText([title, status, owner, record && (record.whyItMatters || record.rationale || record.resultSummary || record.processSummary || record.answer || record.requiredEvidenceType || record.nextAction || record.nextStep || record.successSignal || "")].filter(Boolean).join(" | "), 420)
   };
 }
 
-function valueContainsRef(value, ref) {
-  return JSON.stringify(value || "").toLowerCase().includes(String(ref || "").toLowerCase());
+function arrayValue(value) {
+  return Array.isArray(value) ? value : [];
 }
 
-function pushEvidenceMatch(results, seen, kind, ref, sourcePath, record, matchedFields = []) {
-  if (!record || !valueContainsRef(record, ref)) return;
-  const key = kind + ":" + sourcePath + ":" + String(record.id || record.claimId || record.sessionId || record.eventId || JSON.stringify(record).slice(0, 80));
-  if (seen.has(key)) return;
-  seen.add(key);
-  results.push(evidenceCard(kind, ref, sourcePath, record, matchedFields));
+function objectValue(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function scalarList(value, depth = 0, limit = 80) {
+  if (limit <= 0 || depth > 4) return [];
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return [String(value)];
+  }
+  if (Array.isArray(value)) {
+    const out = [];
+    for (const item of value) {
+      out.push(...scalarList(item, depth + 1, limit - out.length));
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+  if (value && typeof value === "object") {
+    const out = [];
+    for (const [key, item] of Object.entries(value)) {
+      out.push(String(key));
+      out.push(...scalarList(item, depth + 1, limit - out.length));
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+  return [];
+}
+
+function fieldValues(record, fields) {
+  const values = [];
+  for (const field of fields) {
+    values.push({ field, value: String(field) });
+    const raw = record && record[field];
+    for (const item of scalarList(raw)) {
+      values.push({ field, value: item });
+    }
+  }
+  return values;
+}
+
+function evidenceCollections(publicState) {
+  const reality = objectValue(publicState.realityModel);
+  const goal = objectValue(publicState.goalCompass);
+  const contextRot = objectValue(publicState.contextRotMonitor);
+  const evidence = objectValue(publicState.projectEvidenceInventory);
+  const claimMatrix = objectValue(publicState.claimEvidenceMatrix);
+  const traceability = objectValue(publicState.sessionTraceability);
+  const userReality = objectValue(publicState.userRealityCheck);
+  const projectionConfidence = objectValue(publicState.projectionConfidence);
+  const governanceEvidence = objectValue(publicState.governanceEvidenceBrief);
+  const trustBoundary = objectValue(publicState.trustBoundary);
+  const listener = objectValue(publicState.listener);
+  const workTimeline = objectValue(publicState.workTimeline);
+  const readinessMap = objectValue(publicState.workReadinessMap);
+  const taskBoard = objectValue(publicState.userTaskBoard);
+  const collections = [
+    { kind: "artifact", sourcePath: "artifacts", rows: arrayValue(publicState.artifacts), fields: ["id", "path", "label", "status", "owner"], scopes: ["all", "evidence"] },
+    { kind: "evidence-source", sourcePath: "projectEvidenceInventory.sources", rows: arrayValue(evidence.sources), fields: ["id", "path", "summary", "status", "owner"], scopes: ["all", "evidence"] },
+    { kind: "claim", sourcePath: "claimEvidenceMatrix.claims", rows: arrayValue(claimMatrix.claims), fields: ["claimId", "statement", "subjectRef", "claimStatus", "sign", "object", "interpretant", "evidenceRefs", "counterEvidenceRefs", "nextActionRef"], scopes: ["all", "evidence", "reality-check"] },
+    { kind: "missing-evidence", sourcePath: "claimEvidenceMatrix.missingEvidenceItems", rows: arrayValue(claimMatrix.missingEvidenceItems), fields: ["id", "label", "requiredEvidenceType", "blocksClaimIds", "owner", "nextActionRef"], scopes: ["all", "evidence", "reality-check", "tasks"] },
+    { kind: "decision", sourcePath: "decisionContracts", rows: arrayValue(publicState.decisionContracts), fields: ["id", "decision", "status", "owner", "evidence", "stakeholderImpact"], scopes: ["all", "decisions", "reality-check"] },
+    { kind: "trace", sourcePath: "sessionTraceability.entries", rows: arrayValue(traceability.entries), fields: ["sessionId", "title", "status", "phase", "originalRequest", "processSummary", "resultSummary", "residualRisk", "evidenceRefs", "nextStep"], scopes: ["all", "traceability", "evidence"] },
+    { kind: "reality-node", sourcePath: "realityModel.nodes", rows: arrayValue(reality.nodes), fields: ["id", "label", "type", "state", "evidenceRefs"], scopes: ["all", "reality-check"] },
+    { kind: "reality-edge", sourcePath: "realityModel.edges", rows: arrayValue(reality.edges), fields: ["id", "from", "to", "relation", "evidenceRefs"], scopes: ["all", "reality-check"] },
+    { kind: "goal", sourcePath: "goalCompass.goalGraph", rows: arrayValue(goal.goalGraph), fields: ["id", "statement", "status", "owner", "evidenceRefs"], scopes: ["all", "reality-check"] },
+    { kind: "goal-gap", sourcePath: "goalCompass.topGaps", rows: arrayValue(goal.topGaps), fields: ["id", "label", "status", "owner", "evidenceNeeded", "nextActionRef"], scopes: ["all", "reality-check", "tasks"] },
+    { kind: "context-warning", sourcePath: "contextRotMonitor.rotWarnings", rows: arrayValue(contextRot.rotWarnings), fields: ["id", "summary", "severity", "status", "owner", "evidenceRefs", "nextAction"], scopes: ["all", "evidence", "reality-check"] },
+    { kind: "user-reality-action", sourcePath: "userRealityCheck.actionPlan", rows: arrayValue(userReality.actionPlan), fields: ["id", "rank", "title", "status", "owner", "whyItMatters", "evidenceRequired", "apiRoutes", "blocks", "successSignal", "sourceRefs", "command"], scopes: ["all", "reality-check", "tasks", "evidence"] },
+    { kind: "user-reality-answer", sourcePath: "userRealityCheck.answers", rows: arrayValue(userReality.answers), fields: ["question", "answer", "sourceRefs", "apiRoutes"], scopes: ["all", "reality-check", "evidence"] },
+    { kind: "evidence-map", sourcePath: "userRealityCheck.evidenceMap", rows: arrayValue(userReality.evidenceMap), fields: ["id", "label", "sourceRefs", "missingRefs", "apiRoutes"], scopes: ["all", "reality-check", "evidence"] },
+    { kind: "vcs-record", sourcePath: "vcsChangeRecords", rows: arrayValue(publicState.vcsChangeRecords), fields: ["commitId", "revisionId", "summary", "linkedSessionIds", "linkedTaskIds", "linkedDecisionIds"], scopes: ["all", "evidence"] },
+    { kind: "work-item", sourcePath: "workTimeline.items", rows: arrayValue(workTimeline.items), fields: ["id", "title", "status", "owner", "lane", "evidenceRefs", "nextActionRef", "exitCriteria"], scopes: ["all", "tasks", "evidence"] },
+    { kind: "readiness-row", sourcePath: "workReadinessMap.rows", rows: arrayValue(readinessMap.rows), fields: ["id", "title", "status", "owner", "evidenceRefs", "nextActionRef", "exitCriteria"], scopes: ["all", "tasks", "evidence"] },
+    { kind: "task-board-current", sourcePath: "userTaskBoard.current", rows: arrayValue(taskBoard.current).map((id) => ({ id, title: id, status: "current" })), fields: ["id", "title", "status"], scopes: ["all", "tasks"] },
+    { kind: "state-section", sourcePath: "projectionConfidence", rows: [projectionConfidence], fields: ["status", "completeness", "staleness", "trustBoundaryStatus", "actionGate", "userMessage", "requiredActions", "evidenceRefs"], scopes: ["all", "traceability", "reality-check"] },
+    { kind: "state-section", sourcePath: "governanceEvidenceBrief", rows: [governanceEvidence], fields: ["evidenceCoverage", "missingEvidenceClaims", "unresolvedDecisions", "staleProjections", "failedValidations"], scopes: ["all", "evidence", "reality-check"] },
+    { kind: "state-section", sourcePath: "trustBoundary", rows: [trustBoundary], fields: ["status", "policy", "ledgerRootHash", "projectionStateHash"], scopes: ["all", "evidence", "traceability"] },
+    { kind: "state-section", sourcePath: "listener", rows: [listener], fields: ["status", "lifecycle", "url", "host", "port"], scopes: ["all"] }
+  ];
+  return collections;
+}
+
+function idLikeValues(record) {
+  const ids = [];
+  for (const field of ["id", "claimId", "sessionId", "eventId", "commitId", "revisionId", "path", "sourcePath"]) {
+    if (record && record[field] != null) ids.push(String(record[field]));
+  }
+  for (const field of ["evidenceRefs", "sourceRefs", "counterEvidenceRefs", "apiRoutes"]) {
+    if (Array.isArray(record && record[field])) {
+      ids.push(...record[field].map((item) => String(item)));
+    }
+  }
+  return ids;
+}
+
+function scoreEvidenceRecord(kind, sourcePath, record, fields, query) {
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return null;
+  const matchedFields = [];
+  let score = 0;
+  let reason = "";
+  for (const value of idLikeValues(record)) {
+    const text = value.toLowerCase();
+    if (text === needle) {
+      score = Math.max(score, 120);
+      reason = "exact id or evidence reference match";
+      matchedFields.push("id");
+    } else if (text.includes(needle)) {
+      score = Math.max(score, 86);
+      reason = "id or evidence reference contains query";
+      matchedFields.push("id");
+    }
+  }
+  if (sourcePath.toLowerCase() === needle) {
+    score = Math.max(score, 98);
+    reason = reason || "exact source path match";
+    matchedFields.push("sourcePath");
+  } else if (sourcePath.toLowerCase().includes(needle)) {
+    score = Math.max(score, 70);
+    reason = reason || "source path contains query";
+    matchedFields.push("sourcePath");
+  }
+  for (const entry of fieldValues(record, fields)) {
+    const field = String(entry.field);
+    const value = String(entry.value || "");
+    const lowerField = field.toLowerCase();
+    const lowerValue = value.toLowerCase();
+    if (lowerField === needle) {
+      score = Math.max(score, 82);
+      reason = reason || "field name matches query";
+      matchedFields.push(field);
+    } else if (lowerField.includes(needle)) {
+      score = Math.max(score, 58);
+      reason = reason || "field name contains query";
+      matchedFields.push(field);
+    }
+    if (lowerValue === needle) {
+      score = Math.max(score, 92);
+      reason = reason || "field value matches query";
+      matchedFields.push(field);
+    } else if (lowerValue.includes(needle)) {
+      const weighted = ["title", "label", "statement", "decision", "summary", "answer", "whyItMatters", "processSummary", "resultSummary"].includes(field) ? 68 : 50;
+      score = Math.max(score, weighted);
+      reason = reason || "field value contains query";
+      matchedFields.push(field);
+    }
+  }
+  if (score === 0) return null;
+  const uniqueFields = Array.from(new Set(matchedFields)).slice(0, 8);
+  const matchQuality = score >= 100 ? "exact" : score >= 82 ? "strong" : score >= 60 ? "field" : "context";
+  return {
+    score,
+    matchQuality,
+    matchReason: reason || "ranked field match",
+    matchedFields: uniqueFields.length ? uniqueFields : ["record"],
+    canonicalPath: sourcePath + (String(record && (record.id || record.claimId || record.sessionId || record.eventId || "") || "") ? "#" + String(record.id || record.claimId || record.sessionId || record.eventId) : ""),
+    freshness: evidenceFreshness(record),
+    provenance: evidenceProvenance(kind, sourcePath, record)
+  };
+}
+
+function rankedEvidenceSearch(publicState, query, options = {}) {
+  const needle = String(query || "").trim().slice(0, 180);
+  const scope = String(options.scope || "all").toLowerCase();
+  const limit = Math.max(1, Math.min(50, Number(options.limit || 20)));
+  if (!needle) {
+    return { query: needle, scope, resultCount: 0, results: [], indexSummary: { candidateCount: 0, exactMatchCount: 0, sources: [] } };
+  }
+  const results = [];
+  const seen = new Set();
+  let candidateCount = 0;
+  const sources = new Set();
+  for (const collection of evidenceCollections(publicState)) {
+    const scopes = Array.isArray(collection.scopes) ? collection.scopes : ["all"];
+    if (scope !== "all" && !scopes.includes(scope)) continue;
+    sources.add(collection.sourcePath);
+    for (const record of arrayValue(collection.rows)) {
+      if (!record || typeof record !== "object") continue;
+      candidateCount += 1;
+      const ranking = scoreEvidenceRecord(collection.kind, collection.sourcePath, record, collection.fields || [], needle);
+      if (!ranking) continue;
+      const key = collection.kind + ":" + ranking.canonicalPath + ":" + stableHash(record).slice(0, 16);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push(evidenceCard(collection.kind, needle, collection.sourcePath, record, ranking.matchedFields, ranking));
+    }
+  }
+  results.sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || String(a.sourcePath).localeCompare(String(b.sourcePath)));
+  return {
+    query: needle,
+    scope,
+    resultCount: results.length,
+    results: results.slice(0, limit).map((item, index) => Object.assign({ rank: index + 1 }, item)),
+    indexSummary: {
+      candidateCount,
+      exactMatchCount: results.filter((item) => item.matchQuality === "exact").length,
+      sources: Array.from(sources).sort().slice(0, 24),
+      ranking: "exact id/evidence refs > source path > named fields > contextual section matches"
+    }
+  };
 }
 
 function structuredEvidenceLookup(state, ref) {
-  const needle = String(ref || "").trim().slice(0, 180);
-  if (!needle) {
-    return { ref: needle, resultCount: 0, results: [] };
-  }
   const publicState = publicSnapshotPayload(state);
-  const results = [];
-  const seen = new Set();
-  const addCollection = (kind, sourcePath, rows, fields = []) => {
-    for (const row of Array.isArray(rows) ? rows : []) {
-      pushEvidenceMatch(results, seen, kind, needle, sourcePath, row, fields);
-      if (results.length >= 30) return;
-    }
-  };
-  addCollection("artifact", "artifacts", publicState.artifacts, ["path", "label", "status"]);
-  addCollection("evidence-source", "projectEvidenceInventory.sources", (publicState.projectEvidenceInventory || {}).sources, ["id", "path", "summary"]);
-  addCollection("claim", "claimEvidenceMatrix.claims", (publicState.claimEvidenceMatrix || {}).claims, ["claimId", "statement", "evidenceRefs", "counterEvidenceRefs"]);
-  addCollection("missing-evidence", "claimEvidenceMatrix.missingEvidenceItems", (publicState.claimEvidenceMatrix || {}).missingEvidenceItems, ["id", "label", "requiredEvidenceType", "blocksClaimIds"]);
-  addCollection("decision", "decisionContracts", publicState.decisionContracts, ["id", "decision", "evidence"]);
-  addCollection("trace", "sessionTraceability.entries", (publicState.sessionTraceability || {}).entries, ["sessionId", "originalRequest", "processSummary", "resultSummary", "evidenceRefs"]);
-  addCollection("reality-node", "realityModel.nodes", (publicState.realityModel || {}).nodes, ["id", "label", "evidenceRefs"]);
-  addCollection("reality-edge", "realityModel.edges", (publicState.realityModel || {}).edges, ["id", "relation", "evidenceRefs"]);
-  addCollection("goal", "goalCompass.goalGraph", (publicState.goalCompass || {}).goalGraph, ["id", "statement", "evidenceRefs"]);
-  addCollection("context-warning", "contextRotMonitor.rotWarnings", (publicState.contextRotMonitor || {}).rotWarnings, ["id", "summary", "evidenceRefs"]);
-  addCollection("user-reality-action", "userRealityCheck.actionPlan", (publicState.userRealityCheck || {}).actionPlan, ["id", "title", "sourceRefs", "evidenceRequired"]);
-  addCollection("user-reality-answer", "userRealityCheck.answers", (publicState.userRealityCheck || {}).answers, ["question", "answer", "sourceRefs"]);
-  addCollection("vcs-record", "vcsChangeRecords", publicState.vcsChangeRecords, ["commitId", "revisionId", "linkedSessionIds", "linkedTaskIds", "linkedDecisionIds"]);
-  if (results.length === 0) {
-    for (const [sourcePath, value] of Object.entries({
-      projectionConfidence: publicState.projectionConfidence,
-      governanceEvidenceBrief: publicState.governanceEvidenceBrief,
-      trustBoundary: publicState.trustBoundary,
-      listener: publicState.listener,
-    })) {
-      pushEvidenceMatch(results, seen, "state-section", needle, sourcePath, value, ["section"]);
-    }
-  }
+  const result = rankedEvidenceSearch(publicState, ref, { scope: "all", limit: 20 });
   return {
-    ref: needle,
-    resultCount: results.length,
-    results: results.slice(0, 20)
+    ref: result.query,
+    resultCount: result.resultCount,
+    matchSummary: result.indexSummary,
+    results: result.results
   };
 }
 
@@ -3176,9 +3360,8 @@ function deterministicQuery(url) {
   const q = String(url.searchParams.get("q") || "").trim().toLowerCase().slice(0, 120);
   const scope = String(url.searchParams.get("scope") || "all").trim().toLowerCase();
   if (!q) {
-    return { query: q, scope, results: [] };
+    return { query: q, scope, resultCount: 0, results: [], indexSummary: { candidateCount: 0, exactMatchCount: 0, sources: [] } };
   }
-  const started = Date.now();
   const state = loadState();
   const publicState = publicSnapshotPayload(state);
   const source = scope === "tasks" ? publicTasksPayload(state)
@@ -3188,17 +3371,7 @@ function deterministicQuery(url) {
     : scope === "decisions" ? { decisionContracts: publicState.decisionContracts }
     : scope === "evidence" ? { artifacts: publicState.artifacts, governanceEvidenceBrief: publicState.governanceEvidenceBrief, versionControl: publicState.versionControl }
     : publicState;
-  const lines = JSON.stringify(source, null, 2).split("\\n");
-  const results = [];
-  for (const [index, line] of lines.entries()) {
-    if (Date.now() - started > 50 || results.length >= 20) {
-      break;
-    }
-    if (line.toLowerCase().includes(q)) {
-      results.push({ line: index + 1, text: line.slice(0, 500) });
-    }
-  }
-  return { query: q, scope, resultCount: results.length, results };
+  return rankedEvidenceSearch(source, q, { scope, limit: 20 });
 }
 
 function serveEvents(request, response, token) {

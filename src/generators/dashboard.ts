@@ -1807,7 +1807,6 @@ function buildDashboardState(params: WorkspaceInitParams) {
     baselineUnresolvedDecisions,
     bootstrapSessionEvidenceRefs
   );
-
   return {
     meta: {
       schemaVersion: DASHBOARD_SCHEMA_VERSION,
@@ -2093,7 +2092,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
       claims: [
         {
           claimId: "claim.world-model.bootstrap",
-          statement: "The Harness Dashboard 4.6.6 world model exists for this workspace.",
+          statement: "The Harness Dashboard 4.6.7 world model exists for this workspace.",
           subjectRef: `workspace:${workspaceId}`,
           claimStatus: "supported",
           confidence: 0.78,
@@ -2651,7 +2650,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     stakeholderBrief: {
       currentGoal: params.purpose,
       whatChangedSinceLastReview:
-        "Workspace initialized with the Harness Dashboard 4.6.6 Hypertext Project World Model.",
+        "Workspace initialized with the Harness Dashboard 4.6.7 Hypertext Project World Model.",
       whyItMatters:
         "Stakeholders and AI Agents now share a durable, evidence-backed view of project reality.",
       currentRisk:
@@ -2924,7 +2923,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         },
       ],
       singleFileConstraint:
-        "the 4.6.6 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
+        "the 4.6.7 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
     },
     listener: {
       workspaceId,
@@ -2950,7 +2949,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.6", "world model"],
+          aliases: ["Harness Dashboard 4.6.7", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -3015,7 +3014,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.6", "world model"],
+          aliases: ["Harness Dashboard 4.6.7", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -3106,7 +3105,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         type: "dashboard-bootstrap",
         status: "complete",
         occurredAt: BOOTSTRAP_TIME,
-        summary: "Harness Dashboard 4.6.6 world model bootstrap generated.",
+        summary: "Harness Dashboard 4.6.7 world model bootstrap generated.",
         evidenceRefs: ["event-000001-bootstrap"],
       },
     ],
@@ -3183,7 +3182,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         completeness: "partial",
       },
     },
-    // Runtime-facing facade fields projected from the 4.6.6 world model.
+    // Runtime-facing facade fields projected from the 4.6.7 world model.
     executiveSummary: {
       headline: `${params.workspaceName} Project World Model`,
       overallStatus: "bootstrap",
@@ -3216,7 +3215,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     },
     governanceState: {
       policyId: "project-world-model-4-6",
-      policyLabel: "Harness Dashboard 4.6.6 Hypertext Project World Model",
+      policyLabel: "Harness Dashboard 4.6.7 Hypertext Project World Model",
       status: "active",
       sessionGovernanceRule:
         "Every meaningful AI session must append canonical events, refresh projections, and leave an agent resume brief.",
@@ -3359,7 +3358,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     timeline: [
       {
         id: "timeline-bootstrap",
-        label: "dashboard 4.6.6 Bootstrap",
+        label: "dashboard 4.6.7 Bootstrap",
         type: "governance",
         status: "complete",
         owner: "workspace-init-mcp",
@@ -3385,7 +3384,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     versionLedger: [
       {
         id: "harness-dashboard-4-6",
-        label: "Harness Dashboard 4.6.6",
+        label: "Harness Dashboard 4.6.7",
         status: "bootstrap",
         scope: "Project World Model",
         progressPercent: 8,
@@ -3425,7 +3424,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           actor: "initializer",
           action: "bootstrap",
           outcome: "project-world-model-created",
-          note: "dashboard 4.6.6 projections and canonical ledger initialized.",
+          note: "dashboard 4.6.7 projections and canonical ledger initialized.",
         },
       ],
     },
@@ -4092,7 +4091,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
-    <title>${workspaceName} Harness Dashboard 4.6.6</title>
+    <title>${workspaceName} Harness Dashboard 4.6.7</title>
     <style>
       :root {
         --bg: #f6f8fb;
@@ -4209,6 +4208,8 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       .evidence-ref { border: 1px solid rgba(23,105,170,0.28); border-radius: 999px; background: #f7fbff; color: var(--accent); padding: 3px 7px; font: inherit; font-size: 0.76rem; cursor: pointer; overflow-wrap: anywhere; max-width: 100%; }
       .evidence-ref:hover, .evidence-ref:focus-visible { background: #eaf5ff; outline: 2px solid rgba(23,105,170,0.22); outline-offset: 2px; }
       .evidence-preview { border: 1px solid rgba(23,105,170,0.24); border-radius: 8px; background: #f7fbff; padding: 12px; display: grid; gap: 8px; }
+      .evidence-rank-strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+      .evidence-rank-strip .source { border: 1px solid rgba(23,105,170,0.18); border-radius: 999px; background: #ffffff; padding: 3px 7px; }
       .api-preview { background: #fbfcfd; }
       .evidence-preview pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
       .trust-boundary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
@@ -4454,7 +4455,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <div class="shell">
       <header class="hero">
         <div>
-          <p class="eyebrow">Harness Dashboard 4.6.6</p>
+          <p class="eyebrow">Harness Dashboard 4.6.7</p>
           <h1 id="dashboard-title" data-workspace="${workspaceName}">${workspaceName} Project World Model</h1>
           <p class="lede" id="dashboard-lede">A canonical, ledger-backed view of project reality for stakeholders, AI Agents, and maintainers.</p>
         </div>
@@ -4537,6 +4538,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         evidenceLookupStatus: "",
         evidenceLookupRef: "",
         evidenceLookupResults: [],
+        evidenceLookupSummary: null,
         apiLookupStatus: "",
         apiLookupRoute: "",
         apiLookupPayload: null,
@@ -4708,6 +4710,13 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "evidenceLookupStatic": "Local listener is not connected; this chip names the evidence ref to search.",
           "evidenceLookupNoResults": "No matching local API result was found for this evidence ref.",
           "evidenceLookupError": "Evidence lookup failed",
+          "evidenceCandidates": "Candidates",
+          "exactMatches": "Exact matches",
+          "matchQuality": "Match quality",
+          "evidenceScore": "Evidence score",
+          "canonicalPath": "Canonical path",
+          "freshness": "Freshness",
+          "provenance": "Provenance",
           "command": "Command",
           "openApiRoute": "Open local API route",
           "apiPreview": "Local API preview",
@@ -4963,6 +4972,13 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "evidenceLookupStatic": "로컬 리스너가 연결되지 않았습니다. 이 칩은 검색할 근거 참조를 표시합니다.",
           "evidenceLookupNoResults": "이 근거 참조와 일치하는 로컬 API 결과가 없습니다.",
           "evidenceLookupError": "근거 조회 실패",
+          "evidenceCandidates": "후보",
+          "exactMatches": "정확 일치",
+          "matchQuality": "일치 품질",
+          "evidenceScore": "근거 점수",
+          "canonicalPath": "표준 경로",
+          "freshness": "신선도",
+          "provenance": "출처 근거",
           "command": "명령",
           "openApiRoute": "로컬 API 경로 열기",
           "apiPreview": "로컬 API 미리보기",
@@ -5280,17 +5296,31 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       }
       function renderEvidencePreview() {
         const results = Array.isArray(app.evidenceLookupResults) ? app.evidenceLookupResults : [];
+        const summary = app.evidenceLookupSummary || {};
+        const summaryStrip = results.length
+          ? '<div class="evidence-rank-strip">' +
+              '<span class="source"><strong>' + esc(t("evidenceCandidates")) + ':</strong> ' + esc(summary.candidateCount ?? results.length) + '</span>' +
+              '<span class="source"><strong>' + esc(t("exactMatches")) + ':</strong> ' + esc(summary.exactMatchCount ?? 0) + '</span>' +
+              '<span class="source"><strong>' + esc(t("matchQuality")) + ':</strong> ' + esc((results[0] || {}).matchQuality || "ranked") + '</span>' +
+            '</div>'
+          : "";
         const lines = results.length
           ? results.slice(0, 8).map((item) =>
-              '<article class="hub-item"><span class="rail-label">' + esc(item.kind || t("evidenceStructuredResult")) + ' · ' + esc(item.sourcePath || item.path || t("evidenceSource")) + '</span>' +
+              '<article class="hub-item"><span class="rail-label">' + esc("#" + (item.rank || "") + " · " + (item.kind || t("evidenceStructuredResult")) + " · " + (item.sourcePath || item.path || t("evidenceSource"))) + '</span>' +
               '<strong>' + esc(item.title || item.recordId || app.evidenceLookupRef || t("notDeclared")) + '</strong>' +
-              '<span>' + badge(item.status || "referenced") + ' ' + esc(item.owner || "unassigned") + '</span>' +
+              '<span>' + badge(item.status || "referenced") + ' ' + badge(item.matchQuality || "ranked") + ' ' + esc(item.owner || "unassigned") + '</span>' +
               '<p>' + esc(item.summary || t("notDeclared")) + '</p>' +
+              '<div class="evidence-rank-strip">' +
+                '<span class="source"><strong>' + esc(t("evidenceScore")) + ':</strong> ' + esc(item.score ?? 0) + '</span>' +
+                '<span class="source"><strong>' + esc(t("canonicalPath")) + ':</strong> ' + esc(item.canonicalPath || item.sourcePath || "") + '</span>' +
+                '<span class="source"><strong>' + esc(t("freshness")) + ':</strong> ' + esc(item.freshness || t("notDeclared")) + '</span>' +
+              '</div>' +
               '<span class="source"><strong>' + esc(t("evidence")) + ':</strong> ' + evidenceRefList(item.evidenceRefs, 5) + '</span>' +
+              '<span class="source"><strong>' + esc(t("provenance")) + ':</strong> ' + esc(item.provenance || item.matchReason || "") + '</span>' +
               '<span class="source">' + esc((item.matchedFields || []).join(", ") || item.recordId || "") + '</span></article>'
             ).join("")
           : '<p class="muted">' + esc(app.evidenceLookupStatus || t("evidencePreviewHint")) + '</p>';
-        return '<div class="evidence-preview" aria-live="polite"><strong>' + esc(t("evidenceDrilldown")) + (app.evidenceLookupRef ? ': ' + esc(app.evidenceLookupRef) : '') + '</strong>' + lines + '</div>';
+        return '<div class="evidence-preview" aria-live="polite"><strong>' + esc(t("evidenceDrilldown")) + (app.evidenceLookupRef ? ': ' + esc(app.evidenceLookupRef) : '') + '</strong>' + summaryStrip + lines + '</div>';
       }
       function renderApiPreview() {
         if (!app.apiLookupRoute && !app.apiLookupStatus) return "";
@@ -5308,6 +5338,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       async function lookupEvidenceRef(ref) {
         app.evidenceLookupRef = ref;
         app.evidenceLookupResults = [];
+        app.evidenceLookupSummary = null;
         if (!localApiToken) {
           app.evidenceLookupStatus = t("evidenceLookupStatic") + ' "' + ref + '".';
           render();
@@ -5322,8 +5353,10 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           });
           if (!response.ok) throw new Error(String(response.status));
           const payload = await response.json();
-          const results = (((payload || {}).payload || {}).results) || [];
+          const body = ((payload || {}).payload || {});
+          const results = body.results || [];
           app.evidenceLookupResults = results;
+          app.evidenceLookupSummary = body.matchSummary || body.indexSummary || null;
           app.evidenceLookupStatus = results.length ? "" : t("evidenceLookupNoResults");
         } catch (error) {
           app.evidenceLookupStatus = t("evidenceLookupError") + ': ' + (error && error.message ? error.message : String(error || ""));
@@ -7291,7 +7324,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
 }
 
 function buildDashboardReadme(): string {
-  return `# Harness Dashboard 4.6.6: Project World Model
+  return `# Harness Dashboard 4.6.7: Project World Model
 
 The dashboard is a ledger-backed Project World Model, not a Markdown-derived report page.
 
@@ -7369,7 +7402,7 @@ function buildDesignFrameworkHtml(): string {
 <meta charset="utf-8" />
 <title>Harness Dashboard Design Framework</title>
 <body>
-  <h1>Harness Dashboard 4.6.6 Design Framework</h1>
+  <h1>Harness Dashboard 4.6.7 Design Framework</h1>
   <p>Executive Overview first. Same data, different density for Stakeholder, AI Agent, and Maintainer modes.</p>
   <ul>
     <li>Modes: Local Live, Static Snapshot, Degraded Offline.</li>
@@ -7389,7 +7422,7 @@ function buildBackendBlueprintHtml(): string {
 <title>Optional Backend Dashboard Blueprint</title>
 <body>
   <h1>Optional Backend Dashboard Blueprint</h1>
-  <p>The default 4.6.6 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
+  <p>The default 4.6.7 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
   <ul>
     <li>Must preserve ledger-first governance.</li>
     <li>Must not replace the local single-file dashboard contract.</li>
@@ -7529,7 +7562,7 @@ export function generateDashboardFiles(
         "Specification for future opt-in backend dashboard implementation.",
       nonGoals: [
         "No backend dashboard app is generated by default.",
-        "No database is required for 4.6.6 MVP.",
+        "No database is required for 4.6.7 MVP.",
         "No persistent UI writes are allowed by default.",
       ],
     }),
