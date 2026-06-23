@@ -241,6 +241,7 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(dashboardStateSchema.properties.dashboardQualityScorecard.properties.modernWebUiPolicy);
   assert.ok(dashboardStateSchema.properties.projectionConfidence.properties.requiredActions);
   assert.ok(dashboardStateSchema.properties.sessionTraceability.properties.entries);
+  assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.actionPlan);
   for (const key of DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS) {
     assert.ok(key in state, `dashboard-state.json should include ${key}`);
   }
@@ -249,11 +250,14 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   const legacyShape = JSON.parse(JSON.stringify(state));
   delete legacyShape.projectionConfidence;
   delete legacyShape.sessionTraceability;
+  delete legacyShape.userRealityCheck;
   const legacyShapeValidation = validateDashboardStateShape(legacyShape);
   assert.equal(legacyShapeValidation.valid, true, legacyShapeValidation.errors.join("\n"));
   assert.equal(legacyShape.projectionConfidence.status, "projection-debt");
   assert.equal(legacyShape.sessionTraceability.status, "trace-debt");
   assert.equal(legacyShape.sessionTraceability.entries[0].traceIntegrity.status, "legacy-fallback");
+  assert.equal(legacyShape.userRealityCheck.status, "legacy-backfill-action-plan");
+  assert.ok(legacyShape.userRealityCheck.actionPlan[0].apiRoutes.includes("/api/harness-dashboard/v1/reality-check"));
   assert.equal(state.realityModel.nodes.some((node) => node.type === "repository"), true);
   assert.equal(state.realityModel.edges.some((edge) => edge.relation === "projects-world-model"), true);
   assert.match(state.goalCompass.currentReality, /Bootstrap harness/);
@@ -297,6 +301,15 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(state.sessionTraceability.entries[0].resultSummary, /real VCS, service, owner, release, and operations evidence/);
   assert.equal(state.sessionTraceability.entries[0].traceIntegrity.status, "complete");
   assert.ok(state.sessionTraceability.entries[0].evidenceRefs.includes("docs/ai-harness/dashboard/index.html"));
+  assert.equal(state.userRealityCheck.status, "bootstrap-action-plan");
+  assert.equal(state.userRealityCheck.summary.readableWithoutRawJson, true);
+  assert.ok(state.userRealityCheck.actionPlan.length >= 5);
+  assert.equal(state.userRealityCheck.actionPlan[0].id, "action.verify-projections");
+  assert.ok(state.userRealityCheck.actionPlan.every((item) => item.evidenceRequired.length > 0));
+  assert.equal(state.userRealityCheck.summary.missingEvidenceCount, state.governanceEvidenceBrief.missingEvidenceClaims.length);
+  assert.equal(state.userRealityCheck.summary.openDecisionCount, state.governanceEvidenceBrief.unresolvedDecisions.length);
+  assert.equal(state.userRealityCheck.apiContract.route, "/api/harness-dashboard/v1/reality-check");
+  assert.ok(state.userRealityCheck.apiContract.queryExamples.some((item) => item.includes("/evidence-ref?ref=")));
   assert.equal(state.governedSessions[0].taskTrace.originalRequest, params.purpose);
   assert.equal(state.governedSessions[0].traceIntegrity.status, "complete");
   assert.equal(state.dashboardQualityScorecard.uiUxDesignScore < 9.5, true);
@@ -395,6 +408,19 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(html, /projection-confidence/);
   assert.match(html, /Projection Confidence/);
   assert.match(html, /Session Traceability/);
+  assert.match(html, /User Reality Check/);
+  assert.match(html, /renderUserRealityCheck/);
+  assert.match(html, /data-evidence-ref/);
+  assert.match(html, /data-api-route/);
+  assert.match(html, /lookupEvidenceRef/);
+  assert.match(html, /lookupApiRoute/);
+  assert.match(html, /api\/harness-dashboard\/v1\/evidence-ref/);
+  assert.match(html, /evidenceStructuredResult/);
+  assert.match(html, /command-line/);
+  assert.match(html, /api-preview/);
+  assert.match(html, /slideDeckKeyboardHelp/);
+  assert.match(html, /deck-status/);
+  assert.doesNotMatch(html, /scope=all&q=/);
   assert.match(html, /renderProjectionConfidence/);
   assert.match(html, /renderSessionTraceability/);
   assert.match(html, /originalRequest/);
@@ -1235,11 +1261,40 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   const legacyState = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
   delete legacyState.projectionConfidence;
   delete legacyState.sessionTraceability;
+  delete legacyState.userRealityCheck;
   fs.writeFileSync(statePath, JSON.stringify(legacyState, null, 2) + "\n", "utf-8");
   const scriptPath = path.join(root, "docs/ai-harness/dashboard/scripts/dashboard-ops.mjs");
   const result = runNode([scriptPath, "validate"], { cwd: root });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /valid/);
+}
+
+{
+  const { root } = generateWorkspace();
+  const statePath = path.join(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  const legacyState = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  delete legacyState.projectionConfidence;
+  delete legacyState.sessionTraceability;
+  delete legacyState.userRealityCheck;
+  fs.writeFileSync(statePath, JSON.stringify(legacyState, null, 2) + "\n", "utf-8");
+
+  const result = reconcileWorkspaceInitialization({
+    workspacePath: root,
+    workspaceName: "Legacy Reality Check Workspace",
+    purpose: "Verify reconcile backfills user-facing dashboard reality checks.",
+    applyChanges: true,
+    writeMigrationReport: false,
+    writeSemanticDiffReport: false,
+  });
+  assert.equal(result.applied, true);
+  const reconciled = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  assert.equal(reconciled.projectionConfidence.status, "projection-debt");
+  assert.ok(reconciled.sessionTraceability.entries[0].originalRequest);
+  assert.ok(["bootstrap-trace-complete", "trace-debt"].includes(reconciled.sessionTraceability.status));
+  assert.ok(["bootstrap-action-plan", "legacy-backfill-action-plan"].includes(reconciled.userRealityCheck.status));
+  assert.equal(reconciled.userRealityCheck.apiContract.route, "/api/harness-dashboard/v1/reality-check");
+  assert.ok(reconciled.userRealityCheck.actionPlan[0].evidenceRequired.length > 0);
+  assert.equal(validateDashboardStateShape(reconciled).valid, true);
 }
 
 {
@@ -1980,6 +2035,8 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     assert.equal(runtime.readOnly, true);
     assert.equal(runtime.apiVersion, "v1");
     assert.ok(runtime.capabilities.includes("traceability"));
+    assert.ok(runtime.capabilities.includes("reality-check"));
+    assert.ok(runtime.capabilities.includes("evidence-ref"));
     assert.equal(runtime.payload.listener.status, "listening");
 
     const rejected = await fetch(apiUrl("runtime"));
@@ -2038,9 +2095,28 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     assert.equal(traceabilityPayload.payload.sessionTraceability.entries[0].traceIntegrity.status, "complete");
     assert.equal(JSON.stringify(traceabilityPayload.payload).includes(root), false);
 
+    const realityCheckPayload = await fetch(apiUrl("reality-check"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(realityCheckPayload.readOnly, true);
+    assert.equal(realityCheckPayload.payload.userRealityCheck.status, "bootstrap-action-plan");
+    assert.equal(realityCheckPayload.payload.userRealityCheck.apiContract.route, "/api/harness-dashboard/v1/reality-check");
+    assert.ok(realityCheckPayload.payload.userRealityCheck.actionPlan.some((item) => item.id === "action.verify-projections"));
+    assert.equal(JSON.stringify(realityCheckPayload.payload).includes(root), false);
+
+    const evidenceRefPayload = await fetch(apiUrl("evidence-ref?ref=event-000001-bootstrap"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(evidenceRefPayload.readOnly, true);
+    assert.equal(evidenceRefPayload.payload.ref, "event-000001-bootstrap");
+    assert.equal(evidenceRefPayload.payload.resultCount > 0, true);
+    assert.ok(evidenceRefPayload.payload.results.some((item) => item.kind && item.sourcePath && item.title));
+    assert.equal(JSON.stringify(evidenceRefPayload.payload).includes(root), false);
+
     const traceabilityQuery = await fetch(apiUrl("query?scope=traceability&q=originalRequest"), { headers: authHeaders }).then((response) => response.json());
     assert.equal(traceabilityQuery.readOnly, true);
     assert.equal(traceabilityQuery.payload.resultCount > 0, true);
+
+    const realityCheckQuery = await fetch(apiUrl("query?scope=reality-check&q=verify-projections"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(realityCheckQuery.readOnly, true);
+    assert.equal(realityCheckQuery.payload.resultCount > 0, true);
+    assert.equal(JSON.stringify(realityCheckQuery.payload).includes(root), false);
 
     const briefingResponse = await fetch(apiUrl("briefing"), { headers: authHeaders });
     assert.equal(briefingResponse.status, 200);

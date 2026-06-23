@@ -12,7 +12,7 @@ import {
 function buildDashboardOpsReadme(): string {
   return `# Harness Dashboard Operations
 
-The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6.5 Hypertext Project World Model.
+The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6.6 Hypertext Project World Model.
 It treats the JSONL event ledger as canonical, the JSON state files as disposable projections,
 and the HTML file as a portable stakeholder projection.
 
@@ -46,7 +46,7 @@ and the HTML file as a portable stakeholder projection.
 ## API
 
 The listener exposes read-only v1 routes under \`/api/harness-dashboard/v1/\`:
-\`snapshot\`, \`index\`, \`tasks\`, \`agent-tasks\`, \`traceability\`, \`sessions\`, \`dictionary\`, \`version-control\`,
+\`snapshot\`, \`index\`, \`tasks\`, \`agent-tasks\`, \`traceability\`, \`reality-check\`, \`evidence-ref\`, \`sessions\`, \`dictionary\`, \`version-control\`,
 \`runtime\`, \`briefing\`, \`health\`, \`events\`, and deterministic \`query\`.
 
 Default protections: local token required by \`x-harness-dashboard-token\` or Bearer auth for REST routes;
@@ -287,6 +287,72 @@ function backfillSessionTraceability(state, workspaceId, workspaceName, purpose)
   };
 }
 
+function backfillUserRealityCheck(state, workspaceId, workspaceName, purpose) {
+  if (isPlainObject(state.userRealityCheck)) return;
+  const goalCompass = isPlainObject(state.goalCompass) ? state.goalCompass : {};
+  const evidence = isPlainObject(state.governanceEvidenceBrief) ? state.governanceEvidenceBrief : {};
+  const projectionConfidence = isPlainObject(state.projectionConfidence) ? state.projectionConfidence : {};
+  const missingEvidenceClaims = Array.isArray(evidence.missingEvidenceClaims) ? evidence.missingEvidenceClaims.filter((entry) => typeof entry === "string") : [];
+  const unresolvedDecisions = Array.isArray(evidence.unresolvedDecisions) ? evidence.unresolvedDecisions.filter((entry) => typeof entry === "string") : [];
+  const nextSafeMove = String(goalCompass.nextSafeMove || "Run dashboard-ops refresh, verify projections, and record the next governed session.");
+  state.userRealityCheck = {
+    schemaVersion: String((state.meta || {}).schemaVersion || SCHEMA_VERSION),
+    status: "legacy-backfill-action-plan",
+    purpose: "Backfilled action plan so users can see reality, goal, risk, next action, evidence, progress, and API usefulness without raw JSON.",
+    generatedAt: "legacy-backfill",
+    summary: {
+      currentReality: String(goalCompass.currentReality || "Legacy dashboard projection needs refresh."),
+      goalState: String(goalCompass.goalState || purpose || workspaceName),
+      progressState: "legacy-refresh-required",
+      trustPosture: String(projectionConfidence.status || "projection-debt"),
+      missingEvidenceCount: missingEvidenceClaims.length,
+      openDecisionCount: unresolvedDecisions.length,
+      activeDomainStressProfiles: [],
+      readableWithoutRawJson: true
+    },
+    answers: [
+      {
+        question: "What should happen next?",
+        answer: nextSafeMove,
+        sourceRefs: ["goalCompass", "projectionConfidence"],
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check"]
+      }
+    ],
+    actionPlan: [
+      {
+        id: "action.legacy-refresh",
+        rank: 1,
+        title: "Refresh legacy dashboard reality",
+        status: "refresh-required",
+        owner: "harness-dashboard-operator",
+        whyItMatters: "Legacy projections may not preserve current reality, evidence, or traceability contracts.",
+        evidenceRequired: ["dashboard-ops verify-projections output", "dashboard-ops refresh output", "next governed session request/process/result trace"],
+        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/traceability"],
+        blocks: ["trusted-handoff", "operational-truth"],
+        successSignal: "Projection confidence, session traceability, and evidence gaps are refreshed from current state.",
+        sourceRefs: ["legacy-dashboard-state", workspaceId]
+      }
+    ],
+    evidenceMap: [
+      {
+        id: "legacy",
+        label: "Legacy projection",
+        sourceRefs: ["legacy-dashboard-state"],
+        missingRefs: ["current-reality-refresh"],
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check"]
+      }
+    ],
+    apiContract: {
+      route: "/api/harness-dashboard/v1/reality-check",
+      readOnly: true,
+      usefulFor: ["legacy refresh orientation", "AI-agent resume"],
+      queryExamples: ["/api/harness-dashboard/v1/query?scope=reality-check&q=refresh"],
+      security: "Loopback-only, token-protected, no shell execution, no file writes, no LLM calls."
+    }
+  };
+}
+
 function normalizeDashboardStateForValidation(state) {
   if (Array.isArray(state.entities)) {
     state.entities = state.entities.map((entity) => {
@@ -312,6 +378,7 @@ function normalizeDashboardStateForValidation(state) {
   const productId = String(((products[0] || {}).id) || "product-primary");
   backfillProjectionConfidence(state, workspaceId);
   backfillSessionTraceability(state, workspaceId, workspaceName, purpose);
+  backfillUserRealityCheck(state, workspaceId, workspaceName, purpose);
   if (!isPlainObject(state.realityModel)) {
     state.realityModel = {
       schemaVersion: SCHEMA_VERSION,
@@ -506,6 +573,8 @@ function envelope(payload, extra = {}) {
       "tasks",
       "agent-tasks",
       "traceability",
+      "reality-check",
+      "evidence-ref",
       "sessions",
       "dictionary",
       "version-control",
@@ -1583,6 +1652,7 @@ function deriveIndex(state) {
     dashboardQualityScorecard: state.dashboardQualityScorecard || null,
     projectionConfidence: state.projectionConfidence || null,
     sessionTraceability: state.sessionTraceability || null,
+    userRealityCheck: state.userRealityCheck || null,
     governanceActionabilityScore: state.governanceActionabilityScore || null,
     agentPlatformGovernance: state.agentPlatformGovernance || null,
     audienceLens: state.audienceLens || null,
@@ -1611,6 +1681,8 @@ function deriveIndex(state) {
       "/api/harness-dashboard/v1/tasks",
       "/api/harness-dashboard/v1/agent-tasks",
       "/api/harness-dashboard/v1/traceability",
+      "/api/harness-dashboard/v1/reality-check",
+      "/api/harness-dashboard/v1/evidence-ref",
       "/api/harness-dashboard/v1/sessions",
       "/api/harness-dashboard/v1/dictionary",
       "/api/harness-dashboard/v1/version-control",
@@ -3001,6 +3073,87 @@ function publicTasksPayload(state) {
   return sanitizePublic(sanitizePublicTextForHiddenTasks({ taskQueues: queues, userTaskBoard, agile, workTimeline, workReadinessMap }, hidden));
 }
 
+function evidenceCard(kind, ref, sourcePath, record, matchedFields = []) {
+  const title = String(record && (record.label || record.title || record.statement || record.decision || record.summary || record.id || record.claimId || ref) || ref);
+  const status = String(record && (record.status || record.claimStatus || record.state || record.lifecycleState || "referenced") || "referenced");
+  const owner = String(record && (record.owner || record.actor || record.agentId || "unassigned") || "unassigned");
+  const evidenceRefs = Array.isArray(record && record.evidenceRefs)
+    ? record.evidenceRefs
+    : Array.isArray(record && record.evidence)
+      ? record.evidence
+      : Array.isArray(record && record.sourceRefs)
+        ? record.sourceRefs
+        : [];
+  return {
+    kind,
+    ref,
+    sourcePath,
+    title,
+    status,
+    owner,
+    summary: String(record && (record.whyItMatters || record.rationale || record.resultSummary || record.processSummary || record.answer || record.requiredEvidenceType || record.nextAction || record.nextStep || record.successSignal || "") || ""),
+    evidenceRefs: evidenceRefs.map((entry) => String(entry)).slice(0, 12),
+    matchedFields,
+    recordId: String(record && (record.id || record.claimId || record.sessionId || record.eventId || "") || "")
+  };
+}
+
+function valueContainsRef(value, ref) {
+  return JSON.stringify(value || "").toLowerCase().includes(String(ref || "").toLowerCase());
+}
+
+function pushEvidenceMatch(results, seen, kind, ref, sourcePath, record, matchedFields = []) {
+  if (!record || !valueContainsRef(record, ref)) return;
+  const key = kind + ":" + sourcePath + ":" + String(record.id || record.claimId || record.sessionId || record.eventId || JSON.stringify(record).slice(0, 80));
+  if (seen.has(key)) return;
+  seen.add(key);
+  results.push(evidenceCard(kind, ref, sourcePath, record, matchedFields));
+}
+
+function structuredEvidenceLookup(state, ref) {
+  const needle = String(ref || "").trim().slice(0, 180);
+  if (!needle) {
+    return { ref: needle, resultCount: 0, results: [] };
+  }
+  const publicState = publicSnapshotPayload(state);
+  const results = [];
+  const seen = new Set();
+  const addCollection = (kind, sourcePath, rows, fields = []) => {
+    for (const row of Array.isArray(rows) ? rows : []) {
+      pushEvidenceMatch(results, seen, kind, needle, sourcePath, row, fields);
+      if (results.length >= 30) return;
+    }
+  };
+  addCollection("artifact", "artifacts", publicState.artifacts, ["path", "label", "status"]);
+  addCollection("evidence-source", "projectEvidenceInventory.sources", (publicState.projectEvidenceInventory || {}).sources, ["id", "path", "summary"]);
+  addCollection("claim", "claimEvidenceMatrix.claims", (publicState.claimEvidenceMatrix || {}).claims, ["claimId", "statement", "evidenceRefs", "counterEvidenceRefs"]);
+  addCollection("missing-evidence", "claimEvidenceMatrix.missingEvidenceItems", (publicState.claimEvidenceMatrix || {}).missingEvidenceItems, ["id", "label", "requiredEvidenceType", "blocksClaimIds"]);
+  addCollection("decision", "decisionContracts", publicState.decisionContracts, ["id", "decision", "evidence"]);
+  addCollection("trace", "sessionTraceability.entries", (publicState.sessionTraceability || {}).entries, ["sessionId", "originalRequest", "processSummary", "resultSummary", "evidenceRefs"]);
+  addCollection("reality-node", "realityModel.nodes", (publicState.realityModel || {}).nodes, ["id", "label", "evidenceRefs"]);
+  addCollection("reality-edge", "realityModel.edges", (publicState.realityModel || {}).edges, ["id", "relation", "evidenceRefs"]);
+  addCollection("goal", "goalCompass.goalGraph", (publicState.goalCompass || {}).goalGraph, ["id", "statement", "evidenceRefs"]);
+  addCollection("context-warning", "contextRotMonitor.rotWarnings", (publicState.contextRotMonitor || {}).rotWarnings, ["id", "summary", "evidenceRefs"]);
+  addCollection("user-reality-action", "userRealityCheck.actionPlan", (publicState.userRealityCheck || {}).actionPlan, ["id", "title", "sourceRefs", "evidenceRequired"]);
+  addCollection("user-reality-answer", "userRealityCheck.answers", (publicState.userRealityCheck || {}).answers, ["question", "answer", "sourceRefs"]);
+  addCollection("vcs-record", "vcsChangeRecords", publicState.vcsChangeRecords, ["commitId", "revisionId", "linkedSessionIds", "linkedTaskIds", "linkedDecisionIds"]);
+  if (results.length === 0) {
+    for (const [sourcePath, value] of Object.entries({
+      projectionConfidence: publicState.projectionConfidence,
+      governanceEvidenceBrief: publicState.governanceEvidenceBrief,
+      trustBoundary: publicState.trustBoundary,
+      listener: publicState.listener,
+    })) {
+      pushEvidenceMatch(results, seen, "state-section", needle, sourcePath, value, ["section"]);
+    }
+  }
+  return {
+    ref: needle,
+    resultCount: results.length,
+    results: results.slice(0, 20)
+  };
+}
+
 function apiPayload(routeName) {
   const state = loadState();
   const publicState = publicSnapshotPayload(state);
@@ -3009,6 +3162,7 @@ function apiPayload(routeName) {
   if (routeName === "tasks") return publicTasksPayload(state);
   if (routeName === "agent-tasks") return sanitizePublic({ agentTaskQueues: state.agentTaskQueues, agentResumeBrief: state.agentResumeBrief });
   if (routeName === "traceability") return sanitizePublic({ projectionConfidence: state.projectionConfidence, sessionTraceability: state.sessionTraceability });
+  if (routeName === "reality-check") return sanitizePublic({ userRealityCheck: state.userRealityCheck, projectionConfidence: state.projectionConfidence, sessionTraceability: state.sessionTraceability });
   if (routeName === "sessions") return { sessionLog: publicState.sessionLog, governedSessions: publicState.governedSessions, sessionTraceability: publicState.sessionTraceability, agentResumeBrief: publicState.agentResumeBrief };
   if (routeName === "dictionary") return sanitizePublic({ dictionary: state.dictionary, ontology: state.ontology });
   if (routeName === "version-control") return sanitizePublic({ versionControl: state.versionControl, vcsChangeRecords: state.vcsChangeRecords });
@@ -3030,6 +3184,7 @@ function deterministicQuery(url) {
   const source = scope === "tasks" ? publicTasksPayload(state)
     : scope === "agent-tasks" ? sanitizePublic({ agentTaskQueues: state.agentTaskQueues, agentResumeBrief: state.agentResumeBrief })
     : scope === "traceability" ? sanitizePublic({ projectionConfidence: state.projectionConfidence, sessionTraceability: state.sessionTraceability })
+    : scope === "reality-check" ? sanitizePublic({ userRealityCheck: state.userRealityCheck, projectionConfidence: state.projectionConfidence })
     : scope === "decisions" ? { decisionContracts: publicState.decisionContracts }
     : scope === "evidence" ? { artifacts: publicState.artifacts, governanceEvidenceBrief: publicState.governanceEvidenceBrief, versionControl: publicState.versionControl }
     : publicState;
@@ -3127,6 +3282,10 @@ function makeServer(token) {
       }
       if (routeName === "query") {
         sendJson(response, 200, envelope(deterministicQuery(url)));
+        return;
+      }
+      if (routeName === "evidence-ref") {
+        sendJson(response, 200, envelope(sanitizePublic(structuredEvidenceLookup(loadState(), url.searchParams.get("ref") || ""))));
         return;
       }
       const payload = apiPayload(routeName);

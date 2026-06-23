@@ -5,7 +5,7 @@
 
 `workspace-init-mcp` installs a non-destructive AI Work Harness that lets humans and agents plan, resume, verify, and hand off project work from durable evidence instead of chat history.
 
-Version `4.6.5` adds dashboard-first traceability and projection confidence: users can see what was requested, what process ran, what result was recorded, what evidence backs it, what residual risk remains, and whether the projection is still bootstrap/debt-limited without reading raw JSON or chat history. It keeps the 4.6.x domain-independent world-model harness: state-externalizing working-memory contracts, extensible domain stress profiles, and a persisted work-review-improve loop.
+Version `4.6.6` adds a User Reality Check projection and evidence drilldowns to the World Model Harness Dashboard: users can see project reality, goal fit, risks, prioritized next actions, required proof, progress, and local API routes without reading raw JSON or chat history. It keeps the 4.6.x domain-independent world-model harness: traceable request/process/result records, projection confidence, extensible domain stress profiles, and a persisted work-review-improve loop.
 
 ---
 
@@ -30,7 +30,7 @@ The harness is designed for both new services and existing projects that already
 
 ---
 
-## 4.6.5 Highlights
+## 4.6.6 Highlights
 
 ### Stateful Cognitive Offloading
 
@@ -104,7 +104,7 @@ UI work follows current Chrome/Google I/O modern web guidance as progressive enh
 
 ### Domain Stress And Briefing Packs
 
-4.6.5 keeps the built-in service profiles and adds custom profile support so the harness can fit a web application, learning plan, research corpus, documentation program, or other governed domain without hard-coding the world around commerce or release work.
+4.6.6 keeps the built-in service profiles and adds custom profile support so the harness can fit a web application, learning plan, research corpus, documentation program, or other governed domain without hard-coding the world around commerce or release work.
 
 - `identity-commerce-operations`: credential/auth, payment, refund, fulfillment, and operational evidence gates.
 - `legacy-modernization-governance`: AS-IS/TO-BE mapping, migration, rollback, ownership, and compatibility evidence gates.
@@ -278,6 +278,8 @@ The listener exposes read-only routes under:
 /api/harness-dashboard/v1/tasks
 /api/harness-dashboard/v1/agent-tasks
 /api/harness-dashboard/v1/traceability
+/api/harness-dashboard/v1/reality-check
+/api/harness-dashboard/v1/evidence-ref?ref=<evidence-ref>
 /api/harness-dashboard/v1/sessions
 /api/harness-dashboard/v1/dictionary
 /api/harness-dashboard/v1/version-control
@@ -361,7 +363,7 @@ Main MCP tools include:
 
 ## Quality And Safety Baseline
 
-Version `4.6.5` includes these guardrails:
+Version `4.6.6` includes these guardrails:
 
 - Absolute `workspacePath` enforcement.
 - Non-destructive adoption for legacy projects.
@@ -425,10 +427,17 @@ npm pack --dry-run
 
 ---
 
-## 4.6.5 Release Notes
+## 4.6.6 Release Notes
 
 Major changes:
 
+- Added `userRealityCheck`, a dashboard/index/context projection that answers what is real, what goal the work serves, what could mislead users, what should happen next, what proves progress, and which local API routes can read it.
+- Added the read-only `/api/harness-dashboard/v1/reality-check` listener route plus deterministic `query?scope=reality-check` support for local tools and dashboard QA.
+- Added the read-only `/api/harness-dashboard/v1/evidence-ref?ref=...` route so evidence chips resolve to source-attributed cards instead of raw serialized JSON snippets.
+- Rendered a User Reality Check panel in every dashboard audience lens with a prioritized action plan, owners, blockers, required evidence, success signals, and API route visibility.
+- Made evidence refs actionable in session traceability, readiness, claim matrix, and reality/action hub surfaces with keyboard-accessible evidence chips and token-protected structured previews.
+- Replaced synthetic bootstrap evidence/decision counters with counts derived from the actual listed missing evidence claims and unresolved decisions.
+- Added migration-safe `userRealityCheck` backfills in validation, dashboard ops, reconcile, runtime sync, dashboard context, generated schemas, and regression tests.
 - Added a persistent dashboard projection-confidence rail that summarizes completeness, staleness, trust boundary status, missing evidence count, open decisions, last refresh, listener status, and the action gate before users treat projections as operational truth.
 - Added `sessionTraceability` and `projectionConfidence` dashboard state contracts, schema coverage, generated validation, dashboard context exposure, and a read-only `/api/harness-dashboard/v1/traceability` listener route.
 - Rendered session trace cards in the dashboard so stakeholders and agents can read original request, process summary, result summary, trace integrity, evidence refs, residual risk, and next step without raw JSON or chat history.

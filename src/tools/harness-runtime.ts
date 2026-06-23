@@ -5350,6 +5350,147 @@ function syncDashboardFromSession(
     ],
   };
 
+  dashboardState.userRealityCheck = {
+    ...(isPlainObject(dashboardState.userRealityCheck)
+      ? dashboardState.userRealityCheck
+      : {}),
+    schemaVersion: HARNESS_RUNTIME_VERSION,
+    status:
+      latestTraceRecord.traceIntegrity.status === "complete"
+        ? "runtime-action-plan"
+        : "trace-debt-action-plan",
+    generatedAt: updatedAt,
+    summary: {
+      currentReality: String(
+        isPlainObject(dashboardState.goalCompass)
+          ? dashboardState.goalCompass.currentReality || session.session.goal
+          : session.session.goal
+      ),
+      goalState: session.session.goal,
+      progressState: `${session.session.status}:${currentPhase}`,
+      trustPosture:
+        latestTraceRecord.traceIntegrity.status === "complete"
+          ? "runtime-current"
+          : "trace-debt",
+      missingEvidenceCount: missingEvidenceClaims.length,
+      openDecisionCount: unresolvedDecisions.length,
+      activeDomainStressProfiles: isPlainObject(dashboardState.domainStress) &&
+        Array.isArray(dashboardState.domainStress.activeProfileIds)
+        ? dashboardState.domainStress.activeProfileIds
+        : [],
+      readableWithoutRawJson: true,
+    },
+    answers: [
+      {
+        question: "What is happening now?",
+        answer: `Harness session ${session.session.id} is ${session.session.status} in ${currentPhase}.`,
+        sourceRefs: ["runtimeOrchestration", "sessionTraceability"],
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/sessions"],
+      },
+      {
+        question: "What was requested?",
+        answer: latestTraceRecord.originalRequest,
+        sourceRefs: ["sessionTraceability", "governedSessions.taskTrace"],
+        apiRoutes: ["/api/harness-dashboard/v1/traceability"],
+      },
+      {
+        question: "What should happen next?",
+        answer: session.notes.current,
+        sourceRefs: ["agentResumeBrief.nextSafestAction", "runtimeOrchestration"],
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/tasks"],
+      },
+    ],
+    actionPlan: [
+      {
+        id: `action.${session.session.id}.next`,
+        rank: 1,
+        title: session.notes.current,
+        status: session.session.status,
+        owner: session.session.nextActor,
+        whyItMatters:
+          "This is the current governed runtime step and should be the only source for continuing the active chunk.",
+        evidenceRequired:
+          sessionOutputs.length > 0
+            ? sessionOutputs
+            : ["verification evidence", "request/process/result trace", "dashboard projection refresh"],
+        command:
+          "advance_harness_session or record_harness_execution_result with processSummary and resultSummary",
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/traceability"],
+        blocks:
+          session.session.status === "blocked"
+            ? [runtimeIssueId]
+            : ["closeout-without-verification"],
+        successSignal:
+          "The session advances or closes with linked verification evidence and refreshed dashboard projections.",
+        sourceRefs: [
+          "sessionTraceability",
+          "runtimeOrchestration",
+          "governanceEvidenceBrief",
+        ],
+      },
+      {
+        id: `action.${session.session.id}.verify`,
+        rank: 2,
+        title: "Link verification evidence before closeout",
+        status:
+          session.verification.testsStatus === "passed"
+            ? "ready"
+            : session.verification.testsStatus,
+        owner: "evaluator",
+        whyItMatters:
+          "A user cannot trust progress or close governance until verification evidence is durable and traceable.",
+        evidenceRequired: [
+          "test command output or artifact path",
+          "negative review verdict",
+          "residual risk decision",
+        ],
+        command: "record_harness_execution_result",
+        apiRoutes: ["/api/harness-dashboard/v1/traceability", "/api/harness-dashboard/v1/query"],
+        blocks: ["governance-close", "handoff-confidence"],
+        successSignal:
+          "sessionTraceability resultSummary and residualRisk match the verification receipt.",
+        sourceRefs: ["sessionTraceability", "governanceEvidenceBrief", "dashboardQualityScorecard"],
+      },
+    ],
+    evidenceMap: [
+      {
+        id: "session-trace",
+        label: "Runtime session trace",
+        sourceRefs: ["sessionTraceability", "governedSessions", "runtimeOrchestration"],
+        missingRefs:
+          latestTraceRecord.traceIntegrity.status === "complete"
+            ? []
+            : ["request-process-result-trace"],
+        apiRoutes: ["/api/harness-dashboard/v1/traceability"],
+      },
+      {
+        id: "verification",
+        label: "Verification and residual risk",
+        sourceRefs: sessionOutputs,
+        missingRefs:
+          sessionOutputs.length > 0 ? [] : ["verification-evidence"],
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/query"],
+      },
+    ],
+    apiContract: {
+      route: "/api/harness-dashboard/v1/reality-check",
+      readOnly: true,
+      usefulFor: [
+        "active session resume",
+        "stakeholder progress readout",
+        "local dashboard widgets",
+        "deterministic evidence lookup",
+      ],
+      queryExamples: [
+        `/api/harness-dashboard/v1/evidence-ref?ref=${session.session.id}`,
+        `/api/harness-dashboard/v1/query?scope=reality-check&q=${session.session.id}`,
+        "/api/harness-dashboard/v1/query?scope=traceability&q=resultSummary",
+      ],
+      security:
+        "Loopback-only, token-protected, no shell execution, no file writes, no LLM calls.",
+    },
+  };
+
   writeJson(paths.dashboardStatePath, dashboardState);
 }
 

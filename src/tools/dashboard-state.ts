@@ -312,6 +312,97 @@ function backfillSessionTraceability(root: Record<string, unknown>): void {
   };
 }
 
+function backfillUserRealityCheck(root: Record<string, unknown>): void {
+  if (isPlainObject(root.userRealityCheck)) {
+    return;
+  }
+  const workspace = isPlainObject(root.workspace) ? root.workspace : {};
+  const goalCompass = isPlainObject(root.goalCompass) ? root.goalCompass : {};
+  const evidence = isPlainObject(root.governanceEvidenceBrief)
+    ? root.governanceEvidenceBrief
+    : {};
+  const projectionConfidence = isPlainObject(root.projectionConfidence)
+    ? root.projectionConfidence
+    : {};
+  const missingEvidenceClaims = Array.isArray(evidence.missingEvidenceClaims)
+    ? evidence.missingEvidenceClaims.filter(isString)
+    : [];
+  const unresolvedDecisions = Array.isArray(evidence.unresolvedDecisions)
+    ? evidence.unresolvedDecisions.filter(isString)
+    : [];
+  const nextSafeMove = String(
+    goalCompass.nextSafeMove || "Run dashboard-ops refresh, verify projections, and record the next governed session."
+  );
+
+  root.userRealityCheck = {
+    schemaVersion: String(
+      isPlainObject(root.meta) ? root.meta.schemaVersion || "legacy-backfill" : "legacy-backfill"
+    ),
+    status: "legacy-backfill-action-plan",
+    purpose:
+      "Backfilled action plan so users can see reality, goal, risk, next action, evidence, progress, and API usefulness without raw JSON.",
+    generatedAt: "legacy-backfill",
+    summary: {
+      currentReality: String(
+        goalCompass.currentReality || "Legacy dashboard projection needs refresh."
+      ),
+      goalState: String(goalCompass.goalState || workspace.purpose || "Goal not declared."),
+      progressState: "legacy-refresh-required",
+      trustPosture: String(projectionConfidence.status || "projection-debt"),
+      missingEvidenceCount: missingEvidenceClaims.length,
+      openDecisionCount: unresolvedDecisions.length,
+      activeDomainStressProfiles: [],
+      readableWithoutRawJson: true,
+    },
+    answers: [
+      {
+        question: "What should happen next?",
+        answer: nextSafeMove,
+        sourceRefs: ["goalCompass", "projectionConfidence"],
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check"],
+      },
+    ],
+    actionPlan: [
+      {
+        id: "action.legacy-refresh",
+        rank: 1,
+        title: "Refresh legacy dashboard reality",
+        status: "refresh-required",
+        owner: "harness-dashboard-operator",
+        whyItMatters:
+          "Legacy projections may not preserve current reality, evidence, or traceability contracts.",
+        evidenceRequired: [
+          "dashboard-ops verify-projections output",
+          "dashboard-ops refresh output",
+          "next governed session request/process/result trace",
+        ],
+        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/traceability"],
+        blocks: ["trusted-handoff", "operational-truth"],
+        successSignal:
+          "Projection confidence, session traceability, and evidence gaps are refreshed from current state.",
+        sourceRefs: ["legacy-dashboard-state"],
+      },
+    ],
+    evidenceMap: [
+      {
+        id: "legacy",
+        label: "Legacy projection",
+        sourceRefs: ["legacy-dashboard-state"],
+        missingRefs: ["current-reality-refresh"],
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check"],
+      },
+    ],
+    apiContract: {
+      route: "/api/harness-dashboard/v1/reality-check",
+      readOnly: true,
+      usefulFor: ["legacy refresh orientation", "AI-agent resume"],
+      queryExamples: ["/api/harness-dashboard/v1/query?scope=reality-check&q=refresh"],
+      security: "Loopback-only, token-protected, no shell execution, no file writes, no LLM calls.",
+    },
+  };
+}
+
 export function validateDashboardStateShape(
   value: unknown
 ): DashboardStateValidationResult {
@@ -324,6 +415,7 @@ export function validateDashboardStateShape(
 
   backfillProjectionConfidence(root);
   backfillSessionTraceability(root);
+  backfillUserRealityCheck(root);
 
   const requiredTopLevelKeys = DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS;
 
@@ -1119,6 +1211,61 @@ export function validateDashboardStateShape(
       }
       requireObject(errors, `${pathPrefix}.traceIntegrity`, traceEntry.traceIntegrity);
       requireStringArrayField(errors, pathPrefix, traceEntry, "evidenceRefs");
+    }
+  }
+
+  const userRealityCheck = requireObject(
+    errors,
+    "dashboardState.userRealityCheck",
+    root.userRealityCheck
+  );
+  if (userRealityCheck != null) {
+    requireStringField(errors, "dashboardState.userRealityCheck", userRealityCheck, "status");
+    requireStringField(errors, "dashboardState.userRealityCheck", userRealityCheck, "purpose");
+    requireObject(errors, "dashboardState.userRealityCheck.summary", userRealityCheck.summary);
+    const answers =
+      requireArray(errors, "dashboardState.userRealityCheck.answers", userRealityCheck.answers) ?? [];
+    if (answers.length === 0) {
+      errors.push("dashboardState.userRealityCheck.answers must contain at least one user question");
+    }
+    const actionPlan =
+      requireArray(errors, "dashboardState.userRealityCheck.actionPlan", userRealityCheck.actionPlan) ?? [];
+    if (actionPlan.length === 0) {
+      errors.push("dashboardState.userRealityCheck.actionPlan must contain at least one action");
+    }
+    const actionIds = new Set<string>();
+    for (const [index, item] of actionPlan.entries()) {
+      const pathPrefix = `dashboardState.userRealityCheck.actionPlan[${index}]`;
+      const action = requireObject(errors, pathPrefix, item);
+      if (action == null) {
+        continue;
+      }
+      requireUniqueStringId(errors, actionIds, `${pathPrefix}.id`, action.id);
+      requireNumberField(errors, pathPrefix, action, "rank");
+      for (const field of [
+        "title",
+        "status",
+        "owner",
+        "whyItMatters",
+        "successSignal",
+      ]) {
+        requireStringField(errors, pathPrefix, action, field);
+      }
+      requireNonEmptyStringArrayField(errors, pathPrefix, action, "evidenceRequired");
+      requireNonEmptyStringArrayField(errors, pathPrefix, action, "apiRoutes");
+      requireStringArrayField(errors, pathPrefix, action, "blocks");
+      requireNonEmptyStringArrayField(errors, pathPrefix, action, "sourceRefs");
+    }
+    requireArray(errors, "dashboardState.userRealityCheck.evidenceMap", userRealityCheck.evidenceMap);
+    const apiContract = requireObject(
+      errors,
+      "dashboardState.userRealityCheck.apiContract",
+      userRealityCheck.apiContract
+    );
+    if (apiContract != null) {
+      requireStringField(errors, "dashboardState.userRealityCheck.apiContract", apiContract, "route");
+      requireBooleanField(errors, "dashboardState.userRealityCheck.apiContract", apiContract, "readOnly");
+      requireStringArrayField(errors, "dashboardState.userRealityCheck.apiContract", apiContract, "usefulFor");
     }
   }
 

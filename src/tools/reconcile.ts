@@ -1013,7 +1013,7 @@ function backfillDashboardProjectionConfidence(state: Record<string, unknown>): 
     ? evidence.unresolvedDecisions
     : [];
   state.projectionConfidence = {
-    schemaVersion: String(meta.schemaVersion || "4.6.5"),
+    schemaVersion: String(meta.schemaVersion || WORKSPACE_INIT_MCP_VERSION),
     status: "projection-debt",
     completeness: String(meta.completeness || "legacy-backfill"),
     staleness: String(meta.staleness || "legacy-backfill"),
@@ -1121,7 +1121,9 @@ function backfillDashboardSessionTraceability(state: Record<string, unknown>): v
       ];
   state.sessionTraceability = {
     schemaVersion: String(
-      isPlainObject(state.meta) ? state.meta.schemaVersion || "4.6.5" : "4.6.5"
+      isPlainObject(state.meta)
+        ? state.meta.schemaVersion || WORKSPACE_INIT_MCP_VERSION
+        : WORKSPACE_INIT_MCP_VERSION
     ),
     status: "trace-debt",
     purpose: "Backfilled compatibility projection for request/process/result traceability.",
@@ -1129,6 +1131,98 @@ function backfillDashboardSessionTraceability(state: Record<string, unknown>): v
     integrityPolicy:
       "Legacy backfills are migration aids only; refreshed governed sessions must record taskTrace directly.",
     entries,
+  };
+}
+
+function backfillDashboardUserRealityCheck(state: Record<string, unknown>): void {
+  if (isPlainObject(state.userRealityCheck)) {
+    return;
+  }
+  const workspace = isPlainObject(state.workspace) ? state.workspace : {};
+  const goalCompass = isPlainObject(state.goalCompass) ? state.goalCompass : {};
+  const evidence = isPlainObject(state.governanceEvidenceBrief)
+    ? state.governanceEvidenceBrief
+    : {};
+  const projectionConfidence = isPlainObject(state.projectionConfidence)
+    ? state.projectionConfidence
+    : {};
+  const missingEvidenceClaims = Array.isArray(evidence.missingEvidenceClaims)
+    ? evidence.missingEvidenceClaims.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const unresolvedDecisions = Array.isArray(evidence.unresolvedDecisions)
+    ? evidence.unresolvedDecisions.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const nextSafeMove = String(
+    goalCompass.nextSafeMove || "Run dashboard-ops refresh, verify projections, and record the next governed session."
+  );
+  state.userRealityCheck = {
+    schemaVersion: String(
+      isPlainObject(state.meta)
+        ? state.meta.schemaVersion || WORKSPACE_INIT_MCP_VERSION
+        : WORKSPACE_INIT_MCP_VERSION
+    ),
+    status: "legacy-backfill-action-plan",
+    purpose:
+      "Backfilled action plan so users can see reality, goal, risk, next action, evidence, progress, and API usefulness without raw JSON.",
+    generatedAt: "legacy-backfill",
+    summary: {
+      currentReality: String(
+        goalCompass.currentReality || "Legacy dashboard projection needs refresh."
+      ),
+      goalState: String(goalCompass.goalState || workspace.purpose || "Goal not declared."),
+      progressState: "legacy-refresh-required",
+      trustPosture: String(projectionConfidence.status || "projection-debt"),
+      missingEvidenceCount: missingEvidenceClaims.length,
+      openDecisionCount: unresolvedDecisions.length,
+      activeDomainStressProfiles: [],
+      readableWithoutRawJson: true,
+    },
+    answers: [
+      {
+        question: "What should happen next?",
+        answer: nextSafeMove,
+        sourceRefs: ["goalCompass", "projectionConfidence"],
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check"],
+      },
+    ],
+    actionPlan: [
+      {
+        id: "action.legacy-refresh",
+        rank: 1,
+        title: "Refresh legacy dashboard reality",
+        status: "refresh-required",
+        owner: "harness-dashboard-operator",
+        whyItMatters:
+          "Legacy projections may not preserve current reality, evidence, or traceability contracts.",
+        evidenceRequired: [
+          "dashboard-ops verify-projections output",
+          "dashboard-ops refresh output",
+          "next governed session request/process/result trace",
+        ],
+        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/traceability"],
+        blocks: ["trusted-handoff", "operational-truth"],
+        successSignal:
+          "Projection confidence, session traceability, and evidence gaps are refreshed from current state.",
+        sourceRefs: ["legacy-dashboard-state"],
+      },
+    ],
+    evidenceMap: [
+      {
+        id: "legacy",
+        label: "Legacy projection",
+        sourceRefs: ["legacy-dashboard-state"],
+        missingRefs: ["current-reality-refresh"],
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check"],
+      },
+    ],
+    apiContract: {
+      route: "/api/harness-dashboard/v1/reality-check",
+      readOnly: true,
+      usefulFor: ["legacy refresh orientation", "AI-agent resume"],
+      queryExamples: ["/api/harness-dashboard/v1/query?scope=reality-check&q=refresh"],
+      security: "Loopback-only, token-protected, no shell execution, no file writes, no LLM calls.",
+    },
   };
 }
 
@@ -1237,7 +1331,11 @@ function normalizeMergedDashboardState(value: unknown): unknown {
   ]);
   state.agentTaskQueues = {
     ...existingAgentTaskQueues,
-    schemaVersion: String(state.meta && isPlainObject(state.meta) ? state.meta.schemaVersion || "4.6.5" : "4.6.5"),
+    schemaVersion: String(
+      state.meta && isPlainObject(state.meta)
+        ? state.meta.schemaVersion || WORKSPACE_INIT_MCP_VERSION
+        : WORKSPACE_INIT_MCP_VERSION
+    ),
     visibilityPolicy:
       typeof existingAgentTaskQueues.visibilityPolicy === "string"
         ? existingAgentTaskQueues.visibilityPolicy
@@ -1374,6 +1472,7 @@ function normalizeMergedDashboardState(value: unknown): unknown {
 
   backfillDashboardProjectionConfidence(state);
   backfillDashboardSessionTraceability(state);
+  backfillDashboardUserRealityCheck(state);
 
   return state;
 }

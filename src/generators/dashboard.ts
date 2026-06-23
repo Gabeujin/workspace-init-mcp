@@ -1369,6 +1369,238 @@ function buildDomainOperations(domainStress: ReturnType<typeof buildDomainStress
   return operations;
 }
 
+function buildUserRealityCheck(
+  params: WorkspaceInitParams,
+  realityModel: ReturnType<typeof buildRealityModel>,
+  goalCompass: ReturnType<typeof buildGoalCompass>,
+  contextRotMonitor: ReturnType<typeof buildContextRotMonitor>,
+  domainStress: ReturnType<typeof buildDomainStressState>,
+  agentPlatformGovernance: ReturnType<typeof buildAgentPlatformGovernance>,
+  baselineMissingEvidenceClaims: string[],
+  baselineUnresolvedDecisions: string[],
+  bootstrapSessionEvidenceRefs: string[]
+) {
+  const missingEvidenceCount =
+    baselineMissingEvidenceClaims.length + domainStress.missingEvidenceItems.length;
+  const openDecisionCount =
+    baselineUnresolvedDecisions.length + domainStress.decisionContracts.length;
+  const activeProfiles = domainStress.activeProfileIds;
+  const domainEvidenceActions = activeProfiles.length
+    ? activeProfiles.map((profileId) => `Resolve mandatory evidence gates for ${profileId}.`)
+    : ["Collect service health, deployment, release, VCS, owner, and operations evidence."];
+
+  return {
+    schemaVersion: DASHBOARD_SCHEMA_VERSION,
+    status: "bootstrap-action-plan",
+    purpose:
+      "Give users one plain-language read of project reality, goal fit, risk, next actions, evidence targets, progress, and local API usefulness without opening raw JSON or chat history.",
+    generatedAt: BOOTSTRAP_TIME,
+    summary: {
+      currentReality: goalCompass.currentReality,
+      goalState: goalCompass.goalState,
+      progressState: "harness-installed-evidence-pending",
+      trustPosture: "usable-for-orientation-not-release",
+      missingEvidenceCount,
+      openDecisionCount,
+      activeDomainStressProfiles: activeProfiles,
+      readableWithoutRawJson: true,
+    },
+    answers: [
+      {
+        question: "What is real right now?",
+        answer:
+          "The harness dashboard, ledger, runtime scaffolding, and generated governance files exist; service, release, owner, VCS, and operations truth still need evidence.",
+        sourceRefs: ["realityModel", "worldJudgment", "trustBoundary"],
+        apiRoutes: ["/api/harness-dashboard/v1/snapshot", "/api/harness-dashboard/v1/index"],
+      },
+      {
+        question: "What goal is the work serving?",
+        answer: params.purpose,
+        sourceRefs: ["workspace.purpose", "goalCompass", "stakeholderBrief"],
+        apiRoutes: ["/api/harness-dashboard/v1/index"],
+      },
+      {
+        question: "What could mislead a user?",
+        answer:
+          "Bootstrap projections can look complete before real VCS, service health, release, owner, and operations evidence has been linked.",
+        sourceRefs: ["projectionConfidence", "contextRotMonitor", "governanceEvidenceBrief"],
+        apiRoutes: ["/api/harness-dashboard/v1/traceability", "/api/harness-dashboard/v1/reality-check"],
+      },
+      {
+        question: "What should happen next?",
+        answer: goalCompass.nextSafeMove,
+        sourceRefs: ["goalCompass.nextSafeMove", "agentResumeBrief.nextSafestAction"],
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/tasks"],
+      },
+      {
+        question: "What proves progress?",
+        answer:
+          "Request/process/result trace cards, refreshed projection checks, linked VCS/service evidence, and resolved claim-evidence gaps.",
+        sourceRefs: ["sessionTraceability", "claimEvidenceMatrix", "projectEvidenceInventory"],
+        apiRoutes: ["/api/harness-dashboard/v1/traceability", "/api/harness-dashboard/v1/query"],
+      },
+      {
+        question: "What can local tools safely read?",
+        answer:
+          "The loopback listener serves read-only snapshot, index, task, traceability, reality-check, briefing, health, SSE, and deterministic query payloads.",
+        sourceRefs: ["listener", "dashboard-runtime.json"],
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/runtime"],
+      },
+    ],
+    actionPlan: [
+      {
+        id: "action.verify-projections",
+        rank: 1,
+        title: "Verify projection integrity",
+        status: "ready",
+        owner: "harness-dashboard-operator",
+        whyItMatters:
+          "Users need to know whether the dashboard projection can be trusted before acting on it.",
+        evidenceRequired: [
+          "dashboard-state schema validation",
+          "ledger manifest matches source event sequence",
+          "projection confidence is current or debt is explicit",
+        ],
+        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections",
+        apiRoutes: ["/api/harness-dashboard/v1/health", "/api/harness-dashboard/v1/traceability"],
+        blocks: ["trusted-handoff", "closeout", "release-readiness-claim"],
+        successSignal:
+          "verify-projections exits valid and projectionConfidence no longer hides missing required actions.",
+        sourceRefs: ["projectionConfidence", "trustBoundary", "dashboardQualityScorecard"],
+      },
+      {
+        id: "action.refresh-real-world-evidence",
+        rank: 2,
+        title: "Refresh real project evidence",
+        status: "waiting-for-evidence",
+        owner: "harness-dashboard-operator",
+        whyItMatters:
+          "Reality, progress, and risk claims are only useful when they link to real project artifacts.",
+        evidenceRequired: [
+          "VCS status or revision records",
+          "service health or project inventory",
+          "release and operations evidence when applicable",
+        ],
+        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+        apiRoutes: ["/api/harness-dashboard/v1/snapshot", "/api/harness-dashboard/v1/version-control"],
+        blocks: ["operational-truth", "handoff-confidence"],
+        successSignal:
+          "governanceEvidenceBrief missing claims shrink and projectEvidenceInventory has real sources.",
+        sourceRefs: ["governanceEvidenceBrief", "projectEvidenceInventory", "versionControl"],
+      },
+      {
+        id: "action.confirm-first-goal",
+        rank: 3,
+        title: "Confirm the first governed goal",
+        status: "decision-needed",
+        owner: "stakeholder-product-owner",
+        whyItMatters:
+          "Users cannot judge progress until the dashboard knows whether this is greenfield creation, running-service adoption, or modernization.",
+        evidenceRequired: [
+          "decision-first-governed-goal approval or revision",
+          "service lifecycle mode",
+          "owner and next milestone",
+        ],
+        command: "start_harness_session with originalRequest, processSummary, and resultSummary",
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/sessions"],
+        blocks: ["goal-fit", "work-prioritization"],
+        successSignal:
+          "sessionTraceability records the original request, process summary, result summary, evidence, residual risk, and next step.",
+        sourceRefs: bootstrapSessionEvidenceRefs,
+      },
+      {
+        id: "action.resolve-domain-gates",
+        rank: 4,
+        title: "Resolve mandatory evidence gates",
+        status: activeProfiles.length ? "blocked-by-domain-evidence" : "evidence-pending",
+        owner: "maintainer",
+        whyItMatters:
+          "Domain-specific gaps are where a generic dashboard most often overstates readiness.",
+        evidenceRequired: domainEvidenceActions,
+        command:
+          "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs record-domain-evidence --gate <gate> --status resolved --evidence <path>",
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/query"],
+        blocks: ["domain-readiness", "release-or-operate"],
+        successSignal:
+          "Domain operations sections and claim-evidence gaps move from blocked to resolved or explicitly waived.",
+        sourceRefs: ["domainStress", "domainOperations", "claimEvidenceMatrix"],
+      },
+      {
+        id: "action.confirm-agent-platforms",
+        rank: 5,
+        title: "Declare active AI agent platforms",
+        status: agentPlatformGovernance.status,
+        owner: "stakeholder-product-owner",
+        whyItMatters:
+          "Future agents need to know which instruction files are active and which are stale.",
+        evidenceRequired: ["declared platform list", "generated instruction paths", "unused-instruction state"],
+        command: agentPlatformGovernance.intake.commandTemplate,
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/index"],
+        blocks: ["agent-continuity", "instruction-governance"],
+        successSignal:
+          "agentPlatformGovernance changes from inferred to declared and unused instruction files are marked.",
+        sourceRefs: ["agentPlatformGovernance", ...agentPlatformGovernance.governanceIndexing.evidenceRefs],
+      },
+    ],
+    evidenceMap: [
+      {
+        id: "reality",
+        label: "Project reality",
+        sourceRefs: ["realityModel", "projectWorldModel", "worldModelFacts"],
+        missingRefs: realityModel.missingRelationEvidence.map((item) => item.id),
+        apiRoutes: ["/api/harness-dashboard/v1/snapshot", "/api/harness-dashboard/v1/reality-check"],
+      },
+      {
+        id: "goal",
+        label: "Goal and next safe move",
+        sourceRefs: ["goalCompass", "stakeholderBrief", "agentResumeBrief"],
+        missingRefs: goalCompass.topGaps.map((item) => item.id),
+        apiRoutes: ["/api/harness-dashboard/v1/index", "/api/harness-dashboard/v1/reality-check"],
+      },
+      {
+        id: "risk",
+        label: "Risk and context rot",
+        sourceRefs: ["contextRotMonitor", "criticalSignals", "judgmentConsole"],
+        missingRefs: contextRotMonitor.rotWarnings.map((item) => item.id),
+        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/query"],
+      },
+      {
+        id: "progress",
+        label: "Progress and handoff",
+        sourceRefs: ["sessionTraceability", "workTimeline", "userTaskBoard"],
+        missingRefs: ["first-governed-session"],
+        apiRoutes: ["/api/harness-dashboard/v1/traceability", "/api/harness-dashboard/v1/tasks"],
+      },
+    ],
+    apiContract: {
+      route: "/api/harness-dashboard/v1/reality-check",
+      readOnly: true,
+      usefulFor: [
+        "local dashboard QA",
+        "AI-agent resume",
+        "stakeholder status widgets",
+        "deterministic search without raw JSON",
+      ],
+      queryExamples: [
+        "/api/harness-dashboard/v1/evidence-ref?ref=event-000001-bootstrap",
+        "/api/harness-dashboard/v1/query?scope=reality-check&q=next",
+        "/api/harness-dashboard/v1/query?scope=reality-check&q=evidence",
+      ],
+      security: "Loopback-only, token-protected, no shell execution, no file writes, no LLM calls.",
+    },
+    qualityRubric: {
+      targetScore: 9.5,
+      scorePolicy:
+        "Do not raise dashboardQualityScorecard to target from this projection alone; require rendered browser QA plus local listener/API verification.",
+      requiredChecks: [
+        "User can answer reality, goal, risk, next action, progress, and evidence questions from Overview.",
+        "Local listener exposes the same action plan through a read-only route.",
+        "Action plan links each step to evidence requirements, blockers, owner, and success signal.",
+      ],
+    },
+  };
+}
+
 function buildDashboardState(params: WorkspaceInitParams) {
   const workspaceId = buildWorkspaceId(params);
   const projectType = params.projectType ?? "other";
@@ -1538,6 +1770,17 @@ function buildDashboardState(params: WorkspaceInitParams) {
     "docs/ai-harness/dashboard/state/dashboard-state.json",
     "docs/ai-harness/dashboard/index.html",
   ];
+  const baselineMissingEvidenceClaims = [
+    "service health",
+    "deployment target",
+    "VCS history",
+    "operations telemetry",
+    "stakeholder approval",
+  ];
+  const baselineUnresolvedDecisions = [
+    "decision-first-governed-goal",
+    "decision-agent-platform-selection",
+  ];
   const bootstrapTaskTrace = {
     originalRequest: params.purpose,
     processSummary:
@@ -1553,6 +1796,17 @@ function buildDashboardState(params: WorkspaceInitParams) {
     policy:
       "Dashboard session trace cards must show missing taskTrace fields explicitly instead of silently reconstructing them from notes or chat history.",
   };
+  const userRealityCheck = buildUserRealityCheck(
+    params,
+    realityModel,
+    goalCompass,
+    contextRotMonitor,
+    domainStress,
+    agentPlatformGovernance,
+    baselineMissingEvidenceClaims,
+    baselineUnresolvedDecisions,
+    bootstrapSessionEvidenceRefs
+  );
 
   return {
     meta: {
@@ -1839,7 +2093,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
       claims: [
         {
           claimId: "claim.world-model.bootstrap",
-          statement: "The Harness Dashboard 4.6.5 world model exists for this workspace.",
+          statement: "The Harness Dashboard 4.6.6 world model exists for this workspace.",
           subjectRef: `workspace:${workspaceId}`,
           claimStatus: "supported",
           confidence: 0.78,
@@ -2236,8 +2490,10 @@ function buildDashboardState(params: WorkspaceInitParams) {
         uiUxDesignScore: 9.2,
         projectEvidenceScore: 1.2,
         dirtyOrUnclassifiedVcsPaths: 0,
-        missingEvidenceClaims: 5 + domainStress.missingEvidenceItems.length,
-        unresolvedDecisions: 1 + domainStress.decisionContracts.length,
+        missingEvidenceClaims:
+          baselineMissingEvidenceClaims.length + domainStress.missingEvidenceItems.length,
+        unresolvedDecisions:
+          baselineUnresolvedDecisions.length + domainStress.decisionContracts.length,
       },
       nextToReach95: [
         "Resolve decision-first-governed-goal.",
@@ -2395,7 +2651,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     stakeholderBrief: {
       currentGoal: params.purpose,
       whatChangedSinceLastReview:
-        "Workspace initialized with the Harness Dashboard 4.6.5 Hypertext Project World Model.",
+        "Workspace initialized with the Harness Dashboard 4.6.6 Hypertext Project World Model.",
       whyItMatters:
         "Stakeholders and AI Agents now share a durable, evidence-backed view of project reality.",
       currentRisk:
@@ -2440,17 +2696,12 @@ function buildDashboardState(params: WorkspaceInitParams) {
     governanceEvidenceBrief: {
       evidenceCoverage: "bootstrap",
       missingEvidenceClaims: [
-        "service health",
-        "deployment target",
-        "VCS history",
-        "operations telemetry",
-        "stakeholder approval",
+        ...baselineMissingEvidenceClaims,
         ...domainStress.missingEvidenceItems.map((item) => item.label),
       ],
       unlinkedCommitsOrRevisions: [],
       unresolvedDecisions: [
-        "decision-first-governed-goal",
-        "decision-agent-platform-selection",
+        ...baselineUnresolvedDecisions,
         ...domainStress.decisionContracts.map((decision) => decision.id),
       ],
       staleProjections: ["dashboard-state.json"],
@@ -2462,8 +2713,10 @@ function buildDashboardState(params: WorkspaceInitParams) {
       completeness: "partial",
       staleness: "bootstrap",
       trustBoundaryStatus: "bootstrap-warning",
-      missingEvidenceCount: 5 + domainStress.missingEvidenceItems.length,
-      openDecisionCount: 2 + domainStress.decisionContracts.length,
+      missingEvidenceCount:
+        baselineMissingEvidenceClaims.length + domainStress.missingEvidenceItems.length,
+      openDecisionCount:
+        baselineUnresolvedDecisions.length + domainStress.decisionContracts.length,
       lastSuccessfulRefreshAt: null,
       lastSourceEventSequence: BOOTSTRAP_SEQUENCE,
       localListenerStatus: "not-started",
@@ -2513,6 +2766,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         },
       ],
     },
+    userRealityCheck,
     decisionContracts: [
       {
         id: "decision-first-governed-goal",
@@ -2670,7 +2924,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         },
       ],
       singleFileConstraint:
-        "the 4.6.5 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
+        "the 4.6.6 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
     },
     listener: {
       workspaceId,
@@ -2696,7 +2950,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.5", "world model"],
+          aliases: ["Harness Dashboard 4.6.6", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -2761,7 +3015,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.5", "world model"],
+          aliases: ["Harness Dashboard 4.6.6", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -2852,7 +3106,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         type: "dashboard-bootstrap",
         status: "complete",
         occurredAt: BOOTSTRAP_TIME,
-        summary: "Harness Dashboard 4.6.5 world model bootstrap generated.",
+        summary: "Harness Dashboard 4.6.6 world model bootstrap generated.",
         evidenceRefs: ["event-000001-bootstrap"],
       },
     ],
@@ -2929,7 +3183,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         completeness: "partial",
       },
     },
-    // Runtime-facing facade fields projected from the 4.6.5 world model.
+    // Runtime-facing facade fields projected from the 4.6.6 world model.
     executiveSummary: {
       headline: `${params.workspaceName} Project World Model`,
       overallStatus: "bootstrap",
@@ -2962,7 +3216,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     },
     governanceState: {
       policyId: "project-world-model-4-6",
-      policyLabel: "Harness Dashboard 4.6.5 Hypertext Project World Model",
+      policyLabel: "Harness Dashboard 4.6.6 Hypertext Project World Model",
       status: "active",
       sessionGovernanceRule:
         "Every meaningful AI session must append canonical events, refresh projections, and leave an agent resume brief.",
@@ -3105,7 +3359,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     timeline: [
       {
         id: "timeline-bootstrap",
-        label: "dashboard 4.6.5 Bootstrap",
+        label: "dashboard 4.6.6 Bootstrap",
         type: "governance",
         status: "complete",
         owner: "workspace-init-mcp",
@@ -3131,7 +3385,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     versionLedger: [
       {
         id: "harness-dashboard-4-6",
-        label: "Harness Dashboard 4.6.5",
+        label: "Harness Dashboard 4.6.6",
         status: "bootstrap",
         scope: "Project World Model",
         progressPercent: 8,
@@ -3171,7 +3425,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           actor: "initializer",
           action: "bootstrap",
           outcome: "project-world-model-created",
-          note: "dashboard 4.6.5 projections and canonical ledger initialized.",
+          note: "dashboard 4.6.6 projections and canonical ledger initialized.",
         },
       ],
     },
@@ -3280,6 +3534,7 @@ function buildDashboardIndex(state: Record<string, unknown>) {
     dashboardQualityScorecard: state.dashboardQualityScorecard,
     projectionConfidence: state.projectionConfidence,
     sessionTraceability: state.sessionTraceability,
+    userRealityCheck: state.userRealityCheck,
     governanceActionabilityScore: state.governanceActionabilityScore,
     agentPlatformGovernance: state.agentPlatformGovernance,
     audienceLens: state.audienceLens,
@@ -3325,6 +3580,8 @@ function buildDashboardIndex(state: Record<string, unknown>) {
       "/api/harness-dashboard/v1/tasks",
       "/api/harness-dashboard/v1/agent-tasks",
       "/api/harness-dashboard/v1/traceability",
+      "/api/harness-dashboard/v1/reality-check",
+      "/api/harness-dashboard/v1/evidence-ref",
       "/api/harness-dashboard/v1/sessions",
       "/api/harness-dashboard/v1/dictionary",
       "/api/harness-dashboard/v1/version-control",
@@ -3742,6 +3999,52 @@ function buildDashboardStateSchema(): string {
       },
     },
   };
+  properties.userRealityCheck = {
+    type: "object",
+    required: ["status", "purpose", "summary", "answers", "actionPlan", "evidenceMap", "apiContract"],
+    additionalProperties: true,
+    properties: {
+      status: { type: "string" },
+      purpose: { type: "string" },
+      summary: { type: "object" },
+      answers: { type: "array" },
+      actionPlan: {
+        type: "array",
+        items: {
+          type: "object",
+          required: [
+            "id",
+            "rank",
+            "title",
+            "status",
+            "owner",
+            "whyItMatters",
+            "evidenceRequired",
+            "apiRoutes",
+            "blocks",
+            "successSignal",
+            "sourceRefs",
+          ],
+          additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            rank: { type: "number" },
+            title: { type: "string" },
+            status: { type: "string" },
+            owner: { type: "string" },
+            whyItMatters: { type: "string" },
+            evidenceRequired: { type: "array", items: { type: "string" } },
+            apiRoutes: { type: "array", items: { type: "string" } },
+            blocks: { type: "array", items: { type: "string" } },
+            successSignal: { type: "string" },
+            sourceRefs: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+      evidenceMap: { type: "array" },
+      apiContract: { type: "object" },
+    },
+  };
   properties.dashboardQualityScorecard = {
     type: "object",
     required: ["targetScore", "uiUxDesignScore", "projectEvidenceScore", "qaEvidence", "modernWebUiPolicy"],
@@ -3789,7 +4092,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
-    <title>${workspaceName} Harness Dashboard 4.6.5</title>
+    <title>${workspaceName} Harness Dashboard 4.6.6</title>
     <style>
       :root {
         --bg: #f6f8fb;
@@ -3899,7 +4202,15 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       .hub-action-button { border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); padding: 7px 10px; font-weight: 800; cursor: pointer; }
       .hub-action-button:hover, .hub-action-button:focus-visible { border-color: var(--accent); color: var(--accent); }
       .api-route-list { display: flex; flex-wrap: wrap; gap: 6px; }
-      .route-chip { border: 1px solid var(--line); border-radius: 999px; background: #f8fafc; padding: 4px 8px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.72rem; overflow-wrap: anywhere; }
+      .route-chip { border: 1px solid var(--line); border-radius: 999px; background: #f8fafc; color: var(--text); padding: 4px 8px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.72rem; overflow-wrap: anywhere; cursor: pointer; }
+      .route-chip:hover, .route-chip:focus-visible { border-color: rgba(23, 105, 170, 0.46); background: #eef7ff; }
+      .command-line code { border: 1px solid var(--line); border-radius: 6px; background: #f8fafc; padding: 2px 5px; overflow-wrap: anywhere; }
+      .evidence-ref-list { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+      .evidence-ref { border: 1px solid rgba(23,105,170,0.28); border-radius: 999px; background: #f7fbff; color: var(--accent); padding: 3px 7px; font: inherit; font-size: 0.76rem; cursor: pointer; overflow-wrap: anywhere; max-width: 100%; }
+      .evidence-ref:hover, .evidence-ref:focus-visible { background: #eaf5ff; outline: 2px solid rgba(23,105,170,0.22); outline-offset: 2px; }
+      .evidence-preview { border: 1px solid rgba(23,105,170,0.24); border-radius: 8px; background: #f7fbff; padding: 12px; display: grid; gap: 8px; }
+      .api-preview { background: #fbfcfd; }
+      .evidence-preview pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
       .trust-boundary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
       .trust-boundary .metric { border-top: 4px solid var(--accent); }
       .signal-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -4143,7 +4454,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <div class="shell">
       <header class="hero">
         <div>
-          <p class="eyebrow">Harness Dashboard 4.6.5</p>
+          <p class="eyebrow">Harness Dashboard 4.6.6</p>
           <h1 id="dashboard-title" data-workspace="${workspaceName}">${workspaceName} Project World Model</h1>
           <p class="lede" id="dashboard-lede">A canonical, ledger-backed view of project reality for stakeholders, AI Agents, and maintainers.</p>
         </div>
@@ -4223,6 +4534,12 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         selectedWorkId: null,
         uiEvents: [],
         reportCopyStatus: "",
+        evidenceLookupStatus: "",
+        evidenceLookupRef: "",
+        evidenceLookupResults: [],
+        apiLookupStatus: "",
+        apiLookupRoute: "",
+        apiLookupPayload: null,
         projectionError: "",
         slideIndex: 0,
         slideDeckOpen: false,
@@ -4299,6 +4616,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "closePresentation": "Close",
           "previousSlide": "Previous",
           "nextSlide": "Next",
+          "slideDeckKeyboardHelp": "Use Tab to move through slide controls, Arrow keys or Page Up/Down to change slides, Home/End for first and last slide, and Escape to close.",
           "lensContract": "Lens contract",
           "stakeholderLensQuestion": "Stakeholder lens answers: what changed, how complete the work is, what remains, what is blocked, and what decision is needed.",
           "agentLensQuestion": "AI Agent lens answers: next safest action, authoritative files, forbidden assumptions, and validation commands.",
@@ -4379,6 +4697,26 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "hubCurrentReadCopy": "This combines reality, goal, risks, evidence, API health, and the next safe action without requiring raw JSON or chat history.",
           "hubPrimaryNextActions": "Primary next actions",
           "hubEvidenceTargets": "Evidence targets",
+          "userRealityCheck": "User Reality Check",
+          "realityCheckAnswers": "What this means",
+          "realityCheckActionPlan": "Prioritized action plan",
+          "evidenceDrilldown": "Evidence drilldown",
+          "evidencePreviewHint": "Select an evidence chip to preview matching read-only local API results.",
+          "evidenceStructuredResult": "Structured evidence result",
+          "evidenceSource": "Evidence source",
+          "lookupEvidence": "Look up evidence",
+          "evidenceLookupStatic": "Local listener is not connected; this chip names the evidence ref to search.",
+          "evidenceLookupNoResults": "No matching local API result was found for this evidence ref.",
+          "evidenceLookupError": "Evidence lookup failed",
+          "command": "Command",
+          "openApiRoute": "Open local API route",
+          "apiPreview": "Local API preview",
+          "apiPreviewHint": "Select a route chip to preview the read-only local API response.",
+          "apiLookupStatic": "Local listener is not connected; this route is available when served by dashboard-ops listen.",
+          "apiLookupOk": "Read-only local API response loaded.",
+          "apiLookupError": "Local API lookup failed",
+          "payloadKeys": "Payload keys",
+          "capabilities": "Capabilities",
           "hubLocalApi": "Local listener API",
           "hubApiCopy": "Read-only loopback endpoints are useful for local tools, dashboards, and deterministic search.",
           "hubOpenWorkTab": "Open Work",
@@ -4533,6 +4871,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "closePresentation": "닫기",
           "previousSlide": "이전",
           "nextSlide": "다음",
+          "slideDeckKeyboardHelp": "Tab으로 슬라이드 컨트롤을 이동하고, 화살표 또는 Page Up/Down으로 슬라이드를 변경하며, Home/End는 처음/마지막 슬라이드, Escape는 닫기입니다.",
           "lensContract": "보기 방식 계약",
           "stakeholderLensQuestion": "이해관계자 보기는 무엇이 바뀌었고, 얼마나 진행됐고, 무엇이 남았고, 무엇이 막혔고, 어떤 결정이 필요한지 답합니다.",
           "agentLensQuestion": "AI Agent 보기는 다음 안전 행동, 권위 파일, 금지 가정, 검증 명령을 답합니다.",
@@ -4613,6 +4952,26 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "hubCurrentReadCopy": "원시 JSON이나 채팅 기록 없이 현실, 목표, 위험, 증거, API 상태, 다음 안전 행동을 한곳에 모읍니다.",
           "hubPrimaryNextActions": "주요 다음 행동",
           "hubEvidenceTargets": "증거 대상",
+          "userRealityCheck": "사용자 현실 점검",
+          "realityCheckAnswers": "이 상태의 의미",
+          "realityCheckActionPlan": "우선순위 행동 계획",
+          "evidenceDrilldown": "근거 드릴다운",
+          "evidencePreviewHint": "근거 칩을 선택하면 읽기 전용 로컬 API 검색 결과를 미리 봅니다.",
+          "evidenceStructuredResult": "구조화된 근거 결과",
+          "evidenceSource": "근거 출처",
+          "lookupEvidence": "근거 조회",
+          "evidenceLookupStatic": "로컬 리스너가 연결되지 않았습니다. 이 칩은 검색할 근거 참조를 표시합니다.",
+          "evidenceLookupNoResults": "이 근거 참조와 일치하는 로컬 API 결과가 없습니다.",
+          "evidenceLookupError": "근거 조회 실패",
+          "command": "명령",
+          "openApiRoute": "로컬 API 경로 열기",
+          "apiPreview": "로컬 API 미리보기",
+          "apiPreviewHint": "경로 칩을 선택하면 읽기 전용 로컬 API 응답을 미리 봅니다.",
+          "apiLookupStatic": "로컬 리스너가 연결되지 않았습니다. 이 경로는 dashboard-ops listen으로 제공될 때 사용할 수 있습니다.",
+          "apiLookupOk": "읽기 전용 로컬 API 응답을 불러왔습니다.",
+          "apiLookupError": "로컬 API 조회 실패",
+          "payloadKeys": "페이로드 키",
+          "capabilities": "기능",
           "hubLocalApi": "로컬 리스너 API",
           "hubApiCopy": "읽기 전용 루프백 엔드포인트는 로컬 도구, 대시보드, 결정적 검색에 사용할 수 있습니다.",
           "hubOpenWorkTab": "작업 열기",
@@ -4903,6 +5262,99 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       function table(headers, rows) {
         return '<div class="table-wrap"><table><thead><tr>' + headers.map((h) => '<th>' + esc(h) + '</th>').join("") + '</tr></thead><tbody>' +
           rows.map((row) => '<tr>' + row.map((cell) => '<td>' + cell + '</td>').join("") + '</tr>').join("") + '</tbody></table></div>';
+      }
+      function evidenceRefList(refs, limit = 6) {
+        const values = (Array.isArray(refs) ? refs : []).filter(Boolean).map((item) => String(item)).slice(0, limit);
+        if (values.length === 0) return '<span class="muted">' + esc(t("noEvidence")) + '</span>';
+        return '<span class="evidence-ref-list">' + values.map((ref) =>
+          '<button type="button" class="evidence-ref" data-evidence-ref="' + esc(ref) + '" aria-label="' + esc(t("lookupEvidence") + ': ' + ref) + '">' + esc(ref) + '</button>'
+        ).join("") + '</span>';
+      }
+      function apiRouteButton(route) {
+        const value = String(route || "").trim();
+        if (!value) return "";
+        return '<button type="button" class="route-chip" data-api-route="' + esc(value) + '" aria-label="' + esc(t("openApiRoute") + ': ' + value) + '">' + esc(value) + '</button>';
+      }
+      function apiRouteList(routes) {
+        return (Array.isArray(routes) ? routes : []).filter(Boolean).map(apiRouteButton).join("");
+      }
+      function renderEvidencePreview() {
+        const results = Array.isArray(app.evidenceLookupResults) ? app.evidenceLookupResults : [];
+        const lines = results.length
+          ? results.slice(0, 8).map((item) =>
+              '<article class="hub-item"><span class="rail-label">' + esc(item.kind || t("evidenceStructuredResult")) + ' · ' + esc(item.sourcePath || item.path || t("evidenceSource")) + '</span>' +
+              '<strong>' + esc(item.title || item.recordId || app.evidenceLookupRef || t("notDeclared")) + '</strong>' +
+              '<span>' + badge(item.status || "referenced") + ' ' + esc(item.owner || "unassigned") + '</span>' +
+              '<p>' + esc(item.summary || t("notDeclared")) + '</p>' +
+              '<span class="source"><strong>' + esc(t("evidence")) + ':</strong> ' + evidenceRefList(item.evidenceRefs, 5) + '</span>' +
+              '<span class="source">' + esc((item.matchedFields || []).join(", ") || item.recordId || "") + '</span></article>'
+            ).join("")
+          : '<p class="muted">' + esc(app.evidenceLookupStatus || t("evidencePreviewHint")) + '</p>';
+        return '<div class="evidence-preview" aria-live="polite"><strong>' + esc(t("evidenceDrilldown")) + (app.evidenceLookupRef ? ': ' + esc(app.evidenceLookupRef) : '') + '</strong>' + lines + '</div>';
+      }
+      function renderApiPreview() {
+        if (!app.apiLookupRoute && !app.apiLookupStatus) return "";
+        const payload = app.apiLookupPayload || {};
+        const body = payload.payload || {};
+        const payloadKeys = body && typeof body === "object" ? Object.keys(body).slice(0, 8).join(", ") : "";
+        const capabilities = Array.isArray(payload.capabilities) ? payload.capabilities.slice(0, 8).join(", ") : "";
+        return '<div class="evidence-preview api-preview" aria-live="polite"><strong>' + esc(t("apiPreview")) + (app.apiLookupRoute ? ': ' + esc(app.apiLookupRoute) : '') + '</strong>' +
+          '<p class="muted">' + esc(app.apiLookupStatus || t("apiPreviewHint")) + '</p>' +
+          (payload.schemaVersion ? '<span class="source"><strong>' + esc(t("projection")) + ':</strong> ' + esc(payload.schemaVersion) + '</span>' : '') +
+          (payloadKeys ? '<span class="source"><strong>' + esc(t("payloadKeys")) + ':</strong> ' + esc(payloadKeys) + '</span>' : '') +
+          (capabilities ? '<span class="source"><strong>' + esc(t("capabilities")) + ':</strong> ' + esc(capabilities) + '</span>' : '') +
+          '</div>';
+      }
+      async function lookupEvidenceRef(ref) {
+        app.evidenceLookupRef = ref;
+        app.evidenceLookupResults = [];
+        if (!localApiToken) {
+          app.evidenceLookupStatus = t("evidenceLookupStatic") + ' "' + ref + '".';
+          render();
+          return;
+        }
+        app.evidenceLookupStatus = t("lookupEvidence") + ': ' + ref;
+        render();
+        try {
+          const response = await fetch("./api/harness-dashboard/v1/evidence-ref?ref=" + encodeURIComponent(ref), {
+            headers: { "x-harness-dashboard-token": localApiToken },
+            cache: "no-store",
+          });
+          if (!response.ok) throw new Error(String(response.status));
+          const payload = await response.json();
+          const results = (((payload || {}).payload || {}).results) || [];
+          app.evidenceLookupResults = results;
+          app.evidenceLookupStatus = results.length ? "" : t("evidenceLookupNoResults");
+        } catch (error) {
+          app.evidenceLookupStatus = t("evidenceLookupError") + ': ' + (error && error.message ? error.message : String(error || ""));
+        }
+        render();
+      }
+      async function lookupApiRoute(route) {
+        const selectedRoute = String(route || "").trim();
+        app.apiLookupRoute = selectedRoute;
+        app.apiLookupPayload = null;
+        if (!selectedRoute) return;
+        if (!localApiToken) {
+          app.apiLookupStatus = t("apiLookupStatic");
+          render();
+          return;
+        }
+        app.apiLookupStatus = t("openApiRoute") + ': ' + selectedRoute;
+        render();
+        try {
+          const requestUrl = selectedRoute.charAt(0) === "/" ? "." + selectedRoute : selectedRoute;
+          const response = await fetch(requestUrl, {
+            headers: { "x-harness-dashboard-token": localApiToken },
+            cache: "no-store",
+          });
+          const payload = await response.json().catch(() => ({}));
+          app.apiLookupPayload = payload;
+          app.apiLookupStatus = response.ok ? t("apiLookupOk") : t("apiLookupError") + ': ' + response.status;
+        } catch (error) {
+          app.apiLookupStatus = t("apiLookupError") + ': ' + (error && error.message ? error.message : String(error || ""));
+        }
+        render();
       }
       const DAY_MS = 24 * 60 * 60 * 1000;
       function asDate(value, fallback) {
@@ -5487,7 +5939,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
             '<div class="trace-step"><strong>' + esc(t("resultSummary")) + '</strong><p>' + esc(entry.resultSummary) + '</p></div>' +
             '</div>' +
             (entry.residualRisk ? '<p><strong>' + esc(t("residualRisk")) + ':</strong> ' + esc(entry.residualRisk) + '</p>' : '') +
-            '<p><strong>' + esc(t("evidence")) + ':</strong> ' + esc((entry.evidenceRefs || []).slice(0, 6).join(", ") || t("noEvidence")) + '</p>' +
+            '<p><strong>' + esc(t("evidence")) + ':</strong> ' + evidenceRefList(entry.evidenceRefs, 6) + '</p>' +
             '<p><strong>' + esc(t("nextOperatorMove")) + ':</strong> ' + esc(entry.nextStep) + '</p>' +
             (hasMissing ? '<p class="projection-warning">' + esc(t("traceIntegrity")) + ': ' + esc((entry.missingFields || []).join(", ") || entry.integrityStatus) + '</p>' : '') +
             '</article>';
@@ -5531,7 +5983,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           esc(item.label || item.id),
           badge(item.status),
           esc(item.rationale || ""),
-          esc((item.evidenceRefs || []).join(", ") || "none"),
+            evidenceRefList(item.evidenceRefs, 5),
           esc(item.requiredNextAction || ""),
         ]));
       }
@@ -5546,8 +5998,8 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
             esc(claim.object || claim.subjectRef || ""),
             esc(claim.interpretant || ""),
             badge(claim.claimStatus),
-            esc(Math.round(Number(claim.confidence || 0) * 100) + "% · " + ((claim.evidenceRefs || []).join(", ") || "none")),
-            esc(((claim.counterEvidenceRefs || []).join(", ") || "none") + " | " + ((claim.falsificationTests || []).slice(0, 2).join(" / ") || "no falsification test")),
+            esc(Math.round(Number(claim.confidence || 0) * 100) + "%") + "<br>" + evidenceRefList(claim.evidenceRefs, 4),
+            evidenceRefList(claim.counterEvidenceRefs, 3) + "<br>" + esc(((claim.falsificationTests || []).slice(0, 2).join(" / ") || "no falsification test")),
             esc(claim.nextActionRef || ""),
           ])) +
           '<h3>Missing Evidence Items</h3>' +
@@ -5675,6 +6127,8 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "/api/harness-dashboard/v1/snapshot",
           "/api/harness-dashboard/v1/tasks",
           "/api/harness-dashboard/v1/traceability",
+          "/api/harness-dashboard/v1/reality-check",
+          "/api/harness-dashboard/v1/evidence-ref",
           "/api/harness-dashboard/v1/briefing",
           "/api/harness-dashboard/v1/health",
           "/api/harness-dashboard/v1/events",
@@ -5685,17 +6139,17 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           ? uniqueActions.map((item) =>
               '<article class="hub-item ' + (String(item.status || "").includes("blocked") ? "risk" : "warn") + '"><strong>' + esc(item.label) + '</strong>' +
               '<span>' + badge(statusText(item.status)) + ' ' + esc(item.owner || "unassigned") + '</span>' +
-              '<span class="source"><strong>' + esc(t("evidence")) + ':</strong> ' + esc((item.evidenceRefs || []).slice(0, 3).join(", ") || t("notDeclared")) + '</span>' +
+              '<span class="source"><strong>' + esc(t("evidence")) + ':</strong> ' + evidenceRefList(item.evidenceRefs, 3) + '</span>' +
               '<span class="source"><strong>' + esc(t("nextSafestAction")) + ':</strong> ' + esc(item.next || item.label || t("notDeclared")) + '</span></article>'
             ).join("")
           : '<p class="muted">' + esc(t("hubNoAction")) + '</p>';
         const evidenceCards = evidenceTargets.length
           ? evidenceTargets.map((item) =>
               '<article class="hub-item"><strong>' + esc(item.label) + '</strong><span>' + badge(statusText(item.status)) + ' ' + esc(item.owner || "unassigned") + '</span>' +
-              '<span class="source">' + esc(item.target || t("notDeclared")) + '</span><span class="source">' + esc((item.refs || []).slice(0, 4).join(", ") || t("notDeclared")) + '</span></article>'
+              '<span class="source">' + esc(item.target || t("notDeclared")) + '</span><span class="source">' + evidenceRefList(item.refs, 4) + '</span></article>'
             ).join("")
           : '<p class="muted">' + esc(t("hubNoEvidenceTarget")) + '</p>';
-        const apiRoutes = routes.map((route) => '<span class="route-chip">' + esc(route) + '</span>').join("");
+        const apiRoutes = apiRouteList(routes);
         return '<div class="reality-action-hub">' +
           '<div class="hub-brief"><span class="rail-label">' + esc(t("hubCurrentRead")) + '</span><strong>' + esc(compass.currentReality || (state.worldJudgment || {}).summary || t("notDeclared")) + '</strong><p>' + esc(t("hubCurrentReadCopy")) + '</p>' +
           metricGrid([
@@ -5706,7 +6160,60 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           ]) +
           '<div class="hub-actions"><button type="button" class="hub-action-button" data-jump-tab="view-work">' + esc(t("hubOpenWorkTab")) + '</button><button type="button" class="hub-action-button" data-jump-tab="view-evidence">' + esc(t("hubOpenEvidenceTab")) + '</button><button type="button" class="hub-action-button" data-jump-tab="view-system">' + esc(t("hubOpenSystemTab")) + '</button></div></div>' +
           '<div class="hub-grid"><section class="hub-list"><h3>' + esc(t("hubPrimaryNextActions")) + '</h3>' + actionCards + '</section>' +
-          '<section class="hub-list"><h3>' + esc(t("hubEvidenceTargets")) + '</h3>' + evidenceCards + '<div class="hub-item"><strong>' + esc(t("hubLocalApi")) + '</strong><span class="source">' + esc(t("hubApiCopy")) + '</span><div class="api-route-list">' + apiRoutes + '</div></div></section></div>' +
+          '<section class="hub-list"><h3>' + esc(t("hubEvidenceTargets")) + '</h3>' + evidenceCards + renderEvidencePreview() + '<div class="hub-item"><strong>' + esc(t("hubLocalApi")) + '</strong><span class="source">' + esc(t("hubApiCopy")) + '</span><div class="api-route-list">' + apiRoutes + '</div>' + renderApiPreview() + '</div></section></div>' +
+          '</div>';
+      }
+      function renderUserRealityCheck() {
+        const check = app.state.userRealityCheck || {};
+        const summary = check.summary || {};
+        const answers = Array.isArray(check.answers) ? check.answers.slice(0, rowLimit(8)) : [];
+        const actions = Array.isArray(check.actionPlan)
+          ? check.actionPlan.slice().sort((a, b) => Number(a.rank || 0) - Number(b.rank || 0)).slice(0, rowLimit(8))
+          : [];
+        const evidenceMap = Array.isArray(check.evidenceMap) ? check.evidenceMap.slice(0, rowLimit(6)) : [];
+        const api = check.apiContract || {};
+        const answerCards = answers.map((item) =>
+          '<article class="hub-item"><strong>' + esc(item.question || t("notDeclared")) + '</strong><p>' + esc(item.answer || "") + '</p><span class="source">' + evidenceRefList(item.sourceRefs, 4) + '</span></article>'
+        ).join("");
+        const actionCards = actions.map((item) =>
+          '<article class="hub-item ' + (String(item.status || "").includes("blocked") || String(item.status || "").includes("debt") ? "risk" : "warn") + '">' +
+          '<span class="rail-label">#' + esc(item.rank || "") + ' · ' + esc(item.status || "open") + '</span>' +
+          '<strong>' + esc(item.title || item.id) + '</strong>' +
+          '<span class="source"><strong>' + esc(t("owner")) + ':</strong> ' + esc(item.owner || "unassigned") + '</span>' +
+          '<p>' + esc(item.whyItMatters || "") + '</p>' +
+          (item.command ? '<span class="source command-line"><strong>' + esc(t("command")) + ':</strong> <code>' + esc(item.command) + '</code></span>' : '') +
+          '<span class="source"><strong>' + esc(t("evidence")) + ':</strong> ' + esc((item.evidenceRequired || []).slice(0, 3).join(", ") || t("noEvidence")) + '</span>' +
+          '<span class="source"><strong>' + esc(t("blocks")) + ':</strong> ' + esc((item.blocks || []).join(", ") || t("none")) + '</span>' +
+          '<span class="source"><strong>' + esc(t("exit")) + ':</strong> ' + esc(item.successSignal || "") + '</span>' +
+          '<span class="source">' + evidenceRefList(item.sourceRefs, 4) + '</span>' +
+          '</article>'
+        ).join("");
+        const evidenceRows = evidenceMap.map((item) => [
+          esc(item.label || item.id),
+          evidenceRefList(item.sourceRefs, 4),
+          evidenceRefList(item.missingRefs, 4),
+          esc((item.apiRoutes || []).slice(0, 2).join(", ") || t("notDeclared")),
+        ]);
+        const routeChips = [api.route, ...((api.queryExamples || []))]
+          .filter(Boolean)
+          .map(apiRouteButton)
+          .join("");
+        return '<div class="reality-action-hub">' +
+          '<div class="hub-brief"><span class="rail-label">' + esc(t("userRealityCheck")) + '</span><strong>' + esc(check.purpose || "") + '</strong>' +
+          metricGrid([
+            [t("currentReality"), summary.currentReality || t("notDeclared"), "userRealityCheck.summary"],
+            [t("goalState"), summary.goalState || t("notDeclared"), "goal fit"],
+            [t("progress"), summary.progressState || t("notDeclared"), "progress state"],
+            [t("trust"), summary.trustPosture || t("notDeclared"), "trust posture"],
+            [t("openEvidence"), summary.missingEvidenceCount ?? 0, "missing evidence"],
+            [t("openDecisions"), summary.openDecisionCount ?? 0, "decisions"],
+          ]) + '</div>' +
+          '<div class="hub-grid"><section class="hub-list"><h3>' + esc(t("realityCheckAnswers")) + '</h3>' + (answerCards || '<p class="muted">' + esc(t("notDeclared")) + '</p>') + '</section>' +
+          '<section class="hub-list"><h3>' + esc(t("realityCheckActionPlan")) + '</h3>' + (actionCards || '<p class="muted">' + esc(t("hubNoAction")) + '</p>') + '</section></div>' +
+          '<h3>' + esc(t("evidenceDrilldown")) + '</h3>' +
+          table([t("evidence"), "Source refs", "Missing refs", "API"], evidenceRows) +
+          renderEvidencePreview() +
+          '<div class="hub-item"><strong>' + esc(api.route || "/api/harness-dashboard/v1/reality-check") + '</strong><span class="source">' + esc((api.usefulFor || []).join(", ") || t("hubApiCopy")) + '</span><div class="api-route-list">' + routeChips + '</div>' + renderApiPreview() + '</div>' +
           '</div>';
       }
       function renderRealityGraph(nodes, edges) {
@@ -5909,6 +6416,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         if (mode === "agent") {
           document.getElementById("view-overview").innerHTML =
             panel(t("realityNextActionsHub"), renderRealityNextActionsHub(), true) +
+            panel(t("userRealityCheck"), renderUserRealityCheck(), true) +
             panel(t("sessionTraceability"), renderSessionTraceability(), true) +
             panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
             panel(t("agentResumeBoard"), renderAgentResumeBoard(), true) +
@@ -5921,6 +6429,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         if (mode === "maintainer") {
           document.getElementById("view-overview").innerHTML =
             panel(t("realityNextActionsHub"), renderRealityNextActionsHub(), true) +
+            panel(t("userRealityCheck"), renderUserRealityCheck(), true) +
             panel(t("sessionTraceability"), renderSessionTraceability(), true) +
             panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
             panel(t("maintainerHealthBoard"), renderMaintainerHealthBoard(), true) +
@@ -5937,6 +6446,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         }
         document.getElementById("view-overview").innerHTML =
           panel(t("realityNextActionsHub"), renderRealityNextActionsHub(), true) +
+          panel(t("userRealityCheck"), renderUserRealityCheck(), true) +
           panel(t("sessionTraceability"), renderSessionTraceability(), true) +
           panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
           panel(t("stakeholderReport"), renderStakeholderReport(), true) +
@@ -6377,13 +6887,16 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         }
         const dots = slides.map((_, index) => '<button class="deck-dot" type="button" data-slide-go="' + index + '" aria-label="Go to slide ' + (index + 1) + '" aria-current="' + String(index === app.slideIndex) + '"></button>').join("");
         deck.style.setProperty("--slide-index", String(app.slideIndex));
+        deck.setAttribute("aria-describedby", "deck-help deck-status");
         deck.innerHTML =
-          '<div class="deck-topbar"><div><span class="deck-title" id="deck-heading">' + esc(slideDeckTitle()) + '</span><span class="deck-count"> ' + esc(app.slideIndex + 1) + ' / ' + esc(slides.length) + '</span></div><div class="deck-controls"><button class="deck-button" type="button" data-slide-fullscreen>' + esc(t("startPresentation")) + '</button><button class="deck-button" type="button" data-slide-close>' + esc(t("closePresentation")) + '</button></div></div>' +
-          '<div class="deck-viewport"><div class="deck-track">' + slides.map((slide, index) => '<article class="deck-slide" aria-hidden="' + String(index !== app.slideIndex) + '"><div><span class="deck-kicker">' + esc(slide.kicker) + '</span><h2>' + esc(slide.title) + '</h2>' + slide.body + '</div><div>' + slide.visual + '</div></article>').join("") + '</div></div>' +
-          '<div class="deck-controls"><button class="deck-button" type="button" data-slide-prev>' + esc(t("previousSlide")) + '</button><div class="deck-dots">' + dots + '</div><button class="deck-button primary" type="button" data-slide-next>' + esc(t("nextSlide")) + '</button></div>';
+          '<div class="deck-topbar"><div><span class="deck-title" id="deck-heading">' + esc(slideDeckTitle()) + '</span><span class="deck-count" id="deck-status" aria-live="polite"> ' + esc(app.slideIndex + 1) + ' / ' + esc(slides.length) + '</span><p class="source" id="deck-help">' + esc(t("slideDeckKeyboardHelp")) + '</p></div><div class="deck-controls"><button class="deck-button" type="button" data-slide-fullscreen>' + esc(t("startPresentation")) + '</button><button class="deck-button" type="button" data-slide-close>' + esc(t("closePresentation")) + '</button></div></div>' +
+          '<div class="deck-viewport"><div class="deck-track">' + slides.map((slide, index) => '<article class="deck-slide" id="deck-slide-' + index + '" aria-hidden="' + String(index !== app.slideIndex) + '" aria-label="' + esc((index + 1) + ' / ' + slides.length + ': ' + slide.title) + '"><div><span class="deck-kicker">' + esc(slide.kicker) + '</span><h2>' + esc(slide.title) + '</h2>' + slide.body + '</div><div>' + slide.visual + '</div></article>').join("") + '</div></div>' +
+          '<div class="deck-controls"><button class="deck-button" type="button" data-slide-prev aria-controls="deck-slide-' + app.slideIndex + '" ' + (app.slideIndex === 0 ? 'disabled aria-disabled="true"' : '') + '>' + esc(t("previousSlide")) + '</button><div class="deck-dots">' + dots + '</div><button class="deck-button primary" type="button" data-slide-next aria-controls="deck-slide-' + app.slideIndex + '" ' + (app.slideIndex === slides.length - 1 ? 'disabled aria-disabled="true"' : '') + '>' + esc(t("nextSlide")) + '</button></div>';
         if (deck.getAttribute("data-rendered") !== "true") {
+          const next = deck.querySelector("[data-slide-next]:not([disabled])");
           const close = deck.querySelector("[data-slide-close]");
-          if (close) close.focus();
+          if (next) next.focus();
+          else if (close) close.focus();
         }
         deck.setAttribute("data-rendered", "true");
       }
@@ -6625,10 +7138,20 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           render();
         }
       });
-      document.addEventListener("click", (event) => {
+      document.addEventListener("click", async (event) => {
         const rawTarget = event.target;
-        const target = rawTarget && rawTarget.closest ? rawTarget.closest("[data-slideshow-open], [data-slide-close], [data-slide-prev], [data-slide-next], [data-slide-fullscreen], [data-slide-go], [data-work-view], [data-focus-work], [data-jump-tab], [data-platform-submit], [data-report-focus], [data-ops-lens], [data-report-copy], [data-report-print]") : rawTarget;
+        const target = rawTarget && rawTarget.closest ? rawTarget.closest("[data-slideshow-open], [data-slide-close], [data-slide-prev], [data-slide-next], [data-slide-fullscreen], [data-slide-go], [data-work-view], [data-focus-work], [data-jump-tab], [data-platform-submit], [data-report-focus], [data-ops-lens], [data-report-copy], [data-report-print], [data-evidence-ref], [data-api-route]") : rawTarget;
         if (!target || !target.getAttribute) return;
+        const apiRoute = target.getAttribute("data-api-route");
+        if (apiRoute) {
+          await lookupApiRoute(apiRoute);
+          return;
+        }
+        const evidenceRef = target.getAttribute("data-evidence-ref");
+        if (evidenceRef) {
+          await lookupEvidenceRef(evidenceRef);
+          return;
+        }
         const opensSlideDeck = target.hasAttribute("data-slideshow-open");
         const reportFocus = target.getAttribute("data-report-focus");
         if (reportFocus) {
@@ -6768,7 +7291,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
 }
 
 function buildDashboardReadme(): string {
-  return `# Harness Dashboard 4.6.5: Project World Model
+  return `# Harness Dashboard 4.6.6: Project World Model
 
 The dashboard is a ledger-backed Project World Model, not a Markdown-derived report page.
 
@@ -6846,7 +7369,7 @@ function buildDesignFrameworkHtml(): string {
 <meta charset="utf-8" />
 <title>Harness Dashboard Design Framework</title>
 <body>
-  <h1>Harness Dashboard 4.6.5 Design Framework</h1>
+  <h1>Harness Dashboard 4.6.6 Design Framework</h1>
   <p>Executive Overview first. Same data, different density for Stakeholder, AI Agent, and Maintainer modes.</p>
   <ul>
     <li>Modes: Local Live, Static Snapshot, Degraded Offline.</li>
@@ -6866,7 +7389,7 @@ function buildBackendBlueprintHtml(): string {
 <title>Optional Backend Dashboard Blueprint</title>
 <body>
   <h1>Optional Backend Dashboard Blueprint</h1>
-  <p>The default 4.6.5 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
+  <p>The default 4.6.6 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
   <ul>
     <li>Must preserve ledger-first governance.</li>
     <li>Must not replace the local single-file dashboard contract.</li>
@@ -7006,7 +7529,7 @@ export function generateDashboardFiles(
         "Specification for future opt-in backend dashboard implementation.",
       nonGoals: [
         "No backend dashboard app is generated by default.",
-        "No database is required for 4.6.5 MVP.",
+        "No database is required for 4.6.6 MVP.",
         "No persistent UI writes are allowed by default.",
       ],
     }),
