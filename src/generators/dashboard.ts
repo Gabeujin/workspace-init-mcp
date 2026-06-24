@@ -1388,6 +1388,126 @@ function buildUserRealityCheck(
   const domainEvidenceActions = activeProfiles.length
     ? activeProfiles.map((profileId) => `Resolve mandatory evidence gates for ${profileId}.`)
     : ["Collect service health, deployment, release, VCS, owner, and operations evidence."];
+  const listenerStartCommand = "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs ensure-listening";
+  const openRotWarnings = (contextRotMonitor.rotWarnings || []).filter((item) =>
+    String(item.status || "open").toLowerCase() === "open"
+  );
+  const topOpenRotWarnings = openRotWarnings.slice(0, 3).map((item) => item.summary).filter(Boolean);
+  const topActionPlan = [
+    {
+      id: "action.verify-projections",
+      rank: 1,
+      title: "Verify projection integrity",
+      status: "ready",
+      owner: "harness-dashboard-operator",
+      whyItMatters:
+        "Users need to know whether the dashboard projection can be trusted before acting on it.",
+      evidenceRequired: [
+        "dashboard-state schema validation",
+        "ledger manifest matches source event sequence",
+        "projection confidence is current or debt is explicit",
+      ],
+      command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections",
+      apiRoutes: ["/api/harness-dashboard/v1/health", "/api/harness-dashboard/v1/traceability"],
+      blocks: ["trusted-handoff", "closeout", "release-readiness-claim"],
+      successSignal:
+        "verify-projections exits valid and projectionConfidence no longer hides missing required actions.",
+      sourceRefs: ["projectionConfidence", "trustBoundary", "dashboardQualityScorecard"],
+    },
+    {
+      id: "action.start-local-listener",
+      rank: 2,
+      title: "Start local proof listener",
+      status: "ready",
+      owner: "harness-dashboard-operator",
+      whyItMatters:
+        "Structured evidence and API previews need the token-protected loopback listener; static HTML still names the proof path but cannot fetch it.",
+      evidenceRequired: [
+        "dashboard listener status is listening",
+        "token-protected health route returns readOnly true",
+        "route chips can preview structured API payloads",
+      ],
+      command: listenerStartCommand,
+      apiRoutes: ["/api/harness-dashboard/v1/health", "/api/harness-dashboard/v1/reality-check"],
+      blocks: ["structured-proof-preview", "local-tool-resume"],
+      successSignal:
+        "User Reality Check route chips show token-authenticated local API previews instead of static fallback text.",
+      sourceRefs: ["listener", "dashboardRuntime", "userRealityCheck.apiContract"],
+    },
+    {
+      id: "action.refresh-real-world-evidence",
+      rank: 3,
+      title: "Refresh real project evidence",
+      status: "waiting-for-evidence",
+      owner: "harness-dashboard-operator",
+      whyItMatters:
+        "Reality, progress, and risk claims are only useful when they link to real project artifacts.",
+      evidenceRequired: [
+        "VCS status or revision records",
+        "service health or project inventory",
+        "release and operations evidence when applicable",
+      ],
+      command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+      apiRoutes: ["/api/harness-dashboard/v1/snapshot", "/api/harness-dashboard/v1/version-control"],
+      blocks: ["operational-truth", "handoff-confidence"],
+      successSignal:
+        "governanceEvidenceBrief missing claims shrink and projectEvidenceInventory has real sources.",
+      sourceRefs: ["governanceEvidenceBrief", "projectEvidenceInventory", "versionControl"],
+    },
+    {
+      id: "action.confirm-first-goal",
+      rank: 4,
+      title: "Confirm the first governed goal",
+      status: "decision-needed",
+      owner: "stakeholder-product-owner",
+      whyItMatters:
+        "Users cannot judge progress until the dashboard knows whether this is greenfield creation, running-service adoption, or modernization.",
+      evidenceRequired: [
+        "decision-first-governed-goal approval or revision",
+        "service lifecycle mode",
+        "owner and next milestone",
+      ],
+      command: "start_harness_session with originalRequest, processSummary, and resultSummary",
+      apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/sessions"],
+      blocks: ["goal-fit", "work-prioritization"],
+      successSignal:
+        "sessionTraceability records the original request, process summary, result summary, evidence, residual risk, and next step.",
+      sourceRefs: bootstrapSessionEvidenceRefs,
+    },
+    {
+      id: "action.resolve-domain-gates",
+      rank: 5,
+      title: "Resolve mandatory evidence gates",
+      status: activeProfiles.length ? "blocked-by-domain-evidence" : "evidence-pending",
+      owner: "maintainer",
+      whyItMatters:
+        "Domain-specific gaps are where a generic dashboard most often overstates readiness.",
+      evidenceRequired: domainEvidenceActions,
+      command:
+        "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs record-domain-evidence --gate <gate> --status resolved --evidence <path>",
+      apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/query"],
+      blocks: ["domain-readiness", "release-or-operate"],
+      successSignal:
+        "Domain operations sections and claim-evidence gaps move from blocked to resolved or explicitly waived.",
+      sourceRefs: ["domainStress", "domainOperations", "claimEvidenceMatrix"],
+    },
+    {
+      id: "action.confirm-agent-platforms",
+      rank: 6,
+      title: "Declare active AI agent platforms",
+      status: agentPlatformGovernance.status,
+      owner: "stakeholder-product-owner",
+      whyItMatters:
+        "Future agents need to know which instruction files are active and which are stale.",
+      evidenceRequired: ["declared platform list", "generated instruction paths", "unused-instruction state"],
+      command: agentPlatformGovernance.intake.commandTemplate,
+      apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/index"],
+      blocks: ["agent-continuity", "instruction-governance"],
+      successSignal:
+        "agentPlatformGovernance changes from inferred to declared and unused instruction files are marked.",
+      sourceRefs: ["agentPlatformGovernance", ...agentPlatformGovernance.governanceIndexing.evidenceRefs],
+    },
+  ];
 
   return {
     schemaVersion: DASHBOARD_SCHEMA_VERSION,
@@ -1447,99 +1567,57 @@ function buildUserRealityCheck(
         apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/runtime"],
       },
     ],
-    actionPlan: [
+    actionPlan: topActionPlan,
+    progressFlow: [
       {
-        id: "action.verify-projections",
-        rank: 1,
-        title: "Verify projection integrity",
-        status: "ready",
-        owner: "harness-dashboard-operator",
-        whyItMatters:
-          "Users need to know whether the dashboard projection can be trusted before acting on it.",
-        evidenceRequired: [
-          "dashboard-state schema validation",
-          "ledger manifest matches source event sequence",
-          "projection confidence is current or debt is explicit",
-        ],
-        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections",
-        apiRoutes: ["/api/harness-dashboard/v1/health", "/api/harness-dashboard/v1/traceability"],
-        blocks: ["trusted-handoff", "closeout", "release-readiness-claim"],
-        successSignal:
-          "verify-projections exits valid and projectionConfidence no longer hides missing required actions.",
-        sourceRefs: ["projectionConfidence", "trustBoundary", "dashboardQualityScorecard"],
+        stage: "reality",
+        title: "Project reality",
+        status: "needs-evidence",
+        summary:
+          "The dashboard schema is in place and trusted, but service, release, VCS, owner, and operating evidence are still bootstrap-level.",
+        sourceRefs: ["realityModel", "projectWorldModel", "goalCompass", "worldJudgment", "sessionTraceability"],
+        nextStep: "Run verify-projections, then refresh real-world evidence.",
       },
       {
-        id: "action.refresh-real-world-evidence",
-        rank: 2,
-        title: "Refresh real project evidence",
-        status: "waiting-for-evidence",
-        owner: "harness-dashboard-operator",
-        whyItMatters:
-          "Reality, progress, and risk claims are only useful when they link to real project artifacts.",
-        evidenceRequired: [
-          "VCS status or revision records",
-          "service health or project inventory",
-          "release and operations evidence when applicable",
-        ],
-        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
-        apiRoutes: ["/api/harness-dashboard/v1/snapshot", "/api/harness-dashboard/v1/version-control"],
-        blocks: ["operational-truth", "handoff-confidence"],
-        successSignal:
-          "governanceEvidenceBrief missing claims shrink and projectEvidenceInventory has real sources.",
-        sourceRefs: ["governanceEvidenceBrief", "projectEvidenceInventory", "versionControl"],
+        stage: "risks",
+        title: "Current risks",
+        status: openRotWarnings.length ? "warning" : "tracked",
+        summary: openRotWarnings.length
+          ? `${openRotWarnings.length} open risk signal${openRotWarnings.length === 1 ? "" : "s"}: ${topOpenRotWarnings.join("; ")}`
+          : "No open risk signal is currently blocking immediate planning.",
+        sourceRefs: ["contextRotMonitor", "criticalSignals", "judgmentConsole"],
+        nextStep:
+          "Prioritize the highest-risk signal, then close open context warnings before claiming readiness.",
       },
       {
-        id: "action.confirm-first-goal",
-        rank: 3,
-        title: "Confirm the first governed goal",
-        status: "decision-needed",
-        owner: "stakeholder-product-owner",
-        whyItMatters:
-          "Users cannot judge progress until the dashboard knows whether this is greenfield creation, running-service adoption, or modernization.",
-        evidenceRequired: [
-          "decision-first-governed-goal approval or revision",
-          "service lifecycle mode",
-          "owner and next milestone",
-        ],
-        command: "start_harness_session with originalRequest, processSummary, and resultSummary",
-        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/sessions"],
-        blocks: ["goal-fit", "work-prioritization"],
-        successSignal:
-          "sessionTraceability records the original request, process summary, result summary, evidence, residual risk, and next step.",
-        sourceRefs: bootstrapSessionEvidenceRefs,
+        stage: "next-actions",
+        title: "Next actions",
+        status: "in-progress",
+        summary:
+          `Top work now: ${topActionPlan
+            .slice(0, 3)
+            .map((item) => item.title)
+            .join(", ")}`,
+        sourceRefs: ["userRealityCheck.actionPlan", "dashboard-runtime", "domainStress"],
+        nextStep: topActionPlan[0]?.title || "Start with projection verification.",
       },
       {
-        id: "action.resolve-domain-gates",
-        rank: 4,
-        title: "Resolve mandatory evidence gates",
-        status: activeProfiles.length ? "blocked-by-domain-evidence" : "evidence-pending",
-        owner: "maintainer",
-        whyItMatters:
-          "Domain-specific gaps are where a generic dashboard most often overstates readiness.",
-        evidenceRequired: domainEvidenceActions,
-        command:
-          "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs record-domain-evidence --gate <gate> --status resolved --evidence <path>",
-        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/query"],
-        blocks: ["domain-readiness", "release-or-operate"],
-        successSignal:
-          "Domain operations sections and claim-evidence gaps move from blocked to resolved or explicitly waived.",
-        sourceRefs: ["domainStress", "domainOperations", "claimEvidenceMatrix"],
+        stage: "proof-progress",
+        title: "Proof and progress",
+        status: missingEvidenceCount || openDecisionCount ? "debt" : "tracked",
+        summary: `Progress proof is provisional: ${missingEvidenceCount} evidence gaps and ${openDecisionCount} open decisions remain.`,
+        sourceRefs: ["claimEvidenceMatrix", "sessionTraceability", "workTimeline", "userTaskBoard"],
+        nextStep:
+          "Collect the missing evidence, freeze decisions, and confirm the first governed goal before claiming operational progress.",
       },
       {
-        id: "action.confirm-agent-platforms",
-        rank: 5,
-        title: "Declare active AI agent platforms",
-        status: agentPlatformGovernance.status,
-        owner: "stakeholder-product-owner",
-        whyItMatters:
-          "Future agents need to know which instruction files are active and which are stale.",
-        evidenceRequired: ["declared platform list", "generated instruction paths", "unused-instruction state"],
-        command: agentPlatformGovernance.intake.commandTemplate,
-        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/index"],
-        blocks: ["agent-continuity", "instruction-governance"],
-        successSignal:
-          "agentPlatformGovernance changes from inferred to declared and unused instruction files are marked.",
-        sourceRefs: ["agentPlatformGovernance", ...agentPlatformGovernance.governanceIndexing.evidenceRefs],
+        stage: "local-api",
+        title: "Local API proof path",
+        status: "listener-required",
+        summary:
+          "Static snapshots explain which proof to inspect; the local listener turns evidence and route chips into structured, token-authenticated previews.",
+        sourceRefs: ["listener", "dashboardRuntime", "userRealityCheck.apiContract"],
+        nextStep: listenerStartCommand,
       },
     ],
     evidenceMap: [
@@ -1575,6 +1653,8 @@ function buildUserRealityCheck(
     apiContract: {
       route: "/api/harness-dashboard/v1/reality-check",
       readOnly: true,
+      startCommand: listenerStartCommand,
+      statusCommand: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status",
       usefulFor: [
         "local dashboard QA",
         "AI-agent resume",
@@ -2092,7 +2172,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
       claims: [
         {
           claimId: "claim.world-model.bootstrap",
-          statement: "The Harness Dashboard 4.6.7 world model exists for this workspace.",
+          statement: "The Harness Dashboard 4.6.8 world model exists for this workspace.",
           subjectRef: `workspace:${workspaceId}`,
           claimStatus: "supported",
           confidence: 0.78,
@@ -2650,7 +2730,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     stakeholderBrief: {
       currentGoal: params.purpose,
       whatChangedSinceLastReview:
-        "Workspace initialized with the Harness Dashboard 4.6.7 Hypertext Project World Model.",
+        "Workspace initialized with the Harness Dashboard 4.6.8 Hypertext Project World Model.",
       whyItMatters:
         "Stakeholders and AI Agents now share a durable, evidence-backed view of project reality.",
       currentRisk:
@@ -2923,7 +3003,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         },
       ],
       singleFileConstraint:
-        "the 4.6.7 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
+        "the 4.6.8 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
     },
     listener: {
       workspaceId,
@@ -2949,7 +3029,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.7", "world model"],
+          aliases: ["Harness Dashboard 4.6.8", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -3014,7 +3094,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.7", "world model"],
+          aliases: ["Harness Dashboard 4.6.8", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -3105,7 +3185,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         type: "dashboard-bootstrap",
         status: "complete",
         occurredAt: BOOTSTRAP_TIME,
-        summary: "Harness Dashboard 4.6.7 world model bootstrap generated.",
+        summary: "Harness Dashboard 4.6.8 world model bootstrap generated.",
         evidenceRefs: ["event-000001-bootstrap"],
       },
     ],
@@ -3182,7 +3262,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         completeness: "partial",
       },
     },
-    // Runtime-facing facade fields projected from the 4.6.7 world model.
+    // Runtime-facing facade fields projected from the 4.6.8 world model.
     executiveSummary: {
       headline: `${params.workspaceName} Project World Model`,
       overallStatus: "bootstrap",
@@ -3215,7 +3295,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     },
     governanceState: {
       policyId: "project-world-model-4-6",
-      policyLabel: "Harness Dashboard 4.6.7 Hypertext Project World Model",
+      policyLabel: "Harness Dashboard 4.6.8 Hypertext Project World Model",
       status: "active",
       sessionGovernanceRule:
         "Every meaningful AI session must append canonical events, refresh projections, and leave an agent resume brief.",
@@ -3358,7 +3438,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     timeline: [
       {
         id: "timeline-bootstrap",
-        label: "dashboard 4.6.7 Bootstrap",
+        label: "dashboard 4.6.8 Bootstrap",
         type: "governance",
         status: "complete",
         owner: "workspace-init-mcp",
@@ -3384,7 +3464,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     versionLedger: [
       {
         id: "harness-dashboard-4-6",
-        label: "Harness Dashboard 4.6.7",
+        label: "Harness Dashboard 4.6.8",
         status: "bootstrap",
         scope: "Project World Model",
         progressPercent: 8,
@@ -3424,7 +3504,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           actor: "initializer",
           action: "bootstrap",
           outcome: "project-world-model-created",
-          note: "dashboard 4.6.7 projections and canonical ledger initialized.",
+          note: "dashboard 4.6.8 projections and canonical ledger initialized.",
         },
       ],
     },
@@ -4000,7 +4080,7 @@ function buildDashboardStateSchema(): string {
   };
   properties.userRealityCheck = {
     type: "object",
-    required: ["status", "purpose", "summary", "answers", "actionPlan", "evidenceMap", "apiContract"],
+    required: ["status", "purpose", "summary", "answers", "actionPlan", "progressFlow", "evidenceMap", "apiContract"],
     additionalProperties: true,
     properties: {
       status: { type: "string" },
@@ -4037,6 +4117,22 @@ function buildDashboardStateSchema(): string {
             blocks: { type: "array", items: { type: "string" } },
             successSignal: { type: "string" },
             sourceRefs: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+      progressFlow: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["stage", "title", "status", "summary", "sourceRefs", "nextStep"],
+          additionalProperties: true,
+          properties: {
+            stage: { type: "string" },
+            title: { type: "string" },
+            status: { type: "string" },
+            summary: { type: "string" },
+            sourceRefs: { type: "array", items: { type: "string" } },
+            nextStep: { type: "string" },
           },
         },
       },
@@ -4091,7 +4187,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
-    <title>${workspaceName} Harness Dashboard 4.6.7</title>
+    <title>${workspaceName} Harness Dashboard 4.6.8</title>
     <style>
       :root {
         --bg: #f6f8fb;
@@ -4455,7 +4551,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <div class="shell">
       <header class="hero">
         <div>
-          <p class="eyebrow">Harness Dashboard 4.6.7</p>
+          <p class="eyebrow">Harness Dashboard 4.6.8</p>
           <h1 id="dashboard-title" data-workspace="${workspaceName}">${workspaceName} Project World Model</h1>
           <p class="lede" id="dashboard-lede">A canonical, ledger-backed view of project reality for stakeholders, AI Agents, and maintainers.</p>
         </div>
@@ -4497,21 +4593,21 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       <section id="projection-confidence" class="projection-confidence" aria-live="polite"></section>
       <section id="status-rail" class="status-rail" aria-label="Persistent project status rail"></section>
       <nav class="tablist" role="tablist" aria-label="Dashboard views">
-        <button class="tab" role="tab" id="tab-overview" aria-controls="view-overview" aria-selected="true" data-purpose="Executive view: world judgment, critical signals, required decision, risk, and trustworthiness.">Overview</button>
-        <button class="tab" role="tab" id="tab-work" aria-controls="view-work" aria-selected="false" data-purpose="Delivery view: queues, backlog, active work, readiness timeline, WIP aging, and throughput signals.">Work</button>
-        <button class="tab" role="tab" id="tab-evidence" aria-controls="view-evidence" aria-selected="false" data-purpose="Proof view: claim-to-evidence matrix, missing evidence, source links, Git/SVN records, and validation warnings.">Evidence</button>
-        <button class="tab" role="tab" id="tab-governance" aria-controls="view-governance" aria-selected="false" data-purpose="Decision view: value hierarchy, readiness judgments, approvals, gates, definition of ready/done, retro and review loops.">Governance</button>
-        <button class="tab" role="tab" id="tab-system" aria-controls="view-system" aria-selected="false" data-purpose="System topology view: services, environments, dependencies, operations readiness, and listener health without repeating the executive mission.">System</button>
-        <button class="tab" role="tab" id="tab-tech" aria-controls="view-tech" aria-selected="false" data-purpose="Technology stack view: project architecture, runtime stack, infrastructure, data stores, deployment path, and harness integration points.">Tech Stack</button>
+        <button class="tab" role="tab" id="tab-overview" aria-controls="view-overview" aria-selected="true" tabindex="0" data-purpose="Executive view: world judgment, critical signals, required decision, risk, and trustworthiness.">Overview</button>
+        <button class="tab" role="tab" id="tab-work" aria-controls="view-work" aria-selected="false" tabindex="-1" data-purpose="Delivery view: queues, backlog, active work, readiness timeline, WIP aging, and throughput signals.">Work</button>
+        <button class="tab" role="tab" id="tab-evidence" aria-controls="view-evidence" aria-selected="false" tabindex="-1" data-purpose="Proof view: claim-to-evidence matrix, missing evidence, source links, Git/SVN records, and validation warnings.">Evidence</button>
+        <button class="tab" role="tab" id="tab-governance" aria-controls="view-governance" aria-selected="false" tabindex="-1" data-purpose="Decision view: value hierarchy, readiness judgments, approvals, gates, definition of ready/done, retro and review loops.">Governance</button>
+        <button class="tab" role="tab" id="tab-system" aria-controls="view-system" aria-selected="false" tabindex="-1" data-purpose="System topology view: services, environments, dependencies, operations readiness, and listener health without repeating the executive mission.">System</button>
+        <button class="tab" role="tab" id="tab-tech" aria-controls="view-tech" aria-selected="false" tabindex="-1" data-purpose="Technology stack view: project architecture, runtime stack, infrastructure, data stores, deployment path, and harness integration points.">Tech Stack</button>
       </nav>
       <section id="tab-purpose" class="tab-purpose" aria-live="polite"></section>
       <main id="main" class="grid">
-        <section id="view-overview" class="grid panel-wide" role="tabpanel" aria-labelledby="tab-overview"></section>
-        <section id="view-work" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-work"></section>
-        <section id="view-evidence" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-evidence"></section>
-        <section id="view-governance" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-governance"></section>
-        <section id="view-system" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-system"></section>
-        <section id="view-tech" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-tech"></section>
+        <section id="view-overview" class="grid panel-wide" role="tabpanel" aria-labelledby="tab-overview" aria-hidden="false"></section>
+        <section id="view-work" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-work" aria-hidden="true" hidden inert></section>
+        <section id="view-evidence" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-evidence" aria-hidden="true" hidden inert></section>
+        <section id="view-governance" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-governance" aria-hidden="true" hidden inert></section>
+        <section id="view-system" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-system" aria-hidden="true" hidden inert></section>
+        <section id="view-tech" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-tech" aria-hidden="true" hidden inert></section>
       </main>
     </div>
     <section id="slide-deck" class="slide-deck hidden" aria-modal="true" role="dialog" aria-labelledby="deck-heading"></section>
@@ -4701,13 +4797,17 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "hubEvidenceTargets": "Evidence targets",
           "userRealityCheck": "User Reality Check",
           "realityCheckAnswers": "What this means",
+          "realityCheckProgressFlow": "Reality > Risks > Next Actions > Proof > API",
+          "listenerBootstrap": "Listener bootstrap",
+          "listenerBootstrapCopy": "When this dashboard is opened as a static file, proof chips name the evidence but cannot fetch structured API cards. Start the loopback listener to preview the same read-only evidence locally.",
+          "staticProofFallback": "Static proof fallback",
           "realityCheckActionPlan": "Prioritized action plan",
           "evidenceDrilldown": "Evidence drilldown",
           "evidencePreviewHint": "Select an evidence chip to preview matching read-only local API results.",
           "evidenceStructuredResult": "Structured evidence result",
           "evidenceSource": "Evidence source",
           "lookupEvidence": "Look up evidence",
-          "evidenceLookupStatic": "Local listener is not connected; this chip names the evidence ref to search.",
+          "evidenceLookupStatic": "Local listener is not connected; this chip names the evidence ref to search. Use the listener bootstrap commands below for structured proof preview.",
           "evidenceLookupNoResults": "No matching local API result was found for this evidence ref.",
           "evidenceLookupError": "Evidence lookup failed",
           "evidenceCandidates": "Candidates",
@@ -4721,7 +4821,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "openApiRoute": "Open local API route",
           "apiPreview": "Local API preview",
           "apiPreviewHint": "Select a route chip to preview the read-only local API response.",
-          "apiLookupStatic": "Local listener is not connected; this route is available when served by dashboard-ops listen.",
+          "apiLookupStatic": "Local listener is not connected; run the listener bootstrap command shown in User Reality Check, then reopen this dashboard through the local listener.",
           "apiLookupOk": "Read-only local API response loaded.",
           "apiLookupError": "Local API lookup failed",
           "payloadKeys": "Payload keys",
@@ -4963,13 +5063,17 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "hubEvidenceTargets": "증거 대상",
           "userRealityCheck": "사용자 현실 점검",
           "realityCheckAnswers": "이 상태의 의미",
+          "realityCheckProgressFlow": "현실 > 위험 > 다음 행동 > 증거 > API",
+          "listenerBootstrap": "리스너 부트스트랩",
+          "listenerBootstrapCopy": "이 대시보드를 정적 파일로 열면 근거 칩은 참조명을 보여주지만 구조화된 API 카드를 가져올 수 없습니다. 루프백 리스너를 시작하면 같은 읽기 전용 근거를 로컬에서 미리 볼 수 있습니다.",
+          "staticProofFallback": "정적 근거 대체 경로",
           "realityCheckActionPlan": "우선순위 행동 계획",
           "evidenceDrilldown": "근거 드릴다운",
           "evidencePreviewHint": "근거 칩을 선택하면 읽기 전용 로컬 API 검색 결과를 미리 봅니다.",
           "evidenceStructuredResult": "구조화된 근거 결과",
           "evidenceSource": "근거 출처",
           "lookupEvidence": "근거 조회",
-          "evidenceLookupStatic": "로컬 리스너가 연결되지 않았습니다. 이 칩은 검색할 근거 참조를 표시합니다.",
+          "evidenceLookupStatic": "로컬 리스너가 연결되지 않았습니다. 이 칩은 검색할 근거 참조를 표시합니다. 구조화된 근거 미리보기는 아래 리스너 부트스트랩 명령을 사용하세요.",
           "evidenceLookupNoResults": "이 근거 참조와 일치하는 로컬 API 결과가 없습니다.",
           "evidenceLookupError": "근거 조회 실패",
           "evidenceCandidates": "후보",
@@ -4983,7 +5087,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "openApiRoute": "로컬 API 경로 열기",
           "apiPreview": "로컬 API 미리보기",
           "apiPreviewHint": "경로 칩을 선택하면 읽기 전용 로컬 API 응답을 미리 봅니다.",
-          "apiLookupStatic": "로컬 리스너가 연결되지 않았습니다. 이 경로는 dashboard-ops listen으로 제공될 때 사용할 수 있습니다.",
+          "apiLookupStatic": "로컬 리스너가 연결되지 않았습니다. 사용자 현실 점검에 표시된 리스너 부트스트랩 명령을 실행한 뒤 로컬 리스너로 대시보드를 다시 여세요.",
           "apiLookupOk": "읽기 전용 로컬 API 응답을 불러왔습니다.",
           "apiLookupError": "로컬 API 조회 실패",
           "payloadKeys": "페이로드 키",
@@ -6200,6 +6304,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const check = app.state.userRealityCheck || {};
         const summary = check.summary || {};
         const answers = Array.isArray(check.answers) ? check.answers.slice(0, rowLimit(8)) : [];
+        const progressFlow = Array.isArray(check.progressFlow) ? check.progressFlow.slice(0, 5) : [];
         const actions = Array.isArray(check.actionPlan)
           ? check.actionPlan.slice().sort((a, b) => Number(a.rank || 0) - Number(b.rank || 0)).slice(0, rowLimit(8))
           : [];
@@ -6207,6 +6312,15 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const api = check.apiContract || {};
         const answerCards = answers.map((item) =>
           '<article class="hub-item"><strong>' + esc(item.question || t("notDeclared")) + '</strong><p>' + esc(item.answer || "") + '</p><span class="source">' + evidenceRefList(item.sourceRefs, 4) + '</span></article>'
+        ).join("");
+        const progressFlowCards = progressFlow.map((item) =>
+          '<article class="hub-item ' + (/debt|warning|required|blocked/i.test(String(item.status || "")) ? "risk" : "") + '">' +
+          '<span class="rail-label">' + esc(item.title || item.stage || t("notDeclared")) + '</span>' +
+          '<strong>' + esc(item.summary || "") + '</strong>' +
+          '<span class="source"><strong>' + esc(t("progress")) + ':</strong> ' + esc(item.status || "unknown") + '</span>' +
+          '<span class="source"><strong>' + esc(t("nextSafeMove")) + ':</strong> ' + esc(item.nextStep || t("none")) + '</span>' +
+          '<span class="source"><strong>' + esc(t("evidence")) + ':</strong> ' + evidenceRefList(item.sourceRefs, 4) + '</span>' +
+          '</article>'
         ).join("");
         const actionCards = actions.map((item) =>
           '<article class="hub-item ' + (String(item.status || "").includes("blocked") || String(item.status || "").includes("debt") ? "risk" : "warn") + '">' +
@@ -6231,6 +6345,23 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           .filter(Boolean)
           .map(apiRouteButton)
           .join("");
+        const listener = app.state.listener || ((app.state.dashboardRuntime || {}).listener) || {};
+        const listenerCommands = [
+          api.startCommand || "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs ensure-listening",
+          api.statusCommand || "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status",
+        ];
+        const staticProofRefs = [];
+        for (const item of evidenceMap) {
+          for (const ref of [...(item.sourceRefs || []), ...(item.missingRefs || [])]) {
+            if (ref && !staticProofRefs.includes(ref)) staticProofRefs.push(ref);
+          }
+        }
+        const listenerBootstrap =
+          '<div class="hub-item ' + (localApiToken ? "" : "warn") + '"><strong>' + esc(t("listenerBootstrap")) + '</strong>' +
+          '<span>' + badge(localApiToken ? t("apiLookupOk") : t("apiLookupStatic")) + ' ' + esc(listener.status || (localApiToken ? "connected" : "not-connected")) + '</span>' +
+          '<p>' + esc(t("listenerBootstrapCopy")) + '</p>' +
+          listenerCommands.map((command) => '<span class="source command-line"><strong>' + esc(t("command")) + ':</strong> <code>' + esc(command) + '</code></span>').join("") +
+          '<span class="source"><strong>' + esc(t("staticProofFallback")) + ':</strong> ' + evidenceRefList(staticProofRefs, 6) + '</span></div>';
         return '<div class="reality-action-hub">' +
           '<div class="hub-brief"><span class="rail-label">' + esc(t("userRealityCheck")) + '</span><strong>' + esc(check.purpose || "") + '</strong>' +
           metricGrid([
@@ -6242,10 +6373,12 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
             [t("openDecisions"), summary.openDecisionCount ?? 0, "decisions"],
           ]) + '</div>' +
           '<div class="hub-grid"><section class="hub-list"><h3>' + esc(t("realityCheckAnswers")) + '</h3>' + (answerCards || '<p class="muted">' + esc(t("notDeclared")) + '</p>') + '</section>' +
+          '<section class="hub-list"><h3>' + esc(t("realityCheckProgressFlow")) + '</h3>' + (progressFlowCards || '<p class="muted">' + esc(t("notDeclared")) + '</p>') + '</section>' +
           '<section class="hub-list"><h3>' + esc(t("realityCheckActionPlan")) + '</h3>' + (actionCards || '<p class="muted">' + esc(t("hubNoAction")) + '</p>') + '</section></div>' +
           '<h3>' + esc(t("evidenceDrilldown")) + '</h3>' +
           table([t("evidence"), "Source refs", "Missing refs", "API"], evidenceRows) +
           renderEvidencePreview() +
+          listenerBootstrap +
           '<div class="hub-item"><strong>' + esc(api.route || "/api/harness-dashboard/v1/reality-check") + '</strong><span class="source">' + esc((api.usefulFor || []).join(", ") || t("hubApiCopy")) + '</span><div class="api-route-list">' + routeChips + '</div>' + renderApiPreview() + '</div>' +
           '</div>';
       }
@@ -7117,9 +7250,18 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         document.querySelectorAll('[role="tab"]').forEach((tab) => {
           const selected = tab.getAttribute("aria-controls") === targetId;
           tab.setAttribute("aria-selected", String(selected));
+          tab.setAttribute("tabindex", selected ? "0" : "-1");
         });
         document.querySelectorAll('[role="tabpanel"]').forEach((panel) => {
-          panel.classList.toggle("hidden", panel.id !== targetId);
+          const selected = panel.id === targetId;
+          panel.classList.toggle("hidden", !selected);
+          panel.toggleAttribute("hidden", !selected);
+          panel.setAttribute("aria-hidden", String(!selected));
+          if ("inert" in panel) {
+            panel.inert = !selected;
+          } else {
+            panel.toggleAttribute("inert", !selected);
+          }
         });
         renderTabPurpose();
         const purpose = document.getElementById("tab-purpose");
@@ -7324,7 +7466,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
 }
 
 function buildDashboardReadme(): string {
-  return `# Harness Dashboard 4.6.7: Project World Model
+  return `# Harness Dashboard 4.6.8: Project World Model
 
 The dashboard is a ledger-backed Project World Model, not a Markdown-derived report page.
 
@@ -7402,7 +7544,7 @@ function buildDesignFrameworkHtml(): string {
 <meta charset="utf-8" />
 <title>Harness Dashboard Design Framework</title>
 <body>
-  <h1>Harness Dashboard 4.6.7 Design Framework</h1>
+  <h1>Harness Dashboard 4.6.8 Design Framework</h1>
   <p>Executive Overview first. Same data, different density for Stakeholder, AI Agent, and Maintainer modes.</p>
   <ul>
     <li>Modes: Local Live, Static Snapshot, Degraded Offline.</li>
@@ -7422,7 +7564,7 @@ function buildBackendBlueprintHtml(): string {
 <title>Optional Backend Dashboard Blueprint</title>
 <body>
   <h1>Optional Backend Dashboard Blueprint</h1>
-  <p>The default 4.6.7 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
+  <p>The default 4.6.8 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
   <ul>
     <li>Must preserve ledger-first governance.</li>
     <li>Must not replace the local single-file dashboard contract.</li>
@@ -7562,7 +7704,7 @@ export function generateDashboardFiles(
         "Specification for future opt-in backend dashboard implementation.",
       nonGoals: [
         "No backend dashboard app is generated by default.",
-        "No database is required for 4.6.7 MVP.",
+        "No database is required for 4.6.8 MVP.",
         "No persistent UI writes are allowed by default.",
       ],
     }),

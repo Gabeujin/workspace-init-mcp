@@ -137,7 +137,7 @@ ${params.purpose}
 
 ## Status
 
-- Harness Dashboard 4.6.7 Hypertext Project World Model generated.
+- Harness Dashboard 4.6.8 Hypertext Project World Model generated.
 - First governed session is pending.
 - AI Agents should call \`get_harness_dashboard_context\` before starting work.
 
@@ -753,7 +753,7 @@ This directory family defines how AI work is governed for **${params.workspaceNa
 - \`.github/ai-harness/operating-model.md\`: how humans and AI should operate
 - \`.github/ai-harness/context-strategy.md\`: when to compact vs reset context
 - \`.github/ai-harness/evaluation-rubrics.md\`: explicit grading criteria and quality thresholds
-- \`docs/ai-harness/dashboard/\`: Harness Dashboard 4.6.7 Hypertext Project World Model, ledger projections, single-file HTML, and read-only local API design system
+- \`docs/ai-harness/dashboard/\`: Harness Dashboard 4.6.8 Hypertext Project World Model, ledger projections, single-file HTML, and read-only local API design system
 - \`docs/ai-harness/runtime/\`: planner / generator / evaluator runtime state, prompts, and session ledgers
 - \`docs/ai-harness/adoption-paths.md\`: legacy-project and greenfield DX/AX adoption playbook
 - \`docs/ai-harness/domain-stress-playbooks.md\`: domain packs for identity commerce, legacy modernization, and content release governance

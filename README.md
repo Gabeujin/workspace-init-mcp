@@ -5,7 +5,7 @@
 
 `workspace-init-mcp` installs a non-destructive AI Work Harness that lets humans and agents plan, resume, verify, and hand off project work from durable evidence instead of chat history.
 
-Version `4.6.7` strengthens the World Model Harness Dashboard with ranked evidence lookup, match-quality metadata, provenance/freshness visibility, and closed-session trace synchronization. Users can inspect project reality, goal fit, risks, next actions, required proof, progress, and local API evidence routes without reading raw JSON or chat history. It keeps the 4.6.x domain-independent world-model harness: traceable request/process/result records, projection confidence, extensible domain stress profiles, and a persisted work-review-improve loop.
+Version `4.6.8` strengthens the World Model Harness Dashboard with a required reality-to-action progress flow, local listener bootstrap guidance, static proof fallback, migrated/runtime projection coverage, and stricter tab accessibility semantics. Users can inspect project reality, goal fit, risks, next actions, required proof, progress, and local API evidence routes without reading raw JSON or chat history. It keeps the 4.6.x domain-independent world-model harness: traceable request/process/result records, projection confidence, ranked evidence lookup, extensible domain stress profiles, and a persisted work-review-improve loop.
 
 ---
 
@@ -30,7 +30,7 @@ The harness is designed for both new services and existing projects that already
 
 ---
 
-## 4.6.7 Highlights
+## 4.6.8 Highlights
 
 ### Stateful Cognitive Offloading
 
@@ -104,7 +104,7 @@ UI work follows current Chrome/Google I/O modern web guidance as progressive enh
 
 ### Domain Stress And Briefing Packs
 
-4.6.7 keeps the built-in service profiles and adds custom profile support so the harness can fit a web application, learning plan, research corpus, documentation program, or other governed domain without hard-coding the world around commerce or release work.
+4.6.8 keeps the built-in service profiles and custom profile support so the harness can fit a web application, learning plan, research corpus, documentation program, or other governed domain without hard-coding the world around commerce or release work.
 
 - `identity-commerce-operations`: credential/auth, payment, refund, fulfillment, and operational evidence gates.
 - `legacy-modernization-governance`: AS-IS/TO-BE mapping, migration, rollback, ownership, and compatibility evidence gates.
@@ -363,7 +363,7 @@ Main MCP tools include:
 
 ## Quality And Safety Baseline
 
-Version `4.6.7` includes these guardrails:
+Version `4.6.8` includes these guardrails:
 
 - Absolute `workspacePath` enforcement.
 - Non-destructive adoption for legacy projects.
@@ -426,6 +426,16 @@ npm pack --dry-run
 `prepack` runs `clean` and `build` so package contents do not depend on stale local `dist/` output.
 
 ---
+
+## 4.6.8 Release Notes
+
+Major changes in 4.6.8:
+
+- Added required `userRealityCheck.progressFlow` stages so the dashboard reads as Reality > Risks > Next Actions > Proof > API instead of separate cards users must mentally stitch together.
+- Added a local listener bootstrap action, status command, static proof fallback, and User Reality Check UI panel so tokenless/static dashboard users know exactly how to turn evidence and route chips into structured read-only previews.
+- Propagated the progress-flow contract through generated schema, dashboard validation, generated `dashboard-ops` legacy repair, reconcile backfills, runtime dashboard synchronization, and tests.
+- Tightened dashboard tab accessibility with roving tab indexes plus explicit `hidden`, `aria-hidden`, and `inert` state for inactive tab panels.
+- Added regression coverage for progress-flow state, listener bootstrap commands, static proof fallback UI, legacy migration, and tab/panel activation semantics.
 
 ## 4.6.7 Release Notes
 

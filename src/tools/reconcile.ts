@@ -1135,9 +1135,9 @@ function backfillDashboardSessionTraceability(state: Record<string, unknown>): v
 }
 
 function backfillDashboardUserRealityCheck(state: Record<string, unknown>): void {
-  if (isPlainObject(state.userRealityCheck)) {
-    return;
-  }
+  const existingRealityCheck = isPlainObject(state.userRealityCheck)
+    ? state.userRealityCheck
+    : null;
   const workspace = isPlainObject(state.workspace) ? state.workspace : {};
   const goalCompass = isPlainObject(state.goalCompass) ? state.goalCompass : {};
   const evidence = isPlainObject(state.governanceEvidenceBrief)
@@ -1155,6 +1155,72 @@ function backfillDashboardUserRealityCheck(state: Record<string, unknown>): void
   const nextSafeMove = String(
     goalCompass.nextSafeMove || "Run dashboard-ops refresh, verify projections, and record the next governed session."
   );
+  const listenerStartCommand = "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs ensure-listening";
+  const legacyProgressFlow = [
+    {
+      stage: "reality",
+      title: "Legacy projection reality",
+      status: "refresh-required",
+      summary: String(goalCompass.currentReality || "Legacy dashboard projection needs refresh."),
+      sourceRefs: ["goalCompass", "projectionConfidence", "legacy-dashboard-state"],
+      nextStep: "Run dashboard-ops verify-projections and refresh.",
+    },
+    {
+      stage: "risks",
+      title: "Current risks",
+      status: "projection-debt",
+      summary:
+        "Legacy projection risk is not fully known until dashboard projections and request/process/result trace are refreshed.",
+      sourceRefs: ["projectionConfidence", "sessionTraceability", "legacy-dashboard-state"],
+      nextStep: "Run dashboard-ops verify-projections and refresh before trusting readiness.",
+    },
+    {
+      stage: "next-actions",
+      title: "Next action",
+      status: "refresh-required",
+      summary: nextSafeMove,
+      sourceRefs: ["goalCompass", "userRealityCheck.actionPlan"],
+      nextStep: nextSafeMove,
+    },
+    {
+      stage: "proof-progress",
+      title: "Proof and progress",
+      status: missingEvidenceClaims.length || unresolvedDecisions.length ? "debt" : "tracked",
+      summary: `${missingEvidenceClaims.length} evidence gaps and ${unresolvedDecisions.length} open decisions remain in the migrated projection.`,
+      sourceRefs: ["governanceEvidenceBrief", "sessionTraceability"],
+      nextStep: "Refresh evidence and record a governed session trace before trusting progress.",
+    },
+    {
+      stage: "local-api",
+      title: "Local API proof path",
+      status: "listener-required",
+      summary:
+        "Static snapshots name proof references; the local listener provides token-authenticated structured previews.",
+      sourceRefs: ["listener", "dashboardRuntime", "userRealityCheck.apiContract"],
+      nextStep: listenerStartCommand,
+    },
+  ];
+  if (existingRealityCheck != null) {
+    if (!Array.isArray(existingRealityCheck.progressFlow)) {
+      existingRealityCheck.progressFlow = legacyProgressFlow;
+    }
+    const existingApi = isPlainObject(existingRealityCheck.apiContract)
+      ? existingRealityCheck.apiContract
+      : {};
+    existingRealityCheck.apiContract = {
+      ...existingApi,
+      route: String(existingApi.route || "/api/harness-dashboard/v1/reality-check"),
+      readOnly: existingApi.readOnly === false ? false : true,
+      usefulFor: Array.isArray(existingApi.usefulFor)
+        ? existingApi.usefulFor
+        : ["legacy refresh orientation", "AI-agent resume"],
+      startCommand: String(existingApi.startCommand || listenerStartCommand),
+      statusCommand: String(
+        existingApi.statusCommand || "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status"
+      ),
+    };
+    return;
+  }
   state.userRealityCheck = {
     schemaVersion: String(
       isPlainObject(state.meta)
@@ -1185,6 +1251,7 @@ function backfillDashboardUserRealityCheck(state: Record<string, unknown>): void
         apiRoutes: ["/api/harness-dashboard/v1/reality-check"],
       },
     ],
+    progressFlow: legacyProgressFlow,
     actionPlan: [
       {
         id: "action.legacy-refresh",
@@ -1220,6 +1287,8 @@ function backfillDashboardUserRealityCheck(state: Record<string, unknown>): void
       route: "/api/harness-dashboard/v1/reality-check",
       readOnly: true,
       usefulFor: ["legacy refresh orientation", "AI-agent resume"],
+      startCommand: listenerStartCommand,
+      statusCommand: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status",
       queryExamples: ["/api/harness-dashboard/v1/query?scope=reality-check&q=refresh"],
       security: "Loopback-only, token-protected, no shell execution, no file writes, no LLM calls.",
     },

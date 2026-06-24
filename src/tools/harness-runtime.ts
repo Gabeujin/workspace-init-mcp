@@ -5350,6 +5350,7 @@ function syncDashboardFromSession(
     ],
   };
 
+  const listenerStartCommand = "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs ensure-listening";
   dashboardState.userRealityCheck = {
     ...(isPlainObject(dashboardState.userRealityCheck)
       ? dashboardState.userRealityCheck
@@ -5398,6 +5399,58 @@ function syncDashboardFromSession(
         answer: session.notes.current,
         sourceRefs: ["agentResumeBrief.nextSafestAction", "runtimeOrchestration"],
         apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/tasks"],
+      },
+    ],
+    progressFlow: [
+      {
+        stage: "reality",
+        title: "Runtime session reality",
+        status: session.session.status,
+        summary: `Harness session ${session.session.id} is ${session.session.status} in ${currentPhase}.`,
+        sourceRefs: ["runtimeOrchestration", "sessionTraceability", "governedSessions"],
+        nextStep: session.notes.current,
+      },
+      {
+        stage: "risks",
+        title: "Current risks",
+        status:
+          latestTraceRecord.traceIntegrity.status === "complete"
+            ? "tracked"
+            : "trace-debt",
+        summary:
+          latestTraceRecord.traceIntegrity.status === "complete"
+            ? `Request trace is complete for: ${latestTraceRecord.originalRequest}`
+            : "Request/process/result trace integrity needs repair before handoff.",
+        sourceRefs: ["sessionTraceability", "governedSessions.taskTrace", "governanceEvidenceBrief"],
+        nextStep:
+          latestTraceRecord.traceIntegrity.status === "complete"
+            ? "Continue from the latest governed phase."
+            : "Repair request/process/result trace integrity before handoff.",
+      },
+      {
+        stage: "next-actions",
+        title: "Next action",
+        status: session.session.status,
+        summary: session.notes.current,
+        sourceRefs: ["agentResumeBrief.nextSafestAction", "runtimeOrchestration"],
+        nextStep: session.notes.current,
+      },
+      {
+        stage: "proof-progress",
+        title: "Proof and progress",
+        status: missingEvidenceClaims.length || unresolvedDecisions.length ? "debt" : "tracked",
+        summary: `${missingEvidenceClaims.length} evidence gaps and ${unresolvedDecisions.length} open decisions remain for this projection.`,
+        sourceRefs: ["governanceEvidenceBrief", "dashboardQualityScorecard", "sessionTraceability"],
+        nextStep: "Link verification evidence and residual-risk decisions before closeout.",
+      },
+      {
+        stage: "local-api",
+        title: "Local API proof path",
+        status: "listener-required",
+        summary:
+          "Static snapshots keep the resume path readable; the local listener provides token-authenticated structured previews.",
+        sourceRefs: ["listener", "dashboardRuntime", "userRealityCheck.apiContract"],
+        nextStep: listenerStartCommand,
       },
     ],
     actionPlan: [
@@ -5475,6 +5528,8 @@ function syncDashboardFromSession(
     apiContract: {
       route: "/api/harness-dashboard/v1/reality-check",
       readOnly: true,
+      startCommand: listenerStartCommand,
+      statusCommand: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status",
       usefulFor: [
         "active session resume",
         "stakeholder progress readout",

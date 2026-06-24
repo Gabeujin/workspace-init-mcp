@@ -38,6 +38,13 @@ const { recommendAgentSkills, SKILL_REGISTRY, AGENT_REGISTRY } = agentSkillsRegi
 const { generateSelectedSkills } = agentSkillsGeneratorModule;
 const packageJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf-8"));
 const CURRENT_VERSION = packageJson.version;
+const EXPECTED_USER_REALITY_PROGRESS_STAGES = [
+  "reality",
+  "risks",
+  "next-actions",
+  "proof-progress",
+  "local-api",
+];
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -242,6 +249,7 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(dashboardStateSchema.properties.projectionConfidence.properties.requiredActions);
   assert.ok(dashboardStateSchema.properties.sessionTraceability.properties.entries);
   assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.actionPlan);
+  assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.progressFlow);
   for (const key of DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS) {
     assert.ok(key in state, `dashboard-state.json should include ${key}`);
   }
@@ -303,12 +311,22 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(state.sessionTraceability.entries[0].evidenceRefs.includes("docs/ai-harness/dashboard/index.html"));
   assert.equal(state.userRealityCheck.status, "bootstrap-action-plan");
   assert.equal(state.userRealityCheck.summary.readableWithoutRawJson, true);
-  assert.ok(state.userRealityCheck.actionPlan.length >= 5);
+  assert.ok(state.userRealityCheck.actionPlan.length >= 6);
+  assert.ok(Array.isArray(state.userRealityCheck.progressFlow));
+  assert.equal(state.userRealityCheck.progressFlow.length, 5);
+  assert.deepEqual(
+    state.userRealityCheck.progressFlow.map((item) => item.stage),
+    EXPECTED_USER_REALITY_PROGRESS_STAGES
+  );
   assert.equal(state.userRealityCheck.actionPlan[0].id, "action.verify-projections");
+  assert.equal(state.userRealityCheck.actionPlan[1].id, "action.start-local-listener");
   assert.ok(state.userRealityCheck.actionPlan.every((item) => item.evidenceRequired.length > 0));
+  assert.ok(state.userRealityCheck.progressFlow.every((item) => item.stage && item.title && item.status && item.summary && Array.isArray(item.sourceRefs)));
+  assert.ok(state.userRealityCheck.progressFlow.some((item) => item.stage === "local-api" && /ensure-listening/.test(item.nextStep)));
   assert.equal(state.userRealityCheck.summary.missingEvidenceCount, state.governanceEvidenceBrief.missingEvidenceClaims.length);
   assert.equal(state.userRealityCheck.summary.openDecisionCount, state.governanceEvidenceBrief.unresolvedDecisions.length);
   assert.equal(state.userRealityCheck.apiContract.route, "/api/harness-dashboard/v1/reality-check");
+  assert.match(state.userRealityCheck.apiContract.startCommand, /ensure-listening/);
   assert.ok(state.userRealityCheck.apiContract.queryExamples.some((item) => item.includes("/evidence-ref?ref=")));
   assert.equal(state.governedSessions[0].taskTrace.originalRequest, params.purpose);
   assert.equal(state.governedSessions[0].traceIntegrity.status, "complete");
@@ -452,6 +470,17 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(html, /Current Judgment Console/);
   assert.match(html, /Reality And Goal Compass/);
   assert.match(html, /Reality & Next Actions Hub/);
+  assert.match(html, /Reality > Risks > Next Actions > Proof > API/);
+  assert.match(html, /Listener bootstrap/);
+  assert.match(html, /Static proof fallback/);
+  assert.match(html, /listenerBootstrapCopy/);
+  assert.match(html, /ensure-listening/);
+  assert.match(html, /id="tab-overview"[^>]*aria-selected="true"[^>]*tabindex="0"/);
+  assert.match(html, /id="tab-work"[^>]*aria-selected="false"[^>]*tabindex="-1"/);
+  assert.match(html, /id="view-overview"[^>]*aria-hidden="false"/);
+  assert.match(html, /id="view-work"[^>]*aria-hidden="true"[^>]*hidden[^>]*inert/);
+  assert.match(html, /setAttribute\("tabindex", selected \? "0" : "-1"\)/);
+  assert.match(html, /toggleAttribute\("hidden", !selected\)/);
   assert.match(html, /renderRealityNextActionsHub/);
   assert.match(html, /hubPrimaryNextActions/);
   assert.match(html, /api-route-list/);
@@ -1296,7 +1325,40 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(["bootstrap-trace-complete", "trace-debt"].includes(reconciled.sessionTraceability.status));
   assert.ok(["bootstrap-action-plan", "legacy-backfill-action-plan"].includes(reconciled.userRealityCheck.status));
   assert.equal(reconciled.userRealityCheck.apiContract.route, "/api/harness-dashboard/v1/reality-check");
+  assert.match(reconciled.userRealityCheck.apiContract.startCommand, /ensure-listening/);
+  assert.deepEqual(
+    reconciled.userRealityCheck.progressFlow.map((item) => item.stage),
+    EXPECTED_USER_REALITY_PROGRESS_STAGES
+  );
   assert.ok(reconciled.userRealityCheck.actionPlan[0].evidenceRequired.length > 0);
+  assert.equal(validateDashboardStateShape(reconciled).valid, true);
+}
+
+{
+  const { root } = generateWorkspace();
+  const statePath = path.join(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  const legacyState = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  delete legacyState.userRealityCheck.progressFlow;
+  delete legacyState.userRealityCheck.apiContract.startCommand;
+  delete legacyState.userRealityCheck.apiContract.statusCommand;
+  fs.writeFileSync(statePath, JSON.stringify(legacyState, null, 2) + "\n", "utf-8");
+
+  const result = reconcileWorkspaceInitialization({
+    workspacePath: root,
+    workspaceName: "Existing Legacy Reality Check Workspace",
+    purpose: "Verify reconcile upgrades existing user-facing dashboard reality checks.",
+    applyChanges: true,
+    writeMigrationReport: false,
+    writeSemanticDiffReport: false,
+  });
+  assert.equal(result.applied, true);
+  const reconciled = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  assert.deepEqual(
+    reconciled.userRealityCheck.progressFlow.map((item) => item.stage),
+    EXPECTED_USER_REALITY_PROGRESS_STAGES
+  );
+  assert.match(reconciled.userRealityCheck.apiContract.startCommand, /ensure-listening/);
+  assert.match(reconciled.userRealityCheck.apiContract.statusCommand, /dashboard-ops\.mjs status/);
   assert.equal(validateDashboardStateShape(reconciled).valid, true);
 }
 
@@ -1901,6 +1963,10 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.equal(traceEntry.traceIntegrity.status, "complete");
   assert.equal(governedEntry.status, "closed");
   assert.match(governedEntry.taskTrace.resultSummary, /Closed dashboard trace remains projected/);
+  assert.deepEqual(
+    dashboardState.userRealityCheck.progressFlow.map((item) => item.stage),
+    EXPECTED_USER_REALITY_PROGRESS_STAGES
+  );
 }
 
 {
