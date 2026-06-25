@@ -3234,6 +3234,8 @@ function evidenceCollections(publicState) {
   const claimMatrix = objectValue(publicState.claimEvidenceMatrix);
   const traceability = objectValue(publicState.sessionTraceability);
   const userReality = objectValue(publicState.userRealityCheck);
+  const trustReadiness = objectValue(userReality.trustReadinessBrief);
+  const trustEvidenceChecks = objectValue(trustReadiness.evidenceChecks);
   const projectionConfidence = objectValue(publicState.projectionConfidence);
   const governanceEvidence = objectValue(publicState.governanceEvidenceBrief);
   const trustBoundary = objectValue(publicState.trustBoundary);
@@ -3256,6 +3258,10 @@ function evidenceCollections(publicState) {
     { kind: "user-reality-action", sourcePath: "userRealityCheck.actionPlan", rows: arrayValue(userReality.actionPlan), fields: ["id", "rank", "title", "status", "owner", "whyItMatters", "evidenceRequired", "apiRoutes", "blocks", "successSignal", "sourceRefs", "command"], scopes: ["all", "reality-check", "tasks", "evidence"] },
     { kind: "user-reality-answer", sourcePath: "userRealityCheck.answers", rows: arrayValue(userReality.answers), fields: ["question", "answer", "sourceRefs", "apiRoutes"], scopes: ["all", "reality-check", "evidence"] },
     { kind: "evidence-map", sourcePath: "userRealityCheck.evidenceMap", rows: arrayValue(userReality.evidenceMap), fields: ["id", "label", "sourceRefs", "missingRefs", "apiRoutes"], scopes: ["all", "reality-check", "evidence"] },
+    { kind: "trust-readiness-question", sourcePath: "userRealityCheck.trustReadinessBrief.questions", rows: arrayValue(trustReadiness.questions), fields: ["question", "answer", "decision", "confidence", "confidenceScore", "dimensionIds", "evidenceRefs", "unresolvedEvidenceRefs", "unresolvedEvidenceItems", "commands", "apiRouteChips"], scopes: ["all", "reality-check", "evidence"] },
+    { kind: "trust-readiness-dimension", sourcePath: "userRealityCheck.trustReadinessBrief.scoreDimensions", rows: arrayValue(trustReadiness.scoreDimensions), fields: ["id", "label", "score", "status", "currentFinding", "passCriteria", "evidenceRefs", "apiRouteChips", "nextAction"], scopes: ["all", "reality-check", "evidence"] },
+    { kind: "trust-readiness-unresolved-evidence", sourcePath: "userRealityCheck.trustReadinessBrief.evidenceChecks.unresolvedItems", rows: arrayValue(trustEvidenceChecks.unresolvedItems), fields: ["id", "label", "requiredEvidenceType", "owner", "sourceRefs", "apiRouteChips", "nextAction"], scopes: ["all", "reality-check", "evidence", "tasks"] },
+    { kind: "trust-readiness-route-contract", sourcePath: "userRealityCheck.trustReadinessBrief.routeContracts", rows: arrayValue(trustReadiness.routeContracts), fields: ["route", "expectedPayloadKeys", "usefulFor", "staticModeBehavior", "listenerModeBehavior"], scopes: ["all", "reality-check", "evidence"] },
     { kind: "vcs-record", sourcePath: "vcsChangeRecords", rows: arrayValue(publicState.vcsChangeRecords), fields: ["commitId", "revisionId", "summary", "linkedSessionIds", "linkedTaskIds", "linkedDecisionIds"], scopes: ["all", "evidence"] },
     { kind: "work-item", sourcePath: "workTimeline.items", rows: arrayValue(workTimeline.items), fields: ["id", "title", "status", "owner", "lane", "evidenceRefs", "nextActionRef", "exitCriteria"], scopes: ["all", "tasks", "evidence"] },
     { kind: "readiness-row", sourcePath: "workReadinessMap.rows", rows: arrayValue(readinessMap.rows), fields: ["id", "title", "status", "owner", "evidenceRefs", "nextActionRef", "exitCriteria"], scopes: ["all", "tasks", "evidence"] },

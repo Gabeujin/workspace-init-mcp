@@ -249,6 +249,11 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(dashboardStateSchema.properties.projectionConfidence.properties.requiredActions);
   assert.ok(dashboardStateSchema.properties.sessionTraceability.properties.entries);
   assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.actionPlan);
+  assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.trustReadinessBrief);
+  assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.trustReadinessBrief.properties.questions);
+  assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.trustReadinessBrief.properties.scoreDimensions);
+  assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.trustReadinessBrief.properties.evidenceChecks);
+  assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.trustReadinessBrief.properties.routeContracts);
   assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.progressFlow);
   for (const key of DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS) {
     assert.ok(key in state, `dashboard-state.json should include ${key}`);
@@ -311,6 +316,67 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(state.sessionTraceability.entries[0].evidenceRefs.includes("docs/ai-harness/dashboard/index.html"));
   assert.equal(state.userRealityCheck.status, "bootstrap-action-plan");
   assert.equal(state.userRealityCheck.summary.readableWithoutRawJson, true);
+  assert.ok(state.userRealityCheck.trustReadinessBrief);
+  assert.ok(state.userRealityCheck.trustReadinessBrief.section);
+  assert.equal(typeof state.userRealityCheck.trustReadinessBrief.score?.value, "number");
+  assert.equal(state.userRealityCheck.trustReadinessBrief.score.status, "orientation-confidence-not-release-readiness");
+  assert.match(state.userRealityCheck.trustReadinessBrief.score.rationale, /not release, deployment, or operations readiness/);
+  assert.match(state.userRealityCheck.trustReadinessBrief.scorePolicy, /Auditable average/);
+  assert.equal(state.userRealityCheck.trustReadinessBrief.score.max >= state.userRealityCheck.trustReadinessBrief.score.value, true);
+  assert.equal(Array.isArray(state.userRealityCheck.trustReadinessBrief.scoreDimensions), true);
+  assert.equal(state.userRealityCheck.trustReadinessBrief.scoreDimensions.length >= 5, true);
+  assert.ok(state.userRealityCheck.trustReadinessBrief.scoreDimensions.every((item) =>
+    item.id &&
+    item.label &&
+    Number.isFinite(item.score) &&
+    item.currentFinding &&
+    Array.isArray(item.passCriteria) &&
+    item.passCriteria.length > 0 &&
+    Array.isArray(item.evidenceRefs) &&
+    item.evidenceRefs.length > 0 &&
+    Array.isArray(item.apiRouteChips) &&
+    item.apiRouteChips.length > 0 &&
+    item.nextAction
+  ));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.scoreDimensions.some((item) => item.id === "local-api-usefulness"));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.evidenceChecks);
+  assert.ok(state.userRealityCheck.trustReadinessBrief.evidenceChecks.resolvableRefs.includes("event-000001-bootstrap"));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.evidenceChecks.lookupRoutes.some((item) => item.includes("event-000001-bootstrap")));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.evidenceChecks.conceptualRefs.includes("projectionConfidence"));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.evidenceChecks.unresolvedRefs.includes("missing.service-health"));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.evidenceChecks.unresolvedItems.some((item) =>
+    item.id === "missing.service-health" &&
+    item.label &&
+    item.requiredEvidenceType &&
+    item.nextAction &&
+    Array.isArray(item.apiRouteChips)
+  ));
+  assert.ok(state.claimEvidenceMatrix.missingEvidenceItems.some((item) => item.id === "missing.operations-telemetry"));
+  assert.ok(state.claimEvidenceMatrix.missingEvidenceItems.some((item) => item.id === "missing.stakeholder-approval"));
+  assert.ok(Array.isArray(state.userRealityCheck.trustReadinessBrief.routeContracts));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.routeContracts.some((item) =>
+    item.route === "/api/harness-dashboard/v1/reality-check" &&
+    item.expectedPayloadKeys.includes("userRealityCheck")
+  ));
+  assert.equal(Array.isArray(state.userRealityCheck.trustReadinessBrief.questions), true);
+  assert.equal(state.userRealityCheck.trustReadinessBrief.questions.length >= 5, true);
+  assert.ok(state.userRealityCheck.trustReadinessBrief.questions.every((item) =>
+    item.question &&
+    item.answer &&
+    item.decision &&
+    Array.isArray(item.dimensionIds) &&
+    item.dimensionIds.length > 0 &&
+    Array.isArray(item.evidenceRefs) &&
+    item.evidenceRefs.length > 0 &&
+    Array.isArray(item.unresolvedEvidenceRefs) &&
+    Array.isArray(item.unresolvedEvidenceItems)
+  ));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.questions.some((item) => Array.isArray(item.commands) && item.commands.length > 0));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.questions.some((item) => Number.isFinite(item.confidenceScore)));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.questions.some((item) => /How can the listener/.test(item.question)));
+  assert.equal(typeof state.userRealityCheck.trustReadinessBrief.commands?.length, "number");
+  assert.ok(state.userRealityCheck.trustReadinessBrief.commands.length > 0);
+  assert.ok(state.userRealityCheck.trustReadinessBrief.apiRouteChips.includes("/api/harness-dashboard/v1/reality-check"));
   assert.ok(state.userRealityCheck.actionPlan.length >= 6);
   assert.ok(Array.isArray(state.userRealityCheck.progressFlow));
   assert.equal(state.userRealityCheck.progressFlow.length, 5);
@@ -427,6 +493,13 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(html, /Projection Confidence/);
   assert.match(html, /Session Traceability/);
   assert.match(html, /User Reality Check/);
+  assert.match(html, /Trust\s*&amp;\s*Readiness Brief|Trust & Readiness Brief/);
+  assert.match(html, /What is real right now/);
+  assert.match(html, /Score policy/);
+  assert.match(html, /Score dimensions/);
+  assert.match(html, /Evidence checks/);
+  assert.match(html, /Route contracts/);
+  assert.match(html, /orientation-confidence-not-release-readiness/);
   assert.match(html, /renderUserRealityCheck/);
   assert.match(html, /data-evidence-ref/);
   assert.match(html, /data-api-route/);
@@ -444,6 +517,7 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.doesNotMatch(html, /scope=all&q=/);
   assert.match(html, /renderProjectionConfidence/);
   assert.match(html, /renderSessionTraceability/);
+  assert.match(html, /Static mode note/);
   assert.match(html, /originalRequest/);
   assert.match(html, /traceIntegrity/);
   assert.match(html, /Maintainer Report Deck/);
@@ -470,6 +544,11 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(html, /Current Judgment Console/);
   assert.match(html, /Reality And Goal Compass/);
   assert.match(html, /Reality & Next Actions Hub/);
+  assert.match(html, /briefQuestions/);
+  assert.match(html, /briefScore/);
+  assert.match(html, /briefRouteContracts/);
+  assert.match(html, /expectedPayloadKeys/);
+  assert.match(html, /What could be risky/);
   assert.match(html, /Reality > Risks > Next Actions > Proof > API/);
   assert.match(html, /Listener bootstrap/);
   assert.match(html, /Static proof fallback/);
@@ -2226,6 +2305,24 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     assert.equal(realityCheckPayload.payload.userRealityCheck.status, "bootstrap-action-plan");
     assert.equal(realityCheckPayload.payload.userRealityCheck.apiContract.route, "/api/harness-dashboard/v1/reality-check");
     assert.ok(realityCheckPayload.payload.userRealityCheck.actionPlan.some((item) => item.id === "action.verify-projections"));
+    assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief);
+    assert.equal(typeof realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.score?.value, "number");
+    assert.equal(Array.isArray(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.questions), true);
+    assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.questions.some((item) => item.question && item.answer));
+    assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.apiRouteChips.includes("/api/harness-dashboard/v1/reality-check"));
+    assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.scoreDimensions.some((item) => item.id === "local-api-usefulness"));
+    assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.evidenceChecks.resolvableRefs.includes("event-000001-bootstrap"));
+    assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.evidenceChecks.unresolvedRefs.includes("missing.service-health"));
+    assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.evidenceChecks.unresolvedItems.some((item) => item.id === "missing.first-governed-session-closeout"));
+    assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.routeContracts.some((item) => item.route === "/api/harness-dashboard/v1/health"));
+    for (const contract of realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.routeContracts) {
+      const pathAndQuery = contract.route.replace("/api/harness-dashboard/v1/", "");
+      const contractPayload = await fetch(apiUrl(pathAndQuery), { headers: authHeaders }).then((response) => response.json());
+      assert.equal(contractPayload.readOnly, true);
+      for (const key of contract.expectedPayloadKeys) {
+        assert.ok(key in contractPayload.payload, `${contract.route} payload should include ${key}`);
+      }
+    }
     assert.equal(JSON.stringify(realityCheckPayload.payload).includes(root), false);
 
     const evidenceRefPayload = await fetch(apiUrl("evidence-ref?ref=event-000001-bootstrap"), { headers: authHeaders }).then((response) => response.json());
@@ -2241,6 +2338,21 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     assert.ok(evidenceRefPayload.payload.results[0].freshness);
     assert.ok(evidenceRefPayload.payload.results[0].provenance);
     assert.equal(JSON.stringify(evidenceRefPayload.payload).includes(root), false);
+
+    for (const ref of [
+      "missing.service-health",
+      "missing.operations-telemetry",
+      "missing.stakeholder-approval",
+      "missing.first-governed-session-closeout",
+      "missing.live-listener-status",
+    ]) {
+      const unresolvedPayload = await fetch(apiUrl(`evidence-ref?ref=${encodeURIComponent(ref)}`), { headers: authHeaders }).then((response) => response.json());
+      assert.equal(unresolvedPayload.readOnly, true);
+      assert.equal(unresolvedPayload.payload.ref, ref);
+      assert.equal(unresolvedPayload.payload.resultCount > 0, true);
+      assert.ok(unresolvedPayload.payload.results.some((item) => item.recordId === ref || item.text.includes(ref) || item.canonicalPath.includes(ref)));
+      assert.equal(JSON.stringify(unresolvedPayload.payload).includes(root), false);
+    }
 
     const traceabilityQuery = await fetch(apiUrl("query?scope=traceability&q=originalRequest"), { headers: authHeaders }).then((response) => response.json());
     assert.equal(traceabilityQuery.readOnly, true);

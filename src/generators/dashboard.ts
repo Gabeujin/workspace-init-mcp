@@ -1508,6 +1508,382 @@ function buildUserRealityCheck(
       sourceRefs: ["agentPlatformGovernance", ...agentPlatformGovernance.governanceIndexing.evidenceRefs],
     },
   ];
+  const clampTrustReadinessScore = (value: number) =>
+    Math.max(0, Math.min(100, Math.round(value)));
+  const trustReadinessScoreInputs = {
+    missingEvidenceCount,
+    openDecisionCount,
+    openRiskSignalCount: openRotWarnings.length,
+    activeDomainStressProfileCount: activeProfiles.length,
+    bootstrapTraceEvidenceRefCount: bootstrapSessionEvidenceRefs.length,
+    commandCount: topActionPlan.filter((item) => Boolean(item.command)).length,
+    apiRouteCount: Array.from(new Set(topActionPlan.flatMap((item) => item.apiRoutes))).length,
+  };
+  const resolvableEvidenceRefs = [
+    "event-000001-bootstrap",
+    "docs/ai-harness/dashboard/index.html",
+    "docs/ai-harness/dashboard/events/harness-events.jsonl",
+    "docs/ai-harness/dashboard/state/dashboard-state.json",
+    "docs/ai-harness/dashboard/state/dashboard-runtime.json",
+  ];
+  const baselineMissingEvidenceItems = [
+    {
+      id: "missing.service-health",
+      label: "Service health evidence",
+      requiredEvidenceType: "health endpoint, local run output, smoke test, or not-applicable service decision",
+      owner: "maintainer",
+      sourceRefs: ["runningServiceContract.health", "claim.service.operational-readiness"],
+      apiRouteChips: ["/api/harness-dashboard/v1/evidence-ref?ref=missing.service-health"],
+      nextAction: "Attach service health evidence or record why this workspace has no service runtime.",
+    },
+    {
+      id: "missing.deployment-target",
+      label: "Deployment target and rollback evidence",
+      requiredEvidenceType: "deployment environment, release URL, smoke result, rollback command, or not-applicable decision",
+      owner: "maintainer",
+      sourceRefs: ["releaseReadiness", "claim.release.traceability"],
+      apiRouteChips: ["/api/harness-dashboard/v1/evidence-ref?ref=missing.deployment-target"],
+      nextAction: "Link deployment target, release trace, smoke result, and rollback path.",
+    },
+    {
+      id: "missing.vcs-task-links",
+      label: "VCS history linked to governed work",
+      requiredEvidenceType: "Git or SVN status, commits/revisions, linked tasks, and linked decisions",
+      owner: "harness-dashboard-operator",
+      sourceRefs: ["versionControl", "vcsChangeRecords"],
+      apiRouteChips: ["/api/harness-dashboard/v1/evidence-ref?ref=missing.vcs-task-links"],
+      nextAction: "Refresh VCS evidence and link unclassified paths to governed work.",
+    },
+    {
+      id: "missing.operations-telemetry",
+      label: "Operations telemetry evidence",
+      requiredEvidenceType: "logs, metrics, traces, SLO/SLI, runbook, incident drill, or not-applicable decision",
+      owner: "maintainer",
+      sourceRefs: ["incidentReadiness", "sloSli", "runningServiceContract"],
+      apiRouteChips: ["/api/harness-dashboard/v1/evidence-ref?ref=missing.operations-telemetry"],
+      nextAction: "Connect operational telemetry or explicitly mark it not applicable for this workspace.",
+    },
+    {
+      id: "missing.stakeholder-approval",
+      label: "Stakeholder approval evidence",
+      requiredEvidenceType: "approved first governed goal, owner confirmation, or decision record",
+      owner: "stakeholder-product-owner",
+      sourceRefs: ["decision-first-governed-goal", "stakeholderBrief"],
+      apiRouteChips: ["/api/harness-dashboard/v1/evidence-ref?ref=missing.stakeholder-approval"],
+      nextAction: "Approve or revise the first governed goal and record the decision.",
+    },
+  ];
+  const unresolvedEvidenceIds = baselineMissingEvidenceItems.map((item) => item.id);
+  const unresolvedDecisionItems = baselineUnresolvedDecisions.map((id) => ({
+    id,
+    label:
+      id === "decision-first-governed-goal"
+        ? "First governed goal decision"
+        : "Active AI agent platform declaration",
+    requiredEvidenceType: "owner-approved decision record",
+    owner: id === "decision-first-governed-goal" ? "stakeholder-product-owner" : "stakeholder-product-owner",
+    sourceRefs: [id],
+    apiRouteChips: [`/api/harness-dashboard/v1/query?scope=reality-check&q=${id}`],
+    nextAction:
+      id === "decision-first-governed-goal"
+        ? "Confirm whether the next goal is greenfield creation, running-service adoption, or modernization."
+        : "Declare active AI agent platforms and record stale instruction files.",
+  }));
+  const progressProofItems = [
+    {
+      id: "missing.first-governed-session-closeout",
+      label: "First governed session closeout",
+      requiredEvidenceType: "runtime session closeout with request/process/result trace",
+      owner: "harness-dashboard-operator",
+      sourceRefs: ["sessionTraceability", "governedSessions"],
+      apiRouteChips: ["/api/harness-dashboard/v1/traceability"],
+      nextAction: "Close the first governed session with explicit result and residual-risk evidence.",
+    },
+    {
+      id: "missing.refreshed-vcs-evidence",
+      label: "Refreshed VCS evidence",
+      requiredEvidenceType: "current VCS refresh with linked task and decision records",
+      owner: "harness-dashboard-operator",
+      sourceRefs: ["versionControl", "vcsChangeRecords"],
+      apiRouteChips: ["/api/harness-dashboard/v1/version-control"],
+      nextAction: "Run dashboard refresh and classify unlinked working-tree paths.",
+    },
+  ];
+  const listenerProofItems = [
+    {
+      id: "missing.live-listener-status",
+      label: "Live listener status",
+      requiredEvidenceType: "token-authenticated loopback health or runtime payload",
+      owner: "harness-dashboard-operator",
+      sourceRefs: ["listener", "dashboardRuntime"],
+      apiRouteChips: ["/api/harness-dashboard/v1/health", "/api/harness-dashboard/v1/runtime"],
+      nextAction: listenerStartCommand,
+    },
+  ];
+  const conceptualEvidenceRefs = [
+    "realityModel",
+    "projectionConfidence",
+    "governanceEvidenceBrief",
+    "contextRotMonitor",
+    "sessionTraceability",
+    "claimEvidenceMatrix",
+  ];
+  const trustReadinessDimensions = [
+    {
+      id: "projection-integrity",
+      label: "Projection integrity",
+      score: clampTrustReadinessScore(82 - openDecisionCount * 4),
+      status: "verify-before-trust",
+      currentFinding:
+        "The bootstrap projection exists and has a schema contract, but users still need a current verify-projections result before treating it as operational truth.",
+      passCriteria: [
+        "dashboard-state schema validation passes",
+        "ledger manifest sequence matches the projection",
+        "projectionConfidence required actions are visible",
+      ],
+      evidenceRefs: [
+        "event-000001-bootstrap",
+        "docs/ai-harness/dashboard/state/dashboard-state.json",
+        "projectionConfidence",
+      ],
+      apiRouteChips: ["/api/harness-dashboard/v1/traceability"],
+      nextAction: "Run verify-projections before using dashboard claims for handoff or release decisions.",
+    },
+    {
+      id: "evidence-coverage",
+      label: "Evidence coverage",
+      score: clampTrustReadinessScore(
+        86 - missingEvidenceCount * 8 - domainStress.missingEvidenceItems.length * 4
+      ),
+      status: missingEvidenceCount > 0 ? "evidence-gaps-visible" : "evidence-linked",
+      currentFinding:
+        "Missing evidence is explicitly counted and linked, but service, release, owner, VCS, and operations proof are still bootstrap-level until refreshed.",
+      passCriteria: [
+        "each missing claim has an owner and required artifact type",
+        "claim evidence links resolve through evidence-ref or query",
+        "unresolved evidence is not hidden from the Overview",
+      ],
+      evidenceRefs: [
+        "docs/ai-harness/dashboard/events/harness-events.jsonl",
+        "governanceEvidenceBrief",
+        "claimEvidenceMatrix",
+      ],
+      apiRouteChips: [
+        "/api/harness-dashboard/v1/evidence-ref?ref=event-000001-bootstrap",
+        "/api/harness-dashboard/v1/query?scope=reality-check&q=evidence",
+      ],
+      nextAction: "Convert each missing evidence claim into a real artifact, explicit waiver, or not-applicable decision.",
+    },
+    {
+      id: "trace-continuity",
+      label: "Request/process/result trace",
+      score: clampTrustReadinessScore(bootstrapSessionEvidenceRefs.length >= 3 ? 84 : 56),
+      status: "bootstrap-trace-present",
+      currentFinding:
+        "The bootstrap trace preserves the original request, process summary, result summary, and dashboard artifacts, but future sessions must keep recording the same fields.",
+      passCriteria: [
+        "original request is visible without chat history",
+        "process and result summaries are explicit",
+        "trace integrity shows missing fields instead of silently reconstructing them",
+      ],
+      evidenceRefs: [
+        "docs/ai-harness/dashboard/state/dashboard-state.json",
+        "docs/ai-harness/dashboard/index.html",
+        "sessionTraceability",
+      ],
+      apiRouteChips: ["/api/harness-dashboard/v1/traceability"],
+      nextAction: "Record every governed session transition with request/process/result trace evidence.",
+    },
+    {
+      id: "risk-and-goal-fit",
+      label: "Risk and goal fit",
+      score: clampTrustReadinessScore(
+        88 - openRotWarnings.length * 12 - openDecisionCount * 7 - activeProfiles.length * 5
+      ),
+      status: openDecisionCount > 0 || openRotWarnings.length > 0 ? "decision-needed" : "aligned",
+      currentFinding:
+        "The next governed goal and risk signals are visible, but open decisions still prevent the dashboard from claiming goal fit is settled.",
+      passCriteria: [
+        "first governed goal is confirmed",
+        "critical rot warnings are closed or accepted",
+        "domain stress gates are resolved, waived, or marked not-applicable",
+      ],
+      evidenceRefs: ["event-000001-bootstrap", "contextRotMonitor", "goalCompass"],
+      apiRouteChips: [
+        "/api/harness-dashboard/v1/reality-check",
+        "/api/harness-dashboard/v1/query?scope=reality-check&q=decision",
+      ],
+      nextAction: "Resolve decision-first-governed-goal and any domain-specific evidence gates.",
+    },
+    {
+      id: "local-api-usefulness",
+      label: "Local listener and API usefulness",
+      score: clampTrustReadinessScore(68 + Math.min(12, trustReadinessScoreInputs.apiRouteCount)),
+      status: "listener-required",
+      currentFinding:
+        "Route chips and read-only payload contracts are generated, but static mode can only name them until the loopback listener is started.",
+      passCriteria: [
+        "loopback listener starts with a local token",
+        "route chips return read-only payloads",
+        "SSE or refresh path proves the dashboard is live when served locally",
+      ],
+      evidenceRefs: [
+        "docs/ai-harness/dashboard/state/dashboard-runtime.json",
+        "listener",
+        "userRealityCheck.apiContract",
+      ],
+      apiRouteChips: [
+        "/api/harness-dashboard/v1/health",
+        "/api/harness-dashboard/v1/runtime",
+        "/api/harness-dashboard/v1/reality-check",
+      ],
+      nextAction: listenerStartCommand,
+    },
+  ];
+  const trustReadinessScoreValue = Math.min(
+    92,
+    clampTrustReadinessScore(
+      trustReadinessDimensions.reduce((sum, item) => sum + item.score, 0) /
+        trustReadinessDimensions.length
+    )
+  );
+  const trustReadinessConfidenceLevel =
+    trustReadinessScoreValue >= 72 ? "high" : trustReadinessScoreValue >= 52 ? "medium" : "low";
+  const routeContracts = [
+    {
+      route: "/api/harness-dashboard/v1/reality-check",
+      expectedPayloadKeys: ["userRealityCheck", "projectionConfidence", "sessionTraceability"],
+      usefulFor: "Shows the same trust brief, action plan, trace, and projection-confidence context as structured JSON.",
+      staticModeBehavior: "chip-only until listener is connected",
+      listenerModeBehavior: "token-authenticated read-only payload preview",
+    },
+    {
+      route: "/api/harness-dashboard/v1/traceability",
+      expectedPayloadKeys: ["projectionConfidence", "sessionTraceability"],
+      usefulFor: "Confirms request/process/result continuity and projection debt.",
+      staticModeBehavior: "named proof path only",
+      listenerModeBehavior: "token-authenticated traceability payload",
+    },
+    {
+      route: "/api/harness-dashboard/v1/health",
+      expectedPayloadKeys: ["ok", "mode", "statePathHash", "generatedAt"],
+      usefulFor: "Confirms the loopback listener is live and serving the current state hash.",
+      staticModeBehavior: "listener bootstrap command is shown",
+      listenerModeBehavior: "token-authenticated health payload",
+    },
+    {
+      route: "/api/harness-dashboard/v1/query?scope=reality-check&q=next",
+      expectedPayloadKeys: ["query", "scope", "resultCount", "results", "indexSummary"],
+      usefulFor: "Finds next-action evidence without reading raw dashboard-state JSON.",
+      staticModeBehavior: "query is displayed but not fetched",
+      listenerModeBehavior: "deterministic read-only search payload",
+    },
+  ];
+  const trustReadinessBriefQuestions = [
+    {
+      question: "What is real right now?",
+      answer:
+        "The harness dashboard, ledger, listener scaffold, and governance files are present. Real service state, release evidence, and ownership proof are still being linked.",
+      decision: "Use the dashboard for orientation and governed planning; do not treat it as release readiness.",
+      confidence: trustReadinessConfidenceLevel,
+      confidenceScore: trustReadinessDimensions.find((item) => item.id === "projection-integrity")?.score ?? trustReadinessScoreValue,
+      dimensionIds: ["projection-integrity", "trace-continuity"],
+      evidenceRefs: [
+        "event-000001-bootstrap",
+        "docs/ai-harness/dashboard/index.html",
+        "docs/ai-harness/dashboard/state/dashboard-state.json",
+      ],
+      unresolvedEvidenceRefs: [
+        "missing.service-health",
+        "missing.deployment-target",
+        "missing.operations-telemetry",
+      ],
+      unresolvedEvidenceItems: baselineMissingEvidenceItems.filter((item) =>
+        ["missing.service-health", "missing.deployment-target", "missing.operations-telemetry"].includes(item.id)
+      ),
+      commands: ["node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections"],
+      apiRouteChips: ["/api/harness-dashboard/v1/snapshot", "/api/harness-dashboard/v1/index"],
+    },
+    {
+      question: "What could be risky?",
+      answer:
+        "Bootstrap projections can appear complete before VCS, service health, deployment target, and operations evidence are tied to each claim.",
+      decision:
+        "Treat every readiness claim as provisional until its missing evidence item is resolved, waived, or marked not-applicable.",
+      confidence: "medium",
+      confidenceScore: trustReadinessDimensions.find((item) => item.id === "evidence-coverage")?.score ?? trustReadinessScoreValue,
+      dimensionIds: ["evidence-coverage", "risk-and-goal-fit"],
+      evidenceRefs: [
+        "docs/ai-harness/dashboard/events/harness-events.jsonl",
+        "projectionConfidence",
+        "governanceEvidenceBrief",
+        "contextRotMonitor",
+      ],
+      unresolvedEvidenceRefs: unresolvedEvidenceIds,
+      unresolvedEvidenceItems: baselineMissingEvidenceItems,
+      commands: ["node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections"],
+      apiRouteChips: ["/api/harness-dashboard/v1/traceability", "/api/harness-dashboard/v1/reality-check"],
+    },
+    {
+      question: "What should happen next?",
+      answer: goalCompass.nextSafeMove,
+      decision:
+        "Start with projection verification and evidence refresh before expanding implementation scope.",
+      confidence: "medium",
+      confidenceScore: trustReadinessDimensions.find((item) => item.id === "risk-and-goal-fit")?.score ?? trustReadinessScoreValue,
+      dimensionIds: ["risk-and-goal-fit", "local-api-usefulness"],
+      evidenceRefs: ["event-000001-bootstrap", "goalCompass", "agentResumeBrief.nextSafestAction"],
+      unresolvedEvidenceRefs: baselineUnresolvedDecisions,
+      unresolvedEvidenceItems: unresolvedDecisionItems,
+      commands: ["node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh"],
+      apiRouteChips: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/query?scope=reality-check&q=next"],
+    },
+    {
+      question: "What proves progress?",
+      answer:
+        "Request/process/result trace cards, verified projection runs, and explicit claim-evidence links that reduce missing claims and unresolved decisions.",
+      decision:
+        "Progress is proven by durable artifacts and shrinking evidence/decision debt, not by chat memory or visual completion alone.",
+      confidence: "medium",
+      confidenceScore: trustReadinessDimensions.find((item) => item.id === "trace-continuity")?.score ?? trustReadinessScoreValue,
+      dimensionIds: ["trace-continuity", "evidence-coverage"],
+      evidenceRefs: [
+        "docs/ai-harness/dashboard/state/dashboard-state.json",
+        "sessionTraceability",
+        "claimEvidenceMatrix",
+        "projectEvidenceInventory",
+      ],
+      unresolvedEvidenceRefs: progressProofItems.map((item) => item.id),
+      unresolvedEvidenceItems: progressProofItems,
+      commands: [
+        "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections",
+        "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status",
+      ],
+      apiRouteChips: ["/api/harness-dashboard/v1/traceability", "/api/harness-dashboard/v1/tasks"],
+    },
+    {
+      question: "How can the listener and API help now?",
+      answer:
+        "The local listener exposes read-only snapshots, traceability, reality-check, task, and query payloads so the dashboard can be rehydrated from durable state instead of memory or chat.",
+      decision:
+        "Use static mode for orientation and the token-protected listener for structured proof previews.",
+      confidence: "high",
+      confidenceScore: trustReadinessDimensions.find((item) => item.id === "local-api-usefulness")?.score ?? trustReadinessScoreValue,
+      dimensionIds: ["local-api-usefulness"],
+      evidenceRefs: [
+        "docs/ai-harness/dashboard/state/dashboard-runtime.json",
+        "listener",
+        "userRealityCheck.apiContract",
+      ],
+      unresolvedEvidenceRefs: listenerProofItems.map((item) => item.id),
+      unresolvedEvidenceItems: listenerProofItems,
+      commands: [listenerStartCommand],
+      apiRouteChips: [
+        "/api/harness-dashboard/v1/reality-check",
+        "/api/harness-dashboard/v1/query?scope=reality-check&q=evidence",
+      ],
+    },
+  ];
 
   return {
     schemaVersion: DASHBOARD_SCHEMA_VERSION,
@@ -1524,6 +1900,67 @@ function buildUserRealityCheck(
       openDecisionCount,
       activeDomainStressProfiles: activeProfiles,
       readableWithoutRawJson: true,
+    },
+    trustReadinessBrief: {
+      section: "Trust and Readiness Brief",
+      score: {
+        value: trustReadinessScoreValue,
+        max: 100,
+        confidenceLevel: trustReadinessConfidenceLevel,
+        confidenceScore: Math.max(10, trustReadinessScoreValue - 4),
+        status: "orientation-confidence-not-release-readiness",
+        rationale:
+          "This score measures whether a user can orient and choose the next governed action. It is not release, deployment, or operations readiness.",
+      },
+      scorePolicy:
+        "Auditable average of explicit dimensions, capped at 92 until browser QA, live listener verification, and real project evidence pass. Never raise by hiding missing evidence.",
+      scoreInputs: trustReadinessScoreInputs,
+      scoreDimensions: trustReadinessDimensions,
+      questions: trustReadinessBriefQuestions,
+      confidence: {
+        level: trustReadinessConfidenceLevel,
+        evidenceBacked: missingEvidenceCount < 3 && openDecisionCount === 0 && openRotWarnings.length === 0,
+      },
+      evidenceRefs: resolvableEvidenceRefs,
+      evidenceChecks: {
+        resolutionPolicy:
+          "Resolvable refs must work through evidence-ref lookup; conceptual refs identify state sections and must remain searchable through query.",
+        resolvableRefs: resolvableEvidenceRefs,
+        conceptualRefs: conceptualEvidenceRefs,
+        unresolvedRefs: Array.from(
+          new Set([
+            ...unresolvedEvidenceIds,
+            ...baselineUnresolvedDecisions,
+            ...progressProofItems.map((item) => item.id),
+            ...listenerProofItems.map((item) => item.id),
+          ])
+        ),
+        unresolvedItems: [
+          ...baselineMissingEvidenceItems,
+          ...unresolvedDecisionItems,
+          ...progressProofItems,
+          ...listenerProofItems,
+        ],
+        lookupRoutes: resolvableEvidenceRefs.map(
+          (ref) => `/api/harness-dashboard/v1/evidence-ref?ref=${ref}`
+        ),
+        remediationAction:
+          "If a resolvable ref returns no evidence-ref match, refresh projections before trusting the brief.",
+      },
+      commands: [
+        "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections",
+        listenerStartCommand,
+        "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+      ],
+      routeContracts,
+      apiRouteChips: [
+        "/api/harness-dashboard/v1/reality-check",
+        "/api/harness-dashboard/v1/traceability",
+        "/api/harness-dashboard/v1/health",
+        "/api/harness-dashboard/v1/query?scope=reality-check&q=next",
+      ],
+      staticModeFallback:
+        "Static export names evidence and API chips but cannot open payloads until a loopback listener is connected.",
     },
     answers: [
       {
@@ -2344,6 +2781,24 @@ function buildDashboardState(params: WorkspaceInitParams) {
           requiredEvidenceType: "user-declared active AI agent platform set and unused-instruction classification",
           owner: "stakeholder-product-owner",
           resolutionTaskId: "agentPlatformGovernance.intake",
+          queueVisibility: "governance-only",
+        },
+        {
+          id: "missing.operations-telemetry",
+          label: "Operations telemetry evidence",
+          blocksClaimIds: ["claim.service.operational-readiness"],
+          requiredEvidenceType: "logs, metrics, traces, SLO/SLI, runbook, incident drill, or not-applicable decision",
+          owner: "maintainer",
+          resolutionTaskId: "evidence.operations-telemetry",
+          queueVisibility: "evidence-only",
+        },
+        {
+          id: "missing.stakeholder-approval",
+          label: "Stakeholder approval evidence",
+          blocksClaimIds: ["claim.agent.safe-resume"],
+          requiredEvidenceType: "approved first governed goal, owner confirmation, or decision record",
+          owner: "stakeholder-product-owner",
+          resolutionTaskId: "decision-first-governed-goal",
           queueVisibility: "governance-only",
         },
         {
@@ -4087,6 +4542,82 @@ function buildDashboardStateSchema(): string {
       purpose: { type: "string" },
       summary: { type: "object" },
       answers: { type: "array" },
+      trustReadinessBrief: {
+        type: "object",
+        required: ["section", "score", "questions", "commands", "apiRouteChips", "evidenceRefs", "staticModeFallback"],
+        additionalProperties: true,
+        properties: {
+          section: { type: "string" },
+          scorePolicy: { type: "string" },
+          scoreInputs: { type: "object" },
+          score: {
+            type: "object",
+            required: ["value", "max", "status", "confidenceLevel"],
+            additionalProperties: true,
+            properties: {
+              value: { type: "number" },
+              max: { type: "number" },
+              status: { type: "string" },
+              confidenceLevel: { type: "string" },
+              confidenceScore: { type: "number" },
+              rationale: { type: "string" },
+            },
+          },
+          confidence: {
+            type: "object",
+            properties: {
+              level: { type: "string" },
+              evidenceBacked: { type: "boolean" },
+            },
+          },
+          evidenceRefs: { type: "array", items: { type: "string" } },
+          evidenceChecks: { type: "object" },
+          commands: { type: "array", items: { type: "string" } },
+          routeContracts: { type: "array" },
+          apiRouteChips: { type: "array", items: { type: "string" } },
+          staticModeFallback: { type: "string" },
+          scoreDimensions: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["id", "label", "score", "status", "currentFinding", "passCriteria", "evidenceRefs", "apiRouteChips", "nextAction"],
+              additionalProperties: true,
+              properties: {
+                id: { type: "string" },
+                label: { type: "string" },
+                score: { type: "number" },
+                status: { type: "string" },
+                currentFinding: { type: "string" },
+                passCriteria: { type: "array", items: { type: "string" } },
+                evidenceRefs: { type: "array", items: { type: "string" } },
+                apiRouteChips: { type: "array", items: { type: "string" } },
+                nextAction: { type: "string" },
+              },
+            },
+          },
+          questions: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["question", "answer", "evidenceRefs", "commands", "apiRouteChips"],
+              additionalProperties: true,
+              properties: {
+                question: { type: "string" },
+                answer: { type: "string" },
+                decision: { type: "string" },
+                confidence: { type: "string" },
+                confidenceScore: { type: "number" },
+                dimensionIds: { type: "array", items: { type: "string" } },
+                evidenceRefs: { type: "array", items: { type: "string" } },
+                unresolvedEvidenceRefs: { type: "array", items: { type: "string" } },
+                unresolvedEvidenceItems: { type: "array" },
+                commands: { type: "array", items: { type: "string" } },
+                apiRouteChips: { type: "array", items: { type: "string" } },
+              },
+            },
+          },
+        },
+      },
       actionPlan: {
         type: "array",
         items: {
@@ -4796,6 +5327,24 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "hubPrimaryNextActions": "Primary next actions",
           "hubEvidenceTargets": "Evidence targets",
           "userRealityCheck": "User Reality Check",
+          "trustReadinessBrief": "Trust & Readiness Brief",
+          "briefScore": "Trust score",
+          "briefConfidence": "Confidence",
+          "briefQuestion": "Question",
+          "briefQuestions": "Questions",
+          "briefEvidenceRefs": "Evidence references",
+          "briefCommands": "Commands",
+          "briefApiRoutes": "Local API route chips",
+          "briefStaticFallback": "Static mode note",
+          "briefScorePolicy": "Score policy",
+          "briefScoreDimensions": "Score dimensions",
+          "briefCurrentFinding": "Current finding",
+          "briefPassCriteria": "Pass criteria",
+          "briefDecision": "Decision guidance",
+          "briefUnresolvedEvidence": "Unresolved evidence",
+          "briefEvidenceChecks": "Evidence checks",
+          "briefRouteContracts": "Route contracts",
+          "expectedPayloadKeys": "Expected payload keys",
           "realityCheckAnswers": "What this means",
           "realityCheckProgressFlow": "Reality > Risks > Next Actions > Proof > API",
           "listenerBootstrap": "Listener bootstrap",
@@ -5062,6 +5611,24 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "hubPrimaryNextActions": "주요 다음 행동",
           "hubEvidenceTargets": "증거 대상",
           "userRealityCheck": "사용자 현실 점검",
+          "trustReadinessBrief": "신뢰·준비성 브리프",
+          "briefScore": "신뢰 점수",
+          "briefConfidence": "신뢰도",
+          "briefQuestion": "질문",
+          "briefQuestions": "질문 목록",
+          "briefEvidenceRefs": "근거 참조",
+          "briefCommands": "명령",
+          "briefApiRoutes": "로컬 API 경로 칩",
+          "briefStaticFallback": "정적 모드 안내",
+          "briefScorePolicy": "점수 정책",
+          "briefScoreDimensions": "점수 차원",
+          "briefCurrentFinding": "현재 판정",
+          "briefPassCriteria": "통과 기준",
+          "briefDecision": "결정 안내",
+          "briefUnresolvedEvidence": "미해결 근거",
+          "briefEvidenceChecks": "근거 점검",
+          "briefRouteContracts": "경로 계약",
+          "expectedPayloadKeys": "예상 페이로드 키",
           "realityCheckAnswers": "이 상태의 의미",
           "realityCheckProgressFlow": "현실 > 위험 > 다음 행동 > 증거 > API",
           "listenerBootstrap": "리스너 부트스트랩",
@@ -6300,6 +6867,91 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           '<section class="hub-list"><h3>' + esc(t("hubEvidenceTargets")) + '</h3>' + evidenceCards + renderEvidencePreview() + '<div class="hub-item"><strong>' + esc(t("hubLocalApi")) + '</strong><span class="source">' + esc(t("hubApiCopy")) + '</span><div class="api-route-list">' + apiRoutes + '</div>' + renderApiPreview() + '</div></section></div>' +
           '</div>';
       }
+      function renderTrustReadinessBrief() {
+        const check = app.state.userRealityCheck || {};
+        const brief = check.trustReadinessBrief || {};
+        const score = brief.score || {};
+        const confidenceSummary = brief.confidence || {};
+        const questions = Array.isArray(brief.questions) ? brief.questions.slice(0, rowLimit(6)) : [];
+        const dimensions = Array.isArray(brief.scoreDimensions) ? brief.scoreDimensions.slice(0, rowLimit(6)) : [];
+        const evidenceChecks = brief.evidenceChecks || {};
+        const routeContracts = Array.isArray(brief.routeContracts) ? brief.routeContracts.slice(0, rowLimit(8)) : [];
+        const renderUnresolvedItems = (items, fallbackRefs) => {
+          const rows = Array.isArray(items) && items.length
+            ? items.slice(0, 5).map((entry) =>
+                '<article class="hub-item risk"><span class="rail-label">' + esc(entry.id || t("notDeclared")) + '</span>' +
+                '<strong>' + esc(entry.label || entry.id || t("notDeclared")) + '</strong>' +
+                '<span class="source"><strong>' + esc(t("owner")) + ':</strong> ' + esc(entry.owner || "unassigned") + '</span>' +
+                '<span class="source"><strong>' + esc(t("evidence")) + ':</strong> ' + esc(entry.requiredEvidenceType || t("notDeclared")) + '</span>' +
+                '<span class="source"><strong>' + esc(t("nextSafeMove")) + ':</strong> ' + esc(entry.nextAction || t("notDeclared")) + '</span>' +
+                '<span class="source"><strong>' + esc(t("briefApiRoutes")) + ':</strong> <span class="api-route-list">' + apiRouteList((entry.apiRouteChips || []).slice(0, 3)) + '</span></span></article>'
+              ).join("")
+            : '<p class="muted">' + esc((fallbackRefs || []).slice(0, 5).join(", ") || t("none")) + '</p>';
+          return '<details class="hub-item"><summary><strong>' + esc(t("briefUnresolvedEvidence")) + '</strong></summary>' + rows + '</details>';
+        };
+        const questionCards = questions.map((item, index) => {
+          const unresolved = renderUnresolvedItems(item.unresolvedEvidenceItems, item.unresolvedEvidenceRefs);
+          return '<article class="hub-item' + (String(item.confidenceLevel || item.confidence || "").toLowerCase() === "low" ? " risk" : "") + '">' +
+            '<span class="rail-label">' + esc(t("briefQuestion")) + " " + (index + 1) + ": " + esc(item.question || t("notDeclared")) + '</span>' +
+            '<strong>' + esc(item.answer || t("notDeclared")) + '</strong>' +
+            (item.decision ? '<p><strong>' + esc(t("briefDecision")) + ':</strong> ' + esc(item.decision) + '</p>' : '') +
+            '<span class="source"><strong>' + esc(t("briefConfidence")) + ':</strong> ' + esc(String(item.confidence || "unknown")) + (item.confidenceScore ? ' (' + esc(item.confidenceScore) + ')' : '') + '</span>' +
+            '<span class="source"><strong>' + esc(t("briefScoreDimensions")) + ':</strong> ' + esc((item.dimensionIds || []).join(", ") || t("notDeclared")) + '</span>' +
+            '<span class="source"><strong>' + esc(t("briefEvidenceRefs")) + ':</strong> ' + evidenceRefList(item.evidenceRefs, 5) + '</span>' +
+            unresolved +
+            (item.commands && item.commands.length
+              ? '<span class="source">' + item.commands.slice(0, 3).map((command) => '<span class="command-line"><strong>' + esc(t("command")) + ':</strong> <code>' + esc(command) + '</code></span>').join(" ") + '</span>'
+              : "") +
+            '<span class="source"><strong>' + esc(t("briefApiRoutes")) + ':</strong> <span class="api-route-list">' + apiRouteList((item.apiRouteChips || []).slice(0, 3)) + '</span></span>' +
+            '</article>';
+        }).join("");
+        const dimensionRows = dimensions.map((item) => [
+          esc(item.label || item.id),
+          esc(String(item.score ?? 0)) + "/100<br>" + badge(item.status || "unknown"),
+          esc(item.currentFinding || ""),
+          '<ul>' + (item.passCriteria || []).slice(0, 3).map((entry) => '<li>' + esc(entry) + '</li>').join("") + '</ul>',
+          evidenceRefList(item.evidenceRefs, 4),
+          '<span class="api-route-list">' + apiRouteList((item.apiRouteChips || []).slice(0, 3)) + '</span>',
+          esc(item.nextAction || ""),
+        ]);
+        const routeRows = routeContracts.map((item) => [
+          '<span class="api-route-list">' + apiRouteButton(item.route) + '</span>',
+          esc((item.expectedPayloadKeys || []).join(", ") || t("notDeclared")),
+          esc(item.usefulFor || ""),
+          esc(localApiToken ? (item.listenerModeBehavior || "") : (item.staticModeBehavior || "")),
+        ]);
+        const commandRows = (brief.commands || []).slice(0, 4).map((command) =>
+          '<span class="source command-line"><strong>' + esc(t("command")) + ':</strong> <code>' + esc(command) + '</code></span>'
+        ).join("");
+        const routeButtons = apiRouteList((brief.apiRouteChips || []).slice(0, 8));
+        const scoreValue = Number(score.value ?? 0);
+        const scoreMax = Number(score.max || 100);
+        return '<div class="reality-action-hub">' +
+          '<div class="hub-brief"><span class="rail-label">' + esc(t("trustReadinessBrief")) + '</span><strong>' + esc(brief.section || "") + '</strong>' + (brief.section ? '<p class="muted">' + esc(brief.staticModeFallback || "") + '</p>' : '') +
+          metricGrid([
+            [t("briefScore"), String(scoreValue) + "/" + String(scoreMax), "userRealityCheck.trustReadinessBrief.score"],
+            [t("briefConfidence"), score.confidenceLevel || confidenceSummary.level || "unknown", "confidence level"],
+            [t("confidence"), score.confidenceScore || scoreValue || 0, "confidence score"],
+            [t("briefScoreDimensions"), dimensions.length, "auditable inputs"],
+            [t("briefEvidenceRefs"), ((evidenceChecks.resolvableRefs || brief.evidenceRefs || [])).length, "resolvable refs"],
+            [t("briefUnresolvedEvidence"), ((evidenceChecks.unresolvedRefs || [])).length, "open proof gaps"],
+            [t("briefApiRoutes"), (brief.apiRouteChips || []).length, "route chips"],
+          ]) + '</div>' +
+          '<p class="muted"><strong>' + esc(t("briefScorePolicy")) + ':</strong> ' + esc(brief.scorePolicy || (score.rationale || "")) + '</p>' +
+          '<div class="hub-grid"><section class="hub-list"><h3>' + esc(t("briefQuestions")) + '</h3>' + (questionCards || '<p class="muted">' + esc(t("notDeclared")) + '</p>') + '</section>' +
+          '<section class="hub-list"><h3>' + esc(t("briefEvidenceChecks")) + '</h3><article class="hub-item"><p>' + esc(evidenceChecks.resolutionPolicy || "") + '</p>' +
+          '<span class="source"><strong>' + esc(t("briefEvidenceRefs")) + ':</strong> ' + evidenceRefList(evidenceChecks.resolvableRefs || brief.evidenceRefs, 6) + '</span>' +
+          '<span class="source"><strong>' + esc(t("briefUnresolvedEvidence")) + ':</strong> ' + evidenceRefList(evidenceChecks.unresolvedRefs || [], 8) + '</span>' +
+          '<p><strong>' + esc(t("nextSafestAction")) + ':</strong> ' + esc(evidenceChecks.remediationAction || "") + '</p></article>' +
+          renderUnresolvedItems(evidenceChecks.unresolvedItems, evidenceChecks.unresolvedRefs) +
+          '<article class="hub-item"><p>' + esc(localApiToken ? t("hubApiCopy") : t("apiLookupStatic")) + '</p><div class="api-route-list">' + routeButtons + '</div>' + renderApiPreview() + '</article><article class="hub-item">' + commandRows + '</article></section></div>' +
+          '<h3>' + esc(t("briefScoreDimensions")) + '</h3>' +
+          table([t("briefScoreDimensions"), t("briefScore"), t("briefCurrentFinding"), t("briefPassCriteria"), t("evidence"), "API", t("nextSafeMove")], dimensionRows) +
+          '<h3>' + esc(t("briefRouteContracts")) + '</h3>' +
+          table([t("briefApiRoutes"), t("expectedPayloadKeys"), t("purpose"), app.mode], routeRows) +
+          (localApiToken ? "" : '<p class="source">' + esc(t("briefStaticFallback")) + ": " + esc(brief.staticModeFallback || t("staticProofFallback")) + '</p>') +
+          '</div>';
+      }
       function renderUserRealityCheck() {
         const check = app.state.userRealityCheck || {};
         const summary = check.summary || {};
@@ -6582,6 +7234,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         if (mode === "agent") {
           document.getElementById("view-overview").innerHTML =
             panel(t("realityNextActionsHub"), renderRealityNextActionsHub(), true) +
+            panel(t("trustReadinessBrief"), renderTrustReadinessBrief(), true) +
             panel(t("userRealityCheck"), renderUserRealityCheck(), true) +
             panel(t("sessionTraceability"), renderSessionTraceability(), true) +
             panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
@@ -6595,6 +7248,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         if (mode === "maintainer") {
           document.getElementById("view-overview").innerHTML =
             panel(t("realityNextActionsHub"), renderRealityNextActionsHub(), true) +
+            panel(t("trustReadinessBrief"), renderTrustReadinessBrief(), true) +
             panel(t("userRealityCheck"), renderUserRealityCheck(), true) +
             panel(t("sessionTraceability"), renderSessionTraceability(), true) +
             panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
@@ -6612,6 +7266,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         }
         document.getElementById("view-overview").innerHTML =
           panel(t("realityNextActionsHub"), renderRealityNextActionsHub(), true) +
+          panel(t("trustReadinessBrief"), renderTrustReadinessBrief(), true) +
           panel(t("userRealityCheck"), renderUserRealityCheck(), true) +
           panel(t("sessionTraceability"), renderSessionTraceability(), true) +
           panel(t("realityGoalCompass"), renderRealityGoalCompass(), true) +
