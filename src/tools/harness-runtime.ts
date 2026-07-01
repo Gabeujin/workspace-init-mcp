@@ -2057,6 +2057,127 @@ function validateSessionTraceQuality(
   }
 }
 
+function readHarnessDashboardLedgerRecords(
+  ledgerPath: string
+): {
+  records: Array<Record<string, unknown>>;
+  corruptRows: Array<{ lineNumber: number; content: string; error: string }>;
+} {
+  if (!fs.existsSync(ledgerPath)) {
+    return { records: [], corruptRows: [] };
+  }
+
+  const records: Array<Record<string, unknown>> = [];
+  const corruptRows: Array<{ lineNumber: number; content: string; error: string }> = [];
+  fs.readFileSync(ledgerPath, "utf-8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0)
+    .forEach((line, index) => {
+      try {
+        const parsed = JSON.parse(line) as unknown;
+        if (!isPlainObject(parsed)) {
+          throw new Error("ledger row is not an object");
+        }
+        records.push(parsed);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        corruptRows.push({ lineNumber: index + 1, content: line, error: message });
+      }
+    });
+
+  return { records, corruptRows };
+}
+
+function recoverHarnessDashboardLedgerManifest(params: {
+  workspacePath: string;
+  session: HarnessRuntimeSessionState;
+  ledgerPath: string;
+  manifestPath: string;
+  recordedAt: string;
+}): Record<string, unknown> {
+  ensureDir(path.dirname(params.ledgerPath));
+  ensureDir(path.dirname(params.manifestPath));
+  const { records: existingRecords, corruptRows } =
+    readHarnessDashboardLedgerRecords(params.ledgerPath);
+  const quarantinePath = `${params.ledgerPath}.corrupt.${Date.now()}`;
+  if (corruptRows.length > 0) {
+    writeJson(quarantinePath, {
+      schemaVersion: HARNESS_RUNTIME_VERSION,
+      quarantinedAt: params.recordedAt,
+      ledgerPath: HARNESS_DASHBOARD_LEDGER_PATH,
+      corruptRowCount: corruptRows.length,
+      rows: corruptRows,
+      recoveryRule:
+        "Corrupt rows were excluded from sequence recovery and preserved here for manual audit.",
+    });
+    fs.writeFileSync(
+      params.ledgerPath,
+      `${existingRecords.map((record) => JSON.stringify(record)).join("\n")}${
+        existingRecords.length > 0 ? "\n" : ""
+      }`,
+      "utf-8"
+    );
+  }
+  if (!fs.existsSync(params.ledgerPath)) {
+    fs.writeFileSync(params.ledgerPath, "", "utf-8");
+  }
+
+  const lastRecord = existingRecords.at(-1);
+  const firstRecord = existingRecords[0];
+  const firstSequence =
+    existingRecords.length > 0 ? Number(firstRecord.sequence || 1) : 1;
+  const lastSequence =
+    existingRecords.length > 0
+      ? Number(lastRecord?.sequence || existingRecords.length)
+      : 0;
+  const rootHash =
+    existingRecords.length > 0
+      ? String(lastRecord?.eventHash || stableHash(lastRecord))
+      : "genesis";
+  const workspaceId =
+    typeof lastRecord?.workspaceId === "string"
+      ? lastRecord.workspaceId
+      : params.session.workspace.name;
+  const segment = {
+    id: `segment-${String(firstSequence).padStart(6, "0")}-${String(lastSequence).padStart(6, "0")}`,
+    path: HARNESS_DASHBOARD_LEDGER_PATH,
+    firstSequence,
+    lastSequence,
+    rowCount: existingRecords.length,
+    schemaVersion: HARNESS_RUNTIME_VERSION,
+    segmentHash: rootHash,
+    compactionStatus: "hot",
+    recoveryStatus: "recovered-by-runtime",
+  };
+  const manifest = {
+    schemaVersion: HARNESS_RUNTIME_VERSION,
+    workspaceId,
+    ledgerPath: HARNESS_DASHBOARD_LEDGER_PATH,
+    segments: [segment],
+    firstSequence,
+    lastSequence,
+    rowCount: existingRecords.length,
+    rootHash,
+    lastVerifiedAt: params.recordedAt,
+    compactionStatus: "not-compacted",
+    recoveryStatus: existingRecords.length > 0
+      ? corruptRows.length > 0
+        ? "manifest-recovered-from-valid-ledger-rows"
+        : "manifest-recovered-from-ledger"
+      : corruptRows.length > 0
+        ? "ledger-recreated-after-corrupt-rows-quarantined"
+        : "ledger-and-manifest-recreated-empty",
+    corruptRowCount: corruptRows.length,
+    quarantinePath: corruptRows.length > 0
+      ? relativeToWorkspace(params.workspacePath, quarantinePath)
+      : null,
+    recoveryReason:
+      "Runtime attempted to append a dashboard event while ledger-manifest.json or harness-events.jsonl was missing.",
+  };
+  writeJson(params.manifestPath, manifest);
+  return manifest;
+}
+
 function appendHarnessDashboardLedgerEvent(params: {
   workspacePath: string;
   eventType: string;
@@ -2072,9 +2193,34 @@ function appendHarnessDashboardLedgerEvent(params: {
     params.workspacePath,
     HARNESS_DASHBOARD_LEDGER_MANIFEST_PATH
   );
-  const manifest = readJsonIfExists<Record<string, unknown>>(manifestPath);
-  if (manifest == null || !fs.existsSync(ledgerPath)) {
-    return null;
+  let manifest =
+    readJsonIfExists<Record<string, unknown>>(manifestPath) ??
+    recoverHarnessDashboardLedgerManifest({
+      workspacePath: params.workspacePath,
+      session: params.session,
+      ledgerPath,
+      manifestPath,
+      recordedAt: params.recordedAt,
+    });
+  if (!fs.existsSync(ledgerPath)) {
+    manifest = recoverHarnessDashboardLedgerManifest({
+      workspacePath: params.workspacePath,
+      session: params.session,
+      ledgerPath,
+      manifestPath,
+      recordedAt: params.recordedAt,
+    });
+  } else {
+    const ledgerInspection = readHarnessDashboardLedgerRecords(ledgerPath);
+    if (ledgerInspection.corruptRows.length > 0) {
+      manifest = recoverHarnessDashboardLedgerManifest({
+        workspacePath: params.workspacePath,
+        session: params.session,
+        ledgerPath,
+        manifestPath,
+        recordedAt: params.recordedAt,
+      });
+    }
   }
 
   const lastSequence = Number(manifest.lastSequence || 0);

@@ -249,6 +249,8 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(dashboardStateSchema.properties.projectionConfidence.properties.requiredActions);
   assert.ok(dashboardStateSchema.properties.sessionTraceability.properties.entries);
   assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.actionPlan);
+  assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.nextActionRunway);
+  assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.listenerTrustCard);
   assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.trustReadinessBrief);
   assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.trustReadinessBrief.properties.questions);
   assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.trustReadinessBrief.properties.scoreDimensions);
@@ -271,6 +273,8 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.equal(legacyShape.sessionTraceability.entries[0].traceIntegrity.status, "legacy-fallback");
   assert.equal(legacyShape.userRealityCheck.status, "legacy-backfill-action-plan");
   assert.ok(legacyShape.userRealityCheck.actionPlan[0].apiRoutes.includes("/api/harness-dashboard/v1/reality-check"));
+  assert.equal(legacyShape.userRealityCheck.nextActionRunway[0].proofRoute, "/api/harness-dashboard/v1/reality-check");
+  assert.equal(legacyShape.userRealityCheck.listenerTrustCard.healthRoute, "/api/harness-dashboard/v1/health");
   assert.equal(state.realityModel.nodes.some((node) => node.type === "repository"), true);
   assert.equal(state.realityModel.edges.some((edge) => edge.relation === "projects-world-model"), true);
   assert.match(state.goalCompass.currentReality, /Bootstrap harness/);
@@ -378,6 +382,44 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(state.userRealityCheck.trustReadinessBrief.commands.length > 0);
   assert.ok(state.userRealityCheck.trustReadinessBrief.apiRouteChips.includes("/api/harness-dashboard/v1/reality-check"));
   assert.ok(state.userRealityCheck.actionPlan.length >= 6);
+  assert.ok(Array.isArray(state.userRealityCheck.nextActionRunway));
+  assert.equal(state.userRealityCheck.nextActionRunway.length >= 4, true);
+  assert.deepEqual(
+    state.userRealityCheck.nextActionRunway.slice(0, 2).map((item) => item.actionId),
+    ["action.verify-projections", "action.start-local-listener"]
+  );
+  assert.ok(state.userRealityCheck.nextActionRunway.every((item) =>
+    item.id &&
+    item.lane &&
+    item.userQuestion &&
+    item.actionTitle &&
+    item.owner &&
+    item.whyNow &&
+    Array.isArray(item.unlocks) &&
+    item.unlocks.length > 0 &&
+    Array.isArray(item.evidenceToCollect) &&
+    item.evidenceToCollect.length > 0 &&
+    item.proofRoute &&
+    item.expectedVisibleChange &&
+    Array.isArray(item.blockerRefs) &&
+    item.blockerRefs.length > 0 &&
+    Array.isArray(item.sourceRefs) &&
+    item.sourceRefs.length > 0
+  ));
+  assert.equal(state.userRealityCheck.nextActionRunway[1].proofRoute, "/api/harness-dashboard/v1/health");
+  assert.ok(state.userRealityCheck.nextActionRunway.some((item) => /raw JSON/.test(item.userQuestion)));
+  assert.ok(state.userRealityCheck.listenerTrustCard);
+  assert.equal(state.userRealityCheck.listenerTrustCard.healthRoute, "/api/harness-dashboard/v1/health");
+  assert.equal(state.userRealityCheck.listenerTrustCard.runtimeRoute, "/api/harness-dashboard/v1/runtime");
+  assert.match(state.userRealityCheck.listenerTrustCard.startCommand, /ensure-listening/);
+  assert.match(state.userRealityCheck.listenerTrustCard.snapshotAgePolicy, /health route/);
+  const invalidListenerTrustState = JSON.parse(JSON.stringify(state));
+  delete invalidListenerTrustState.userRealityCheck.listenerTrustCard.healthRoute;
+  const invalidListenerTrustValidation = validateDashboardStateShape(invalidListenerTrustState);
+  assert.equal(invalidListenerTrustValidation.valid, false);
+  assert.ok(invalidListenerTrustValidation.errors.some((error) =>
+    /listenerTrustCard\.healthRoute/.test(error)
+  ));
   assert.ok(Array.isArray(state.userRealityCheck.progressFlow));
   assert.equal(state.userRealityCheck.progressFlow.length, 5);
   assert.deepEqual(
@@ -499,6 +541,10 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(html, /Score dimensions/);
   assert.match(html, /Evidence checks/);
   assert.match(html, /Route contracts/);
+  assert.match(html, /Next Action Runway/);
+  assert.match(html, /Local listener health &amp; trust|Local listener health & trust/);
+  assert.match(html, /expectedVisibleChange/);
+  assert.match(html, /listenerTrustCard/);
   assert.match(html, /orientation-confidence-not-release-readiness/);
   assert.match(html, /renderUserRealityCheck/);
   assert.match(html, /data-evidence-ref/);
@@ -1405,6 +1451,12 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(["bootstrap-action-plan", "legacy-backfill-action-plan"].includes(reconciled.userRealityCheck.status));
   assert.equal(reconciled.userRealityCheck.apiContract.route, "/api/harness-dashboard/v1/reality-check");
   assert.match(reconciled.userRealityCheck.apiContract.startCommand, /ensure-listening/);
+  assert.ok(reconciled.userRealityCheck.nextActionRunway.length > 0);
+  assert.ok([
+    "/api/harness-dashboard/v1/reality-check",
+    "/api/harness-dashboard/v1/traceability",
+  ].includes(reconciled.userRealityCheck.nextActionRunway[0].proofRoute));
+  assert.equal(reconciled.userRealityCheck.listenerTrustCard.healthRoute, "/api/harness-dashboard/v1/health");
   assert.deepEqual(
     reconciled.userRealityCheck.progressFlow.map((item) => item.stage),
     EXPECTED_USER_REALITY_PROGRESS_STAGES
@@ -1438,6 +1490,8 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   );
   assert.match(reconciled.userRealityCheck.apiContract.startCommand, /ensure-listening/);
   assert.match(reconciled.userRealityCheck.apiContract.statusCommand, /dashboard-ops\.mjs status/);
+  assert.ok(reconciled.userRealityCheck.nextActionRunway.some((item) => item.actionId === "action.verify-projections"));
+  assert.equal(reconciled.userRealityCheck.listenerTrustCard.runtimeRoute, "/api/harness-dashboard/v1/runtime");
   assert.equal(validateDashboardStateShape(reconciled).valid, true);
 }
 
@@ -1989,6 +2043,131 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
 
 {
   const { root } = generateWorkspace();
+  const ledgerPath = path.join(root, "docs/ai-harness/dashboard/events/harness-events.jsonl");
+  const manifestPath = path.join(root, "docs/ai-harness/dashboard/events/ledger-manifest.json");
+  fs.rmSync(ledgerPath, { force: true });
+  fs.rmSync(manifestPath, { force: true });
+
+  startHarnessSession({
+    workspacePath: root,
+    goal: "Recover missing dashboard ledger files",
+    originalRequest: "Recover missing dashboard ledger files without losing runtime event trace.",
+    processSummary:
+      "Created a session after deleting the dashboard event ledger and manifest.",
+    resultSummary:
+      "Runtime should recreate missing dashboard ledger files and append the session start event.",
+    sessionId: "session-ledger-recovery",
+    chunkId: "chunk-ledger-recovery",
+    queueIfBusy: true,
+  });
+  advanceHarnessSession({
+    workspacePath: root,
+    sessionId: "session-ledger-recovery",
+    action: "complete",
+    actorRole: "planner",
+    note: "Ledger recovery plan completed.",
+    processSummary:
+      "Planner advanced the recovered session to prove appends continue after manifest recreation.",
+    resultSummary: "Dashboard ledger recovery preserved the phase advance event.",
+  });
+  recordHarnessExecutionResult({
+    workspacePath: root,
+    sessionId: "session-ledger-recovery",
+    bridgeId: "codex-cli",
+    outcome: "completed",
+    summary: "Ledger recovery receipt recorded.",
+    processSummary:
+      "Worker recorded a receipt after dashboard ledger recovery.",
+    resultSummary:
+      "Recovered dashboard ledger preserved the execution receipt event.",
+  });
+
+  const recoveredManifest = readJson(root, "docs/ai-harness/dashboard/events/ledger-manifest.json");
+  const recoveredLines = fs.readFileSync(ledgerPath, "utf-8").trim().split(/\r?\n/);
+  assert.equal(recoveredManifest.recoveryStatus, "ledger-and-manifest-recreated-empty");
+  assert.equal(recoveredManifest.lastSequence, 3);
+  assert.equal(recoveredManifest.rowCount, 3);
+  assert.equal(recoveredLines.length, 3);
+  assert.match(recoveredLines[0], /harness\.session\.started/);
+  assert.match(recoveredLines[1], /harness\.session\.advanced/);
+  assert.match(recoveredLines[2], /harness\.execution\.receipt\.recorded/);
+  assert.match(recoveredLines[2], /Recovered dashboard ledger preserved the execution receipt event/);
+  assert.match(recoveredLines[0], /"previousEventHash":"genesis"/);
+  const recoveredState = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  const recoveredGovernedSession = recoveredState.governedSessions.find((entry) =>
+    entry.id === "session-ledger-recovery"
+  );
+  assert.ok(recoveredGovernedSession);
+  assert.ok(recoveredGovernedSession.outputs.some((entry) => /result-receipt\.json$/.test(entry)));
+}
+
+{
+  const { root } = generateWorkspace();
+  const ledgerPath = path.join(root, "docs/ai-harness/dashboard/events/harness-events.jsonl");
+  const manifestPath = path.join(root, "docs/ai-harness/dashboard/events/ledger-manifest.json");
+  fs.appendFileSync(ledgerPath, "{not valid json}\n", "utf-8");
+  fs.rmSync(manifestPath, { force: true });
+
+  startHarnessSession({
+    workspacePath: root,
+    goal: "Recover corrupt dashboard ledger rows",
+    originalRequest: "Recover corrupt dashboard ledger rows without aborting dashboard event append.",
+    processSummary:
+      "Created a session after corrupting one dashboard ledger row and deleting the manifest.",
+    resultSummary:
+      "Runtime should quarantine corrupt dashboard ledger rows and append a new session event.",
+    sessionId: "session-ledger-corrupt-recovery",
+    chunkId: "chunk-ledger-corrupt-recovery",
+    queueIfBusy: true,
+  });
+
+  const recoveredManifest = readJson(root, "docs/ai-harness/dashboard/events/ledger-manifest.json");
+  const recoveredLines = fs.readFileSync(ledgerPath, "utf-8").trim().split(/\r?\n/);
+  assert.equal(recoveredManifest.recoveryStatus, "manifest-recovered-from-valid-ledger-rows");
+  assert.equal(recoveredManifest.corruptRowCount, 1);
+  assert.ok(recoveredManifest.quarantinePath);
+  assert.equal(recoveredManifest.lastSequence, 2);
+  assert.equal(recoveredLines.length, 2);
+  assert.match(recoveredLines[1], /harness\.session\.started/);
+  assert.equal(recoveredLines.some((line) => line.includes("{not valid json}")), false);
+  const quarantine = readJson(root, recoveredManifest.quarantinePath);
+  assert.equal(quarantine.corruptRowCount, 1);
+  assert.match(quarantine.rows[0].content, /not valid json/);
+}
+
+{
+  const { root } = generateWorkspace();
+  const ledgerPath = path.join(root, "docs/ai-harness/dashboard/events/harness-events.jsonl");
+  fs.appendFileSync(ledgerPath, "{still not valid json}\n", "utf-8");
+
+  startHarnessSession({
+    workspacePath: root,
+    goal: "Recover corrupt ledger with manifest present",
+    originalRequest: "Recover a corrupt dashboard ledger row even when the manifest still exists.",
+    processSummary:
+      "Created a session after corrupting the dashboard ledger while preserving the manifest.",
+    resultSummary:
+      "Runtime should quarantine the corrupt row and append after the existing valid bootstrap event.",
+    sessionId: "session-ledger-corrupt-present-manifest",
+    chunkId: "chunk-ledger-corrupt-present-manifest",
+    queueIfBusy: true,
+  });
+
+  const recoveredManifest = readJson(root, "docs/ai-harness/dashboard/events/ledger-manifest.json");
+  const recoveredLines = fs.readFileSync(ledgerPath, "utf-8").trim().split(/\r?\n/);
+  assert.equal(recoveredManifest.recoveryStatus, "manifest-recovered-from-valid-ledger-rows");
+  assert.equal(recoveredManifest.corruptRowCount, 1);
+  assert.equal(recoveredManifest.lastSequence, 2);
+  assert.equal(recoveredLines.length, 2);
+  assert.match(recoveredLines[0], /workspace\.dashboard\.bootstrap/);
+  assert.match(recoveredLines[1], /harness\.session\.started/);
+  assert.equal(recoveredLines.some((line) => line.includes("{still not valid json}")), false);
+  const quarantine = readJson(root, recoveredManifest.quarantinePath);
+  assert.match(quarantine.rows[0].content, /still not valid json/);
+}
+
+{
+  const { root } = generateWorkspace();
   const sessionId = "session-close-trace";
   startHarnessSession({
     workspacePath: root,
@@ -2315,6 +2494,13 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.evidenceChecks.unresolvedRefs.includes("missing.service-health"));
     assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.evidenceChecks.unresolvedItems.some((item) => item.id === "missing.first-governed-session-closeout"));
     assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.routeContracts.some((item) => item.route === "/api/harness-dashboard/v1/health"));
+    assert.ok(realityCheckPayload.payload.userRealityCheck.nextActionRunway.some((item) =>
+      item.actionId === "action.start-local-listener" &&
+      item.proofRoute === "/api/harness-dashboard/v1/health" &&
+      /raw JSON/.test(item.userQuestion)
+    ));
+    assert.equal(realityCheckPayload.payload.userRealityCheck.listenerTrustCard.healthRoute, "/api/harness-dashboard/v1/health");
+    assert.equal(realityCheckPayload.payload.userRealityCheck.listenerTrustCard.runtimeRoute, "/api/harness-dashboard/v1/runtime");
     for (const contract of realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.routeContracts) {
       const pathAndQuery = contract.route.replace("/api/harness-dashboard/v1/", "");
       const contractPayload = await fetch(apiUrl(pathAndQuery), { headers: authHeaders }).then((response) => response.json());
@@ -2365,6 +2551,16 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     assert.equal(realityCheckQuery.payload.resultCount > 0, true);
     assert.ok(realityCheckQuery.payload.results.every((item) => item.sourcePath && item.text));
     assert.equal(JSON.stringify(realityCheckQuery.payload).includes(root), false);
+
+    const runwayQuery = await fetch(apiUrl("query?scope=reality-check&q=Turn%20proof%20chips"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(runwayQuery.readOnly, true);
+    assert.equal(runwayQuery.payload.resultCount > 0, true);
+    assert.ok(runwayQuery.payload.results.some((item) => item.sourcePath === "userRealityCheck.nextActionRunway"));
+
+    const listenerTrustQuery = await fetch(apiUrl("query?scope=reality-check&q=listener-required"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(listenerTrustQuery.readOnly, true);
+    assert.equal(listenerTrustQuery.payload.resultCount > 0, true);
+    assert.ok(listenerTrustQuery.payload.results.some((item) => item.sourcePath === "userRealityCheck.listenerTrustCard"));
 
     const briefingResponse = await fetch(apiUrl("briefing"), { headers: authHeaders });
     assert.equal(briefingResponse.status, 200);

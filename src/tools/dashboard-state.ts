@@ -312,6 +312,111 @@ function backfillSessionTraceability(root: Record<string, unknown>): void {
   };
 }
 
+function stringsFrom(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter(isString) : [];
+}
+
+function normalizeNextActionRunwayEntries(
+  userRealityCheck: Record<string, unknown>,
+  workspaceName: string,
+  nextSafeMove: string
+): Record<string, unknown>[] {
+  const actionPlan = Array.isArray(userRealityCheck.actionPlan)
+    ? userRealityCheck.actionPlan
+    : [];
+  const existingRunway = Array.isArray(userRealityCheck.nextActionRunway)
+    ? userRealityCheck.nextActionRunway
+    : [];
+  const sourceRows = existingRunway.length > 0
+    ? existingRunway
+    : actionPlan.length > 0
+      ? actionPlan
+      : [
+          {
+            id: "action.legacy-refresh",
+            rank: 1,
+            title: "Refresh legacy dashboard reality",
+            status: "refresh-required",
+            owner: "harness-dashboard-operator",
+            whyItMatters: nextSafeMove,
+            evidenceRequired: [
+              "dashboard-ops verify-projections output",
+              "dashboard-ops refresh output",
+              "next governed session request/process/result trace",
+            ],
+            command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+            apiRoutes: [
+              "/api/harness-dashboard/v1/reality-check",
+              "/api/harness-dashboard/v1/traceability",
+            ],
+            blocks: ["trusted-handoff", "operational-truth"],
+            successSignal:
+              "Projection confidence, session traceability, and evidence gaps are refreshed from current state.",
+            sourceRefs: ["legacy-dashboard-state"],
+          },
+        ];
+  const seenIds = new Set<string>();
+  const normalizedRows: Record<string, unknown>[] = [];
+
+  for (const [index, row] of sourceRows.entries()) {
+    const item = isPlainObject(row) ? row : {};
+    const actionId = String(item.actionId || item.id || `action.legacy-refresh-${index + 1}`);
+    const id = String(item.id || `runway.${actionId.replace(/^action\./, "")}`);
+    const normalizedId = id.startsWith("runway.") ? id : `runway.${id.replace(/^action\./, "")}`;
+    if (seenIds.has(normalizedId)) {
+      continue;
+    }
+    seenIds.add(normalizedId);
+    const sourceApiRoutes = stringsFrom(item.apiRoutes);
+    const sourceRefs = stringsFrom(item.sourceRefs);
+    const rank = Number(item.rank);
+
+    normalizedRows.push({
+      id: normalizedId,
+      rank: Number.isFinite(rank) ? rank : index + 1,
+      lane: String(item.lane || "Legacy projection recovery"),
+      userQuestion: String(
+        item.userQuestion ||
+          item.whyNow ||
+          item.whyItMatters ||
+          "What should happen next?"
+      ),
+      actionId,
+      actionTitle: String(item.actionTitle || item.title || "Refresh legacy dashboard reality"),
+      status: String(item.status || "refresh-required"),
+      owner: String(item.owner || "harness-dashboard-operator"),
+      whyNow: String(item.whyNow || item.whyItMatters || nextSafeMove),
+      unlocks: stringsFrom(item.unlocks).length > 0
+        ? stringsFrom(item.unlocks)
+        : stringsFrom(item.blocks),
+      evidenceToCollect: stringsFrom(item.evidenceToCollect).length > 0
+        ? stringsFrom(item.evidenceToCollect)
+        : stringsFrom(item.evidenceRequired),
+      proofRoute: String(item.proofRoute || sourceApiRoutes[0] || "/api/harness-dashboard/v1/reality-check"),
+      command: String(item.command || "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh"),
+      expectedVisibleChange: String(
+        item.expectedVisibleChange ||
+          item.successSignal ||
+          "Projection confidence and session traceability move from fallback to refreshed evidence."
+      ),
+      blockerRefs: stringsFrom(item.blockerRefs).length > 0
+        ? stringsFrom(item.blockerRefs)
+        : stringsFrom(item.blocks),
+      sourceRefs: Array.from(
+        new Set([...sourceRefs, "userRealityCheck", "projectionConfidence", workspaceName])
+      ).filter((entry) => entry.length > 0),
+    });
+  }
+
+  return normalizedRows
+    .sort(
+      (left, right) =>
+        Number(left.rank || 0) - Number(right.rank || 0) ||
+        String(left.id || "").localeCompare(String(right.id || ""))
+    )
+    .slice(0, 25);
+}
+
 function backfillUserRealityCheck(root: Record<string, unknown>): void {
   const existingRealityCheck = isPlainObject(root.userRealityCheck)
     ? root.userRealityCheck
@@ -382,6 +487,29 @@ function backfillUserRealityCheck(root: Record<string, unknown>): void {
     if (!Array.isArray(existingRealityCheck.progressFlow)) {
       existingRealityCheck.progressFlow = legacyProgressFlow;
     }
+    existingRealityCheck.nextActionRunway = normalizeNextActionRunwayEntries(
+      existingRealityCheck,
+      String(workspace.name || "workspace"),
+      nextSafeMove
+    );
+    if (!isPlainObject(existingRealityCheck.listenerTrustCard)) {
+      existingRealityCheck.listenerTrustCard = {
+        title: "Local listener health and trust",
+        status: "legacy-listener-required",
+        connectionState: "unknown-until-listener-starts",
+        tokenState: "token appears only after the loopback listener starts",
+        lastHeartbeatAt: null,
+        snapshotFreshness: String(projectionConfidence.staleness || "legacy-backfill"),
+        snapshotAgePolicy:
+          "Treat legacy static snapshots as orientation only until the local health route confirms state hash and heartbeat.",
+        healthRoute: "/api/harness-dashboard/v1/health",
+        runtimeRoute: "/api/harness-dashboard/v1/runtime",
+        startCommand: listenerStartCommand,
+        statusCommand: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status",
+        usefulness:
+          "Confirms whether route chips can return current read-only payloads or only name static proof paths.",
+      };
+    }
     const existingApi = isPlainObject(existingRealityCheck.apiContract)
       ? existingRealityCheck.apiContract
       : {};
@@ -399,6 +527,29 @@ function backfillUserRealityCheck(root: Record<string, unknown>): void {
     };
     return;
   }
+
+  const legacyActionPlan = [
+    {
+      id: "action.legacy-refresh",
+      rank: 1,
+      title: "Refresh legacy dashboard reality",
+      status: "refresh-required",
+      owner: "harness-dashboard-operator",
+      whyItMatters:
+        "Legacy projections may not preserve current reality, evidence, or traceability contracts.",
+      evidenceRequired: [
+        "dashboard-ops verify-projections output",
+        "dashboard-ops refresh output",
+        "next governed session request/process/result trace",
+      ],
+      command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+      apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/traceability"],
+      blocks: ["trusted-handoff", "operational-truth"],
+      successSignal:
+        "Projection confidence, session traceability, and evidence gaps are refreshed from current state.",
+      sourceRefs: ["legacy-dashboard-state"],
+    },
+  ];
 
   root.userRealityCheck = {
     schemaVersion: String(
@@ -429,28 +580,28 @@ function backfillUserRealityCheck(root: Record<string, unknown>): void {
       },
     ],
     progressFlow: legacyProgressFlow,
-    actionPlan: [
-      {
-        id: "action.legacy-refresh",
-        rank: 1,
-        title: "Refresh legacy dashboard reality",
-        status: "refresh-required",
-        owner: "harness-dashboard-operator",
-        whyItMatters:
-          "Legacy projections may not preserve current reality, evidence, or traceability contracts.",
-        evidenceRequired: [
-          "dashboard-ops verify-projections output",
-          "dashboard-ops refresh output",
-          "next governed session request/process/result trace",
-        ],
-        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
-        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/traceability"],
-        blocks: ["trusted-handoff", "operational-truth"],
-        successSignal:
-          "Projection confidence, session traceability, and evidence gaps are refreshed from current state.",
-        sourceRefs: ["legacy-dashboard-state"],
-      },
-    ],
+    actionPlan: legacyActionPlan,
+    nextActionRunway: normalizeNextActionRunwayEntries(
+      { actionPlan: legacyActionPlan },
+      String(workspace.name || "workspace"),
+      nextSafeMove
+    ),
+    listenerTrustCard: {
+      title: "Local listener health and trust",
+      status: "legacy-listener-required",
+      connectionState: "unknown-until-listener-starts",
+      tokenState: "token appears only after the loopback listener starts",
+      lastHeartbeatAt: null,
+      snapshotFreshness: String(projectionConfidence.staleness || "legacy-backfill"),
+      snapshotAgePolicy:
+        "Treat legacy static snapshots as orientation only until the local health route confirms state hash and heartbeat.",
+      healthRoute: "/api/harness-dashboard/v1/health",
+      runtimeRoute: "/api/harness-dashboard/v1/runtime",
+      startCommand: listenerStartCommand,
+      statusCommand: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status",
+      usefulness:
+        "Confirms whether route chips can return current read-only payloads or only name static proof paths.",
+    },
     evidenceMap: [
       {
         id: "legacy",
@@ -1324,6 +1475,64 @@ export function validateDashboardStateShape(
       requireNonEmptyStringArrayField(errors, pathPrefix, action, "apiRoutes");
       requireStringArrayField(errors, pathPrefix, action, "blocks");
       requireNonEmptyStringArrayField(errors, pathPrefix, action, "sourceRefs");
+    }
+    const nextActionRunway =
+      requireArray(
+        errors,
+        "dashboardState.userRealityCheck.nextActionRunway",
+        userRealityCheck.nextActionRunway
+      ) ?? [];
+    if (nextActionRunway.length === 0) {
+      errors.push("dashboardState.userRealityCheck.nextActionRunway must contain at least one runway step");
+    }
+    const runwayIds = new Set<string>();
+    for (const [index, item] of nextActionRunway.entries()) {
+      const pathPrefix = `dashboardState.userRealityCheck.nextActionRunway[${index}]`;
+      const runway = requireObject(errors, pathPrefix, item);
+      if (runway == null) {
+        continue;
+      }
+      requireUniqueStringId(errors, runwayIds, `${pathPrefix}.id`, runway.id);
+      requireNumberField(errors, pathPrefix, runway, "rank");
+      for (const field of [
+        "lane",
+        "userQuestion",
+        "actionId",
+        "actionTitle",
+        "status",
+        "owner",
+        "whyNow",
+        "proofRoute",
+        "expectedVisibleChange",
+      ]) {
+        requireStringField(errors, pathPrefix, runway, field);
+      }
+      requireNonEmptyStringArrayField(errors, pathPrefix, runway, "unlocks");
+      requireNonEmptyStringArrayField(errors, pathPrefix, runway, "evidenceToCollect");
+      requireNonEmptyStringArrayField(errors, pathPrefix, runway, "blockerRefs");
+      requireNonEmptyStringArrayField(errors, pathPrefix, runway, "sourceRefs");
+    }
+    const listenerTrustCard = requireObject(
+      errors,
+      "dashboardState.userRealityCheck.listenerTrustCard",
+      userRealityCheck.listenerTrustCard
+    );
+    if (listenerTrustCard != null) {
+      for (const field of [
+        "title",
+        "status",
+        "connectionState",
+        "tokenState",
+        "snapshotFreshness",
+        "snapshotAgePolicy",
+        "healthRoute",
+        "runtimeRoute",
+        "startCommand",
+        "statusCommand",
+        "usefulness",
+      ]) {
+        requireStringField(errors, "dashboardState.userRealityCheck.listenerTrustCard", listenerTrustCard, field);
+      }
     }
     const progressFlow =
       requireArray(errors, "dashboardState.userRealityCheck.progressFlow", userRealityCheck.progressFlow) ?? [];

@@ -1508,6 +1508,65 @@ function buildUserRealityCheck(
       sourceRefs: ["agentPlatformGovernance", ...agentPlatformGovernance.governanceIndexing.evidenceRefs],
     },
   ];
+  const runwayFromAction = (
+    action: (typeof topActionPlan)[number],
+    lane: string,
+    userQuestion: string,
+    proofRoute: string,
+    expectedVisibleChange: string,
+    blockerRefs: string[]
+  ) => ({
+    id: `runway.${action.id.replace(/^action\./, "")}`,
+    rank: action.rank,
+    lane,
+    userQuestion,
+    actionId: action.id,
+    actionTitle: action.title,
+    status: action.status,
+    owner: action.owner,
+    whyNow: action.whyItMatters,
+    unlocks: action.blocks,
+    evidenceToCollect: action.evidenceRequired,
+    proofRoute,
+    command: action.command,
+    expectedVisibleChange,
+    blockerRefs,
+    sourceRefs: action.sourceRefs,
+  });
+  const nextActionRunway = [
+    runwayFromAction(
+      topActionPlan[0],
+      "Trust the projection first",
+      "Can I trust this dashboard enough to act on it?",
+      "/api/harness-dashboard/v1/traceability",
+      "Projection confidence shows a current verification result or keeps debt explicit.",
+      ["projection-debt", "stale-dashboard-state"]
+    ),
+    runwayFromAction(
+      topActionPlan[1],
+      "Turn proof chips into live previews",
+      "How do I inspect evidence without opening raw JSON?",
+      "/api/harness-dashboard/v1/health",
+      "Route chips return token-authenticated read-only payloads instead of static fallback text.",
+      ["listener-not-started", "static-snapshot-only"]
+    ),
+    runwayFromAction(
+      topActionPlan[2],
+      "Replace bootstrap assumptions with project evidence",
+      "What real-world proof is still missing?",
+      "/api/harness-dashboard/v1/version-control",
+      "Missing evidence counts shrink and VCS/service/release facts gain source references.",
+      ["bootstrap-evidence", "unlinked-vcs-or-service-state"]
+    ),
+    runwayFromAction(
+      topActionPlan[3],
+      "Lock the first governed goal",
+      "Which goal should progress be judged against?",
+      "/api/harness-dashboard/v1/sessions",
+      "Session traceability records an owner-approved goal, result summary, residual risk, and next step.",
+      ["decision-first-governed-goal", "goal-fit-unknown"]
+    ),
+  ];
   const clampTrustReadinessScore = (value: number) =>
     Math.max(0, Math.min(100, Math.round(value)));
   const trustReadinessScoreInputs = {
@@ -1962,6 +2021,22 @@ function buildUserRealityCheck(
       staticModeFallback:
         "Static export names evidence and API chips but cannot open payloads until a loopback listener is connected.",
     },
+    listenerTrustCard: {
+      title: "Local listener health and trust",
+      status: "static-listener-required",
+      connectionState: "not-connected-at-bootstrap",
+      tokenState: "token appears only after the loopback listener starts",
+      lastHeartbeatAt: null,
+      snapshotFreshness: "bootstrap",
+      snapshotAgePolicy:
+        "Treat static snapshots as orientation only. Use the health route state hash and heartbeat before trusting live local data.",
+      healthRoute: "/api/harness-dashboard/v1/health",
+      runtimeRoute: "/api/harness-dashboard/v1/runtime",
+      startCommand: listenerStartCommand,
+      statusCommand: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status",
+      usefulness:
+        "Confirms whether route chips can return current read-only payloads or only name static proof paths.",
+    },
     answers: [
       {
         question: "What is real right now?",
@@ -2005,6 +2080,7 @@ function buildUserRealityCheck(
       },
     ],
     actionPlan: topActionPlan,
+    nextActionRunway,
     progressFlow: [
       {
         stage: "reality",
@@ -2113,6 +2189,7 @@ function buildUserRealityCheck(
         "User can answer reality, goal, risk, next action, progress, and evidence questions from Overview.",
         "Local listener exposes the same action plan through a read-only route.",
         "Action plan links each step to evidence requirements, blockers, owner, and success signal.",
+        "Next Action Runway explains the first actions, proof routes, blockers, and expected visible dashboard changes.",
       ],
     },
   };
@@ -4535,7 +4612,7 @@ function buildDashboardStateSchema(): string {
   };
   properties.userRealityCheck = {
     type: "object",
-    required: ["status", "purpose", "summary", "answers", "actionPlan", "progressFlow", "evidenceMap", "apiContract"],
+    required: ["status", "purpose", "summary", "answers", "actionPlan", "nextActionRunway", "progressFlow", "evidenceMap", "apiContract"],
     additionalProperties: true,
     properties: {
       status: { type: "string" },
@@ -4618,6 +4695,24 @@ function buildDashboardStateSchema(): string {
           },
         },
       },
+      listenerTrustCard: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          title: { type: "string" },
+          status: { type: "string" },
+          connectionState: { type: "string" },
+          tokenState: { type: "string" },
+          lastHeartbeatAt: { type: ["string", "null"] },
+          snapshotFreshness: { type: "string" },
+          snapshotAgePolicy: { type: "string" },
+          healthRoute: { type: "string" },
+          runtimeRoute: { type: "string" },
+          startCommand: { type: "string" },
+          statusCommand: { type: "string" },
+          usefulness: { type: "string" },
+        },
+      },
       actionPlan: {
         type: "array",
         items: {
@@ -4647,6 +4742,48 @@ function buildDashboardStateSchema(): string {
             apiRoutes: { type: "array", items: { type: "string" } },
             blocks: { type: "array", items: { type: "string" } },
             successSignal: { type: "string" },
+            sourceRefs: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+      nextActionRunway: {
+        type: "array",
+        items: {
+          type: "object",
+          required: [
+            "id",
+            "rank",
+            "lane",
+            "userQuestion",
+            "actionId",
+            "actionTitle",
+            "status",
+            "owner",
+            "whyNow",
+            "unlocks",
+            "evidenceToCollect",
+            "proofRoute",
+            "expectedVisibleChange",
+            "blockerRefs",
+            "sourceRefs",
+          ],
+          additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            rank: { type: "number" },
+            lane: { type: "string" },
+            userQuestion: { type: "string" },
+            actionId: { type: "string" },
+            actionTitle: { type: "string" },
+            status: { type: "string" },
+            owner: { type: "string" },
+            whyNow: { type: "string" },
+            unlocks: { type: "array", items: { type: "string" } },
+            evidenceToCollect: { type: "array", items: { type: "string" } },
+            proofRoute: { type: "string" },
+            command: { type: "string" },
+            expectedVisibleChange: { type: "string" },
+            blockerRefs: { type: "array", items: { type: "string" } },
             sourceRefs: { type: "array", items: { type: "string" } },
           },
         },
@@ -5345,6 +5482,18 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "briefEvidenceChecks": "Evidence checks",
           "briefRouteContracts": "Route contracts",
           "expectedPayloadKeys": "Expected payload keys",
+          "nextActionRunway": "Next Action Runway",
+          "runwayUserQuestion": "User question",
+          "runwayWhyNow": "Why now",
+          "runwayUnlocks": "Unlocks",
+          "runwayProofRoute": "Proof route",
+          "expectedVisibleChange": "Expected visible change",
+          "blockerRefs": "Blocker refs",
+          "listenerTrustCard": "Local listener health & trust",
+          "connectionState": "Connection",
+          "tokenAvailability": "Token",
+          "lastHeartbeat": "Last heartbeat",
+          "snapshotFreshness": "Snapshot freshness",
           "realityCheckAnswers": "What this means",
           "realityCheckProgressFlow": "Reality > Risks > Next Actions > Proof > API",
           "listenerBootstrap": "Listener bootstrap",
@@ -5629,6 +5778,18 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "briefEvidenceChecks": "근거 점검",
           "briefRouteContracts": "경로 계약",
           "expectedPayloadKeys": "예상 페이로드 키",
+          "nextActionRunway": "다음 행동 활주로",
+          "runwayUserQuestion": "사용자 질문",
+          "runwayWhyNow": "지금 필요한 이유",
+          "runwayUnlocks": "해제되는 항목",
+          "runwayProofRoute": "증명 경로",
+          "expectedVisibleChange": "예상되는 화면 변화",
+          "blockerRefs": "차단 참조",
+          "listenerTrustCard": "로컬 리스너 상태와 신뢰",
+          "connectionState": "연결",
+          "tokenAvailability": "토큰",
+          "lastHeartbeat": "마지막 하트비트",
+          "snapshotFreshness": "스냅샷 신선도",
           "realityCheckAnswers": "이 상태의 의미",
           "realityCheckProgressFlow": "현실 > 위험 > 다음 행동 > 증거 > API",
           "listenerBootstrap": "리스너 부트스트랩",
@@ -6960,6 +7121,9 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const actions = Array.isArray(check.actionPlan)
           ? check.actionPlan.slice().sort((a, b) => Number(a.rank || 0) - Number(b.rank || 0)).slice(0, rowLimit(8))
           : [];
+        const runway = Array.isArray(check.nextActionRunway)
+          ? check.nextActionRunway.slice().sort((a, b) => Number(a.rank || 0) - Number(b.rank || 0)).slice(0, rowLimit(6))
+          : [];
         const evidenceMap = Array.isArray(check.evidenceMap) ? check.evidenceMap.slice(0, rowLimit(6)) : [];
         const api = check.apiContract || {};
         const answerCards = answers.map((item) =>
@@ -6987,6 +7151,22 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           '<span class="source">' + evidenceRefList(item.sourceRefs, 4) + '</span>' +
           '</article>'
         ).join("");
+        const runwayCards = runway.map((item) =>
+          '<article class="hub-item ' + (/blocked|debt|required|waiting|pending/i.test(String(item.status || "")) ? "risk" : "warn") + '">' +
+          '<span class="rail-label">#' + esc(item.rank || "") + ' · ' + esc(item.lane || item.status || "open") + '</span>' +
+          '<strong>' + esc(item.actionTitle || item.actionId || t("notDeclared")) + '</strong>' +
+          '<p><strong>' + esc(t("runwayUserQuestion")) + ':</strong> ' + esc(item.userQuestion || t("notDeclared")) + '</p>' +
+          '<span class="source"><strong>' + esc(t("owner")) + ':</strong> ' + esc(item.owner || "unassigned") + '</span>' +
+          '<span class="source"><strong>' + esc(t("runwayWhyNow")) + ':</strong> ' + esc(item.whyNow || "") + '</span>' +
+          '<span class="source"><strong>' + esc(t("runwayUnlocks")) + ':</strong> ' + esc((item.unlocks || []).slice(0, 4).join(", ") || t("none")) + '</span>' +
+          '<span class="source"><strong>' + esc(t("evidence")) + ':</strong> ' + esc((item.evidenceToCollect || []).slice(0, 3).join(", ") || t("noEvidence")) + '</span>' +
+          '<span class="source"><strong>' + esc(t("runwayProofRoute")) + ':</strong> <span class="api-route-list">' + apiRouteButton(item.proofRoute || "/api/harness-dashboard/v1/reality-check") + '</span></span>' +
+          (item.command ? '<span class="source command-line"><strong>' + esc(t("command")) + ':</strong> <code>' + esc(item.command) + '</code></span>' : '') +
+          '<span class="source"><strong>' + esc(t("expectedVisibleChange")) + ':</strong> ' + esc(item.expectedVisibleChange || "") + '</span>' +
+          '<span class="source"><strong>' + esc(t("blockerRefs")) + ':</strong> ' + evidenceRefList(item.blockerRefs || [], 4) + '</span>' +
+          '<span class="source">' + evidenceRefList(item.sourceRefs, 4) + '</span>' +
+          '</article>'
+        ).join("");
         const evidenceRows = evidenceMap.map((item) => [
           esc(item.label || item.id),
           evidenceRefList(item.sourceRefs, 4),
@@ -6998,6 +7178,9 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           .map(apiRouteButton)
           .join("");
         const listener = app.state.listener || ((app.state.dashboardRuntime || {}).listener) || {};
+        const listenerTrust = check.listenerTrustCard || {};
+        const projectionConfidence = app.state.projectionConfidence || {};
+        const meta = app.state.meta || {};
         const listenerCommands = [
           api.startCommand || "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs ensure-listening",
           api.statusCommand || "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status",
@@ -7014,6 +7197,19 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           '<p>' + esc(t("listenerBootstrapCopy")) + '</p>' +
           listenerCommands.map((command) => '<span class="source command-line"><strong>' + esc(t("command")) + ':</strong> <code>' + esc(command) + '</code></span>').join("") +
           '<span class="source"><strong>' + esc(t("staticProofFallback")) + ':</strong> ' + evidenceRefList(staticProofRefs, 6) + '</span></div>';
+        const listenerTrustCard =
+          '<div class="hub-item ' + (localApiToken ? "" : "warn") + '"><strong>' + esc(t("listenerTrustCard")) + '</strong>' +
+          metricGrid([
+            [t("connectionState"), localApiToken ? (listener.status || "connected") : (listener.status || listenerTrust.connectionState || "static"), listener.url || listenerTrust.healthRoute || "/api/harness-dashboard/v1/health"],
+            [t("tokenAvailability"), localApiToken ? t("apiLookupOk") : (listenerTrust.tokenState || t("apiLookupStatic")), "local token"],
+            [t("lastHeartbeat"), listener.lastHeartbeatAt || listenerTrust.lastHeartbeatAt || t("notDeclared"), "listener heartbeat"],
+            [t("snapshotFreshness"), projectionConfidence.staleness || listenerTrust.snapshotFreshness || meta.staleness || "unknown", "projection freshness"],
+          ]) +
+          '<p>' + esc(listenerTrust.snapshotAgePolicy || t("listenerBootstrapCopy")) + '</p>' +
+          '<p class="source">' + esc(listenerTrust.usefulness || t("hubApiCopy")) + '</p>' +
+          '<div class="api-route-list">' + apiRouteButton(listenerTrust.healthRoute || "/api/harness-dashboard/v1/health") + apiRouteButton(listenerTrust.runtimeRoute || "/api/harness-dashboard/v1/runtime") + '</div>' +
+          [listenerTrust.startCommand, listenerTrust.statusCommand].filter(Boolean).map((command) => '<span class="source command-line"><strong>' + esc(t("command")) + ':</strong> <code>' + esc(command) + '</code></span>').join("") +
+          '</div>';
         return '<div class="reality-action-hub">' +
           '<div class="hub-brief"><span class="rail-label">' + esc(t("userRealityCheck")) + '</span><strong>' + esc(check.purpose || "") + '</strong>' +
           metricGrid([
@@ -7023,13 +7219,16 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
             [t("trust"), summary.trustPosture || t("notDeclared"), "trust posture"],
             [t("openEvidence"), summary.missingEvidenceCount ?? 0, "missing evidence"],
             [t("openDecisions"), summary.openDecisionCount ?? 0, "decisions"],
+            [t("nextActionRunway"), runway.length, "ordered next actions"],
           ]) + '</div>' +
           '<div class="hub-grid"><section class="hub-list"><h3>' + esc(t("realityCheckAnswers")) + '</h3>' + (answerCards || '<p class="muted">' + esc(t("notDeclared")) + '</p>') + '</section>' +
           '<section class="hub-list"><h3>' + esc(t("realityCheckProgressFlow")) + '</h3>' + (progressFlowCards || '<p class="muted">' + esc(t("notDeclared")) + '</p>') + '</section>' +
+          '<section class="hub-list"><h3>' + esc(t("nextActionRunway")) + '</h3>' + (runwayCards || '<p class="muted">' + esc(t("hubNoAction")) + '</p>') + '</section>' +
           '<section class="hub-list"><h3>' + esc(t("realityCheckActionPlan")) + '</h3>' + (actionCards || '<p class="muted">' + esc(t("hubNoAction")) + '</p>') + '</section></div>' +
           '<h3>' + esc(t("evidenceDrilldown")) + '</h3>' +
           table([t("evidence"), "Source refs", "Missing refs", "API"], evidenceRows) +
           renderEvidencePreview() +
+          listenerTrustCard +
           listenerBootstrap +
           '<div class="hub-item"><strong>' + esc(api.route || "/api/harness-dashboard/v1/reality-check") + '</strong><span class="source">' + esc((api.usefulFor || []).join(", ") || t("hubApiCopy")) + '</span><div class="api-route-list">' + routeChips + '</div>' + renderApiPreview() + '</div>' +
           '</div>';

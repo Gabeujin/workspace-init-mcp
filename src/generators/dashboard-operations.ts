@@ -287,6 +287,107 @@ function backfillSessionTraceability(state, workspaceId, workspaceName, purpose)
   };
 }
 
+function normalizeNextActionRunwayEntries(userRealityCheck, workspaceId, workspaceName, nextSafeMove) {
+  const actionPlan = Array.isArray((userRealityCheck || {}).actionPlan) ? userRealityCheck.actionPlan : [];
+  const workspaceRefs = [workspaceId, "legacy-dashboard-state"].filter(Boolean);
+  const existingRunway = Array.isArray((userRealityCheck || {}).nextActionRunway) ? userRealityCheck.nextActionRunway : [];
+  const nextActionRunwaySource = existingRunway.length > 0 ? existingRunway : actionPlan.length > 0 ? actionPlan : [{
+    id: "action.legacy-refresh",
+    rank: 1,
+    title: "Refresh legacy dashboard reality",
+    status: "refresh-required",
+    owner: "harness-dashboard-operator",
+    whyItMatters: nextSafeMove,
+    evidenceRequired: ["dashboard-ops verify-projections output", "dashboard-ops refresh output", "next governed session request/process/result trace"],
+    command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+    apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/traceability"],
+    sourceRefs: ["legacy-dashboard-state", workspaceId],
+    blocks: ["trusted-handoff", "operational-truth"],
+    successSignal: "Projection confidence, session traceability, and evidence gaps are refreshed from current state."
+  }];
+  const normalized = [];
+  const seen = new Set();
+  for (const [index, actionItem] of nextActionRunwaySource.entries()) {
+    const action = isPlainObject(actionItem) ? actionItem : {};
+    const actionId = String(action.actionId || action.id || "action.legacy-refresh-" + (index + 1));
+    const rawRunwayId = String(action.id || "");
+    const runwayId = rawRunwayId.startsWith("runway.")
+      ? rawRunwayId
+      : actionId.startsWith("runway.")
+        ? actionId
+        : "runway." + actionId.replace(/^action\./, "");
+    if (seen.has(runwayId)) continue;
+    seen.add(runwayId);
+    const rankValue = Number(action.rank);
+    const lane = String(action.lane || "bootstrap");
+    const rank = Number.isFinite(rankValue) ? rankValue : (index + 1);
+    const status = String(action.status || "refresh-required");
+    const owner = String(action.owner || "harness-dashboard-operator");
+    const whyNow = String(action.whyNow || action.whyItMatters || nextSafeMove);
+    const unlocks = Array.isArray(action.unlocks) ? action.unlocks.filter((entry) => typeof entry === "string")
+      : Array.isArray(action.blocks) ? action.blocks.filter((entry) => typeof entry === "string") : [];
+    const evidenceToCollect = Array.isArray(action.evidenceToCollect) ? action.evidenceToCollect.filter((entry) => typeof entry === "string")
+      : Array.isArray(action.evidenceRequired) ? action.evidenceRequired.filter((entry) => typeof entry === "string") : [];
+    const sourceApiRoutes = Array.isArray(action.apiRoutes)
+      ? action.apiRoutes.filter((entry) => typeof entry === "string")
+      : typeof action.proofRoute === "string" ? [action.proofRoute] : ["/api/harness-dashboard/v1/reality-check"];
+    const proofRoute = String(sourceApiRoutes[0] || "/api/harness-dashboard/v1/reality-check");
+    const command = String(action.command || "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh");
+    const expectedVisibleChange = String(action.expectedVisibleChange || action.successSignal || "Projection and traceability evidence should reflect refreshed reality, ownership, and evidence state.");
+    const blockerRefs = Array.isArray(action.blockerRefs)
+      ? action.blockerRefs.filter((entry) => typeof entry === "string")
+      : typeof action.nextActionRef === "string" ? [String(action.nextActionRef)]
+      : Array.isArray(action.nextActionRefs) ? action.nextActionRefs.filter((entry) => typeof entry === "string")
+      : Array.isArray(action.blocks) ? action.blocks.filter((entry) => typeof entry === "string") : [];
+    if (action.status === "completed") {
+      blockerRefs.push("legacy-action-completed");
+    }
+    const sourceRefs = Array.isArray(action.sourceRefs) ? action.sourceRefs.filter((entry) => typeof entry === "string") : workspaceRefs.slice();
+    sourceRefs.push("governanceEvidenceBrief", "projectionConfidence");
+    normalized.push({
+      id: runwayId,
+      rank,
+      lane,
+      userQuestion: String(action.userQuestion || action.whyNow || action.whyItMatters || "What should happen next?"),
+      actionId,
+      actionTitle: String(action.actionTitle || action.title || action.legacyActionTitle || "Refresh legacy dashboard state"),
+      status,
+      owner,
+      whyNow,
+      unlocks: unlocks,
+      evidenceToCollect: evidenceToCollect,
+      proofRoute,
+      command,
+      expectedVisibleChange,
+      blockerRefs: blockerRefs.filter(Boolean),
+      sourceRefs: Array.from(new Set(sourceRefs.concat([workspaceName, "runtime-projection"]))).filter(Boolean)
+    });
+  }
+  if (normalized.length === 0) {
+    return [{
+      id: "runway.legacy-refresh",
+      rank: 1,
+      lane: "bootstrap",
+      userQuestion: "What should happen next?",
+      actionId: "action.legacy-refresh",
+      actionTitle: "Refresh legacy dashboard reality",
+      status: "refresh-required",
+      owner: "harness-dashboard-operator",
+      whyNow: nextSafeMove,
+      unlocks: ["dashboard-ops refresh"],
+      evidenceToCollect: ["dashboard-ops verify-projections output", "dashboard-ops refresh output", "next governed session request/process/result trace"],
+      proofRoute: "/api/harness-dashboard/v1/reality-check",
+      command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+      expectedVisibleChange: "Projection confidence and session traceability move from safe fallback to refreshed operational evidence.",
+      blockerRefs: ["projectionConfidence", "sessionTraceability"],
+      sourceRefs: workspaceRefs.concat(["userRealityCheck"]).filter(Boolean)
+    }];
+  }
+  return normalized
+    .sort((left, right) => Number(left.rank || 0) - Number(right.rank || 0) || String(left.id).localeCompare(String(right.id)))
+    .slice(0, 25);
+}
+
 function backfillUserRealityCheck(state, workspaceId, workspaceName, purpose) {
   const existingRealityCheck = isPlainObject(state.userRealityCheck) ? state.userRealityCheck : null;
   const goalCompass = isPlainObject(state.goalCompass) ? state.goalCompass : {};
@@ -351,8 +452,42 @@ function backfillUserRealityCheck(state, workspaceId, workspaceName, purpose) {
       startCommand: String(existingApi.startCommand || listenerStartCommand),
       statusCommand: String(existingApi.statusCommand || "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status")
     };
+    if (!isPlainObject(existingRealityCheck.listenerTrustCard)) {
+      existingRealityCheck.listenerTrustCard = {
+        title: "Local listener health and trust",
+        status: "legacy-listener-required",
+        connectionState: "unknown-until-listener-starts",
+        tokenState: "token appears only after the loopback listener starts",
+        lastHeartbeatAt: null,
+        snapshotFreshness: String(projectionConfidence.staleness || "legacy-backfill"),
+        snapshotAgePolicy: "Treat legacy static snapshots as orientation only until the local health route confirms state hash and heartbeat.",
+        healthRoute: "/api/harness-dashboard/v1/health",
+        runtimeRoute: "/api/harness-dashboard/v1/runtime",
+        startCommand: listenerStartCommand,
+        statusCommand: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status",
+        usefulness: "Confirms whether route chips can return current read-only payloads or only name static proof paths."
+      };
+    }
+    existingRealityCheck.nextActionRunway = normalizeNextActionRunwayEntries(existingRealityCheck, workspaceId, workspaceName, nextSafeMove);
     return;
   }
+  const legacyActionPlan = [
+    {
+      id: "action.legacy-refresh",
+      rank: 1,
+      title: "Refresh legacy dashboard reality",
+      status: "refresh-required",
+      owner: "harness-dashboard-operator",
+      whyItMatters: "Legacy projections may not preserve current reality, evidence, or traceability contracts.",
+      evidenceRequired: ["dashboard-ops verify-projections output", "dashboard-ops refresh output", "next governed session request/process/result trace"],
+      command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+      apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/traceability"],
+      blocks: ["trusted-handoff", "operational-truth"],
+      successSignal: "Projection confidence, session traceability, and evidence gaps are refreshed from current state.",
+      sourceRefs: ["legacy-dashboard-state", workspaceId]
+    }
+  ];
+  const nextActionRunway = normalizeNextActionRunwayEntries({ actionPlan: legacyActionPlan }, workspaceId, workspaceName, nextSafeMove);
   state.userRealityCheck = {
     schemaVersion: String((state.meta || {}).schemaVersion || SCHEMA_VERSION),
     status: "legacy-backfill-action-plan",
@@ -377,22 +512,22 @@ function backfillUserRealityCheck(state, workspaceId, workspaceName, purpose) {
       }
     ],
     progressFlow: legacyProgressFlow,
-    actionPlan: [
-      {
-        id: "action.legacy-refresh",
-        rank: 1,
-        title: "Refresh legacy dashboard reality",
-        status: "refresh-required",
-        owner: "harness-dashboard-operator",
-        whyItMatters: "Legacy projections may not preserve current reality, evidence, or traceability contracts.",
-        evidenceRequired: ["dashboard-ops verify-projections output", "dashboard-ops refresh output", "next governed session request/process/result trace"],
-        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
-        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/traceability"],
-        blocks: ["trusted-handoff", "operational-truth"],
-        successSignal: "Projection confidence, session traceability, and evidence gaps are refreshed from current state.",
-        sourceRefs: ["legacy-dashboard-state", workspaceId]
-      }
-    ],
+    actionPlan: legacyActionPlan,
+    nextActionRunway,
+    listenerTrustCard: {
+      title: "Local listener health and trust",
+      status: "legacy-listener-required",
+      connectionState: "unknown-until-listener-starts",
+      tokenState: "token appears only after the loopback listener starts",
+      lastHeartbeatAt: null,
+      snapshotFreshness: String(projectionConfidence.staleness || "legacy-backfill"),
+      snapshotAgePolicy: "Treat legacy static snapshots as orientation only until the local health route confirms state hash and heartbeat.",
+      healthRoute: "/api/harness-dashboard/v1/health",
+      runtimeRoute: "/api/harness-dashboard/v1/runtime",
+      startCommand: listenerStartCommand,
+      statusCommand: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs status",
+      usefulness: "Confirms whether route chips can return current read-only payloads or only name static proof paths."
+    },
     evidenceMap: [
       {
         id: "legacy",
@@ -787,6 +922,73 @@ function validateState(state) {
     requireValidationObject(errors, tracePath + ".traceIntegrity", item.traceIntegrity);
     requireValidationStringArray(errors, tracePath + ".evidenceRefs", item.evidenceRefs);
   }
+  const userRealityCheck = requireValidationObject(errors, "dashboardState.userRealityCheck", state.userRealityCheck) || {};
+  requireValidationString(errors, "dashboardState.userRealityCheck.status", userRealityCheck.status);
+  requireValidationString(errors, "dashboardState.userRealityCheck.purpose", userRealityCheck.purpose);
+  requireValidationObject(errors, "dashboardState.userRealityCheck.summary", userRealityCheck.summary);
+  const userAnswers = requireValidationArray(errors, "dashboardState.userRealityCheck.answers", userRealityCheck.answers) || [];
+  if (userAnswers.length === 0) {
+    errors.push("dashboardState.userRealityCheck.answers must contain at least one user question");
+  }
+  const userActions = requireValidationArray(errors, "dashboardState.userRealityCheck.actionPlan", userRealityCheck.actionPlan) || [];
+  if (userActions.length === 0) {
+    errors.push("dashboardState.userRealityCheck.actionPlan must contain at least one action");
+  }
+  const actionIds = new Set();
+  for (const [index, action] of userActions.entries()) {
+    const actionPath = "dashboardState.userRealityCheck.actionPlan[" + index + "]";
+    const item = requireValidationObject(errors, actionPath, action);
+    if (!item) continue;
+    requireValidationUniqueId(errors, actionIds, actionPath + ".id", item.id);
+    requireValidationNumber(errors, actionPath + ".rank", item.rank);
+    for (const field of ["title", "status", "owner", "whyItMatters", "successSignal"]) {
+      requireValidationString(errors, actionPath + "." + field, item[field]);
+    }
+    requireValidationNonEmptyStringArray(errors, actionPath + ".evidenceRequired", item.evidenceRequired);
+    requireValidationNonEmptyStringArray(errors, actionPath + ".apiRoutes", item.apiRoutes);
+    requireValidationStringArray(errors, actionPath + ".blocks", item.blocks);
+    requireValidationNonEmptyStringArray(errors, actionPath + ".sourceRefs", item.sourceRefs);
+  }
+  const runwayRows = requireValidationArray(errors, "dashboardState.userRealityCheck.nextActionRunway", userRealityCheck.nextActionRunway) || [];
+  if (runwayRows.length === 0) {
+    errors.push("dashboardState.userRealityCheck.nextActionRunway must contain at least one runway step");
+  }
+  const runwayIds = new Set();
+  for (const [index, runway] of runwayRows.entries()) {
+    const runwayPath = "dashboardState.userRealityCheck.nextActionRunway[" + index + "]";
+    const item = requireValidationObject(errors, runwayPath, runway);
+    if (!item) continue;
+    requireValidationUniqueId(errors, runwayIds, runwayPath + ".id", item.id);
+    requireValidationNumber(errors, runwayPath + ".rank", item.rank);
+    for (const field of ["lane", "userQuestion", "actionId", "actionTitle", "status", "owner", "whyNow", "proofRoute", "expectedVisibleChange"]) {
+      requireValidationString(errors, runwayPath + "." + field, item[field]);
+    }
+    requireValidationNonEmptyStringArray(errors, runwayPath + ".unlocks", item.unlocks);
+    requireValidationNonEmptyStringArray(errors, runwayPath + ".evidenceToCollect", item.evidenceToCollect);
+    requireValidationNonEmptyStringArray(errors, runwayPath + ".blockerRefs", item.blockerRefs);
+    requireValidationNonEmptyStringArray(errors, runwayPath + ".sourceRefs", item.sourceRefs);
+  }
+  const listenerTrustCard = requireValidationObject(errors, "dashboardState.userRealityCheck.listenerTrustCard", userRealityCheck.listenerTrustCard) || {};
+  for (const field of ["title", "status", "connectionState", "tokenState", "snapshotFreshness", "snapshotAgePolicy", "healthRoute", "runtimeRoute", "startCommand", "statusCommand", "usefulness"]) {
+    requireValidationString(errors, "dashboardState.userRealityCheck.listenerTrustCard." + field, listenerTrustCard[field]);
+  }
+  const progressFlow = requireValidationArray(errors, "dashboardState.userRealityCheck.progressFlow", userRealityCheck.progressFlow) || [];
+  if (progressFlow.length === 0) {
+    errors.push("dashboardState.userRealityCheck.progressFlow must contain at least one stage");
+  }
+  for (const [index, stage] of progressFlow.entries()) {
+    const stagePath = "dashboardState.userRealityCheck.progressFlow[" + index + "]";
+    const item = requireValidationObject(errors, stagePath, stage);
+    if (!item) continue;
+    for (const field of ["stage", "title", "status", "summary", "nextStep"]) {
+      requireValidationString(errors, stagePath + "." + field, item[field]);
+    }
+    requireValidationNonEmptyStringArray(errors, stagePath + ".sourceRefs", item.sourceRefs);
+  }
+  requireValidationArray(errors, "dashboardState.userRealityCheck.evidenceMap", userRealityCheck.evidenceMap);
+  const userRealityApi = requireValidationObject(errors, "dashboardState.userRealityCheck.apiContract", userRealityCheck.apiContract) || {};
+  requireValidationString(errors, "dashboardState.userRealityCheck.apiContract.route", userRealityApi.route);
+  requireValidationStringArray(errors, "dashboardState.userRealityCheck.apiContract.usefulFor", userRealityApi.usefulFor);
   const agentQueues = requireValidationObject(errors, "dashboardState.agentTaskQueues", state.agentTaskQueues) || {};
   for (const key of ["waiting", "inProgress", "completed", "blocked"]) {
     if (!Array.isArray(agentQueues[key])) {
@@ -3155,7 +3357,7 @@ function evidenceCard(kind, ref, sourcePath, record, matchedFields = [], ranking
   const evidenceRefs = Array.isArray(record && record.evidenceRefs)
     ? record.evidenceRefs
     : Array.isArray(record && record.evidence)
-      ? record.evidence
+    ? record.evidence
       : Array.isArray(record && record.sourceRefs)
         ? record.sourceRefs
         : [];
@@ -3168,21 +3370,30 @@ function evidenceCard(kind, ref, sourcePath, record, matchedFields = [], ranking
     title: compactEvidenceText(title, 180),
     status,
     owner,
-    summary: compactEvidenceText(record && (record.whyItMatters || record.rationale || record.resultSummary || record.processSummary || record.answer || record.requiredEvidenceType || record.nextAction || record.nextStep || record.successSignal || "") || ""),
+    summary: compactEvidenceText(record && (record.whyItMatters || record.whyNow || record.rationale || record.resultSummary || record.processSummary || record.answer || record.requiredEvidenceType || record.nextAction || record.nextStep || record.successSignal || "") || ""),
     evidenceRefs: evidenceRefs.map((entry) => String(entry)).slice(0, 12),
     matchedFields,
     recordId,
+    recordRank: Number.isFinite(Number(record && record.rank)) ? Number(record.rank) : Number.MAX_SAFE_INTEGER,
     score: Number(ranking.score || 0),
     matchQuality: String(ranking.matchQuality || "unranked"),
     matchReason: String(ranking.matchReason || "contains requested reference"),
     freshness: String(ranking.freshness || evidenceFreshness(record)),
     provenance: String(ranking.provenance || evidenceProvenance(kind, sourcePath, record)),
-    text: compactEvidenceText([title, status, owner, record && (record.whyItMatters || record.rationale || record.resultSummary || record.processSummary || record.answer || record.requiredEvidenceType || record.nextAction || record.nextStep || record.successSignal || "")].filter(Boolean).join(" | "), 420)
+    text: compactEvidenceText([title, status, owner, record && (record.whyItMatters || record.whyNow || record.rationale || record.resultSummary || record.processSummary || record.answer || record.requiredEvidenceType || record.nextAction || record.nextStep || record.successSignal || "")].filter(Boolean).join(" | "), 420)
   };
 }
 
 function arrayValue(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function normalizeRunwayRows(rows) {
+  return arrayValue(rows)
+    .map((entry) => isPlainObject(entry) ? entry : {})
+    .filter((entry) => String(entry.id || "").length > 0)
+    .slice()
+    .sort((left, right) => Number(left.rank || 0) - Number(right.rank || 0) || String(left.id || "").localeCompare(String(right.id || "")));
 }
 
 function objectValue(value) {
@@ -3236,6 +3447,7 @@ function evidenceCollections(publicState) {
   const userReality = objectValue(publicState.userRealityCheck);
   const trustReadiness = objectValue(userReality.trustReadinessBrief);
   const trustEvidenceChecks = objectValue(trustReadiness.evidenceChecks);
+  const listenerTrustCard = objectValue(userReality.listenerTrustCard);
   const projectionConfidence = objectValue(publicState.projectionConfidence);
   const governanceEvidence = objectValue(publicState.governanceEvidenceBrief);
   const trustBoundary = objectValue(publicState.trustBoundary);
@@ -3256,6 +3468,8 @@ function evidenceCollections(publicState) {
     { kind: "goal-gap", sourcePath: "goalCompass.topGaps", rows: arrayValue(goal.topGaps), fields: ["id", "label", "status", "owner", "evidenceNeeded", "nextActionRef"], scopes: ["all", "reality-check", "tasks"] },
     { kind: "context-warning", sourcePath: "contextRotMonitor.rotWarnings", rows: arrayValue(contextRot.rotWarnings), fields: ["id", "summary", "severity", "status", "owner", "evidenceRefs", "nextAction"], scopes: ["all", "evidence", "reality-check"] },
     { kind: "user-reality-action", sourcePath: "userRealityCheck.actionPlan", rows: arrayValue(userReality.actionPlan), fields: ["id", "rank", "title", "status", "owner", "whyItMatters", "evidenceRequired", "apiRoutes", "blocks", "successSignal", "sourceRefs", "command"], scopes: ["all", "reality-check", "tasks", "evidence"] },
+    { kind: "user-reality-runway", sourcePath: "userRealityCheck.nextActionRunway", rows: normalizeRunwayRows(userReality.nextActionRunway), fields: ["id", "rank", "lane", "userQuestion", "actionId", "actionTitle", "status", "owner", "whyNow", "unlocks", "evidenceToCollect", "proofRoute", "command", "expectedVisibleChange", "blockerRefs", "sourceRefs"], scopes: ["all", "reality-check", "tasks", "evidence"] },
+    { kind: "listener-trust-card", sourcePath: "userRealityCheck.listenerTrustCard", rows: [listenerTrustCard], fields: ["title", "status", "connectionState", "tokenState", "lastHeartbeatAt", "snapshotFreshness", "snapshotAgePolicy", "healthRoute", "runtimeRoute", "startCommand", "statusCommand", "usefulness"], scopes: ["all", "reality-check", "evidence"] },
     { kind: "user-reality-answer", sourcePath: "userRealityCheck.answers", rows: arrayValue(userReality.answers), fields: ["question", "answer", "sourceRefs", "apiRoutes"], scopes: ["all", "reality-check", "evidence"] },
     { kind: "evidence-map", sourcePath: "userRealityCheck.evidenceMap", rows: arrayValue(userReality.evidenceMap), fields: ["id", "label", "sourceRefs", "missingRefs", "apiRoutes"], scopes: ["all", "reality-check", "evidence"] },
     { kind: "trust-readiness-question", sourcePath: "userRealityCheck.trustReadinessBrief.questions", rows: arrayValue(trustReadiness.questions), fields: ["question", "answer", "decision", "confidence", "confidenceScore", "dimensionIds", "evidenceRefs", "unresolvedEvidenceRefs", "unresolvedEvidenceItems", "commands", "apiRouteChips"], scopes: ["all", "reality-check", "evidence"] },
@@ -3373,13 +3587,15 @@ function rankedEvidenceSearch(publicState, query, options = {}) {
       candidateCount += 1;
       const ranking = scoreEvidenceRecord(collection.kind, collection.sourcePath, record, collection.fields || [], needle);
       if (!ranking) continue;
-      const key = collection.kind + ":" + ranking.canonicalPath + ":" + stableHash(record).slice(0, 16);
+      const canonicalPath = String(ranking.canonicalPath || "");
+      const recordId = String(record && (record.id || record.claimId || record.sessionId || record.eventId || "") || "");
+      const key = collection.kind + ":" + canonicalPath + ":" + (recordId ? stableHash(recordId).slice(0, 12) : stableHash(record).slice(0, 16));
       if (seen.has(key)) continue;
       seen.add(key);
       results.push(evidenceCard(collection.kind, needle, collection.sourcePath, record, ranking.matchedFields, ranking));
     }
   }
-  results.sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || String(a.sourcePath).localeCompare(String(b.sourcePath)));
+  results.sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || Number(a.recordRank || Number.MAX_SAFE_INTEGER) - Number(b.recordRank || Number.MAX_SAFE_INTEGER) || String(a.recordId || "").localeCompare(String(b.recordId || "")) || String(a.sourcePath || "").localeCompare(String(b.sourcePath || "")));
   return {
     query: needle,
     scope,
