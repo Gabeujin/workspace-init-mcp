@@ -742,6 +742,158 @@ function backfillUserPerspectiveAudit(root: Record<string, unknown>): void {
   };
 }
 
+function dashboardSchemaVersion(root: Record<string, unknown>): string {
+  const meta = isPlainObject(root.meta) ? root.meta : {};
+  return String(meta.schemaVersion || "legacy-backfill");
+}
+
+function backfillSemanticGovernance(root: Record<string, unknown>): void {
+  if (isPlainObject(root.semanticGovernance)) {
+    return;
+  }
+  const schemaVersion = dashboardSchemaVersion(root);
+  root.semanticGovernance = {
+    schemaVersion,
+    semanticSchemaVersion: schemaVersion,
+    status: "legacy-backfill-pending-scan",
+    profileId: "legacy-unknown",
+    profileLabel: "Legacy architecture profile pending",
+    profileSummary:
+      "This dashboard state predates semantic governance projections and must be refreshed before architecture claims are trusted.",
+    enforcementMode: "report",
+    unknownLayerMode: "report",
+    gate: {
+      verdict: "not-run",
+      canProceed: false,
+      reason:
+        "Legacy backfill is fail-closed; run source graph scan and architecture governance validation.",
+      strictModes: ["report", "strict", "ci"],
+    },
+    sourceGraph: {
+      path: "docs/ai-harness/ontology/state/source-graph.json",
+      status: "legacy-backfill-missing",
+      expectedTool: "scan_source_graph",
+      metrics: {
+        sourceFileCount: 0,
+        dependencyEdgeCount: 0,
+        unresolvedEdges: 0,
+      },
+    },
+    governanceEvaluation: {
+      path: "docs/ai-harness/ontology/state/governance-evaluation.json",
+      expectedTool: "validate_architecture_governance",
+      verdict: "not-run",
+      blockedEdges: 0,
+      warningEdges: 0,
+    },
+    semanticWarehouse: {
+      path: "docs/ai-harness/ontology/state/semantic-warehouse.json",
+      expectedTool: "query_semantic_warehouse",
+      viewNames: ["files", "symbols", "dependencyEdges", "rules", "violations", "waivers"],
+      status: "legacy-backfill-empty",
+    },
+    waiverGovernance: {
+      ledgerPath: "docs/ai-harness/ontology/state/bypass-ledger.json",
+      revocationLedgerPath: "docs/ai-harness/ontology/state/waiver-revocations.json",
+      trustPath: ".github/ai-harness/governance-trust.json",
+      expectedTool: "validate_architecture_waivers",
+      status: "legacy-backfill-pending",
+      policy:
+        "Legacy backfills are migration aids only; signed waiver and revocation ledgers must be refreshed before trust claims.",
+    },
+    enforcement: {
+      reportPath: "docs/ai-harness/ontology/state/enforcement-report.json",
+      markdownPath: "docs/ai-harness/ontology/state/enforcement-report.md",
+      expectedTool: "enforce_architecture_governance",
+      status: "legacy-backfill-opt-in",
+      canBlock: true,
+    },
+    policyPacks: {
+      guidePath: "docs/ai-harness/ontology/policy-packs/README.md",
+      expectedTools: ["export_architecture_policy_pack", "import_architecture_policy_pack"],
+      status: "legacy-backfill-pending",
+    },
+    visualGraph: {
+      nodes: [],
+      edges: [],
+      legend: ["Legacy projection requires semantic governance refresh."],
+    },
+    commands: [
+      {
+        id: "legacy-refresh-semantic-governance",
+        label: "Refresh semantic governance projection",
+        tool: "validate_architecture_governance",
+        payload: { architectureProfile: "legacy-unknown" },
+        expectedVisibleChange:
+          "Architecture tab replaces fail-closed backfill with scanned source graph and governance evaluation.",
+        evidenceRefs: ["legacy-dashboard-state"],
+      },
+    ],
+    apiRoutes: [
+      "/api/harness-dashboard/v1/architecture",
+      "/api/harness-dashboard/v1/query?scope=architecture&q=governance",
+      "/api/harness-dashboard/v1/events",
+    ],
+    evidenceRefs: ["legacy-dashboard-state"],
+  };
+}
+
+function backfillAgentCommandBridge(root: Record<string, unknown>): void {
+  if (isPlainObject(root.agentCommandBridge)) {
+    return;
+  }
+  const schemaVersion = dashboardSchemaVersion(root);
+  root.agentCommandBridge = {
+    schemaVersion,
+    status: "legacy-backfill-draft-only",
+    executionMode: "draft-only",
+    dashboardDoesNotRunTools: true,
+    requiresAgentExecution: true,
+    policy:
+      "Legacy dashboard state was backfilled with a draft-only Agent bridge. The dashboard never runs tools; copy drafts into an authorized Agent session.",
+    channelModel: {
+      humanToAgent:
+        "Dashboard prepares bounded draft request packets with target tool, payload, expected visible change, and evidence refs.",
+      agentToHuman:
+        "Agent writes governed events or projection state; dashboard listener reflects changes through SSE after refresh.",
+      readOnlyBoundary:
+        "No dashboard button writes project files, runs shell commands, invokes an LLM, or executes MCP tools.",
+    },
+    inboxPath: "docs/ai-harness/runtime/inbox/",
+    outboxPath: "docs/ai-harness/runtime/outbox/",
+    commandPacketSchema: {
+      schemaVersion,
+      required: [
+        "commandId",
+        "executionMode",
+        "dashboardDoesNotRunTools",
+        "targetTool",
+        "payload",
+        "expectedVisibleChange",
+        "evidenceRefs",
+      ],
+    },
+    suggestedCommands: [
+      {
+        id: "legacy-refresh-dashboard",
+        label: "Draft request: refresh dashboard projections",
+        targetTool: "dashboard-ops refresh",
+        payload: {
+          command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+        },
+        expectedVisibleChange:
+          "Projection confidence, semantic governance, and Agent resume state update after refresh.",
+        evidenceRefs: ["legacy-dashboard-state"],
+      },
+    ],
+    sseFeedbackLoop: {
+      route: "/api/harness-dashboard/v1/events",
+      events: ["harness.snapshot", "harness.changed", "harness.heartbeat", "harness.error"],
+      expectedLatency: "directory-watch immediate change event plus heartbeat hash fallback",
+    },
+  };
+}
+
 export function validateDashboardStateShape(
   value: unknown
 ): DashboardStateValidationResult {
@@ -756,6 +908,8 @@ export function validateDashboardStateShape(
   backfillSessionTraceability(root);
   backfillUserRealityCheck(root);
   backfillUserPerspectiveAudit(root);
+  backfillSemanticGovernance(root);
+  backfillAgentCommandBridge(root);
 
   const requiredTopLevelKeys = DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS;
 
@@ -833,6 +987,166 @@ export function validateDashboardStateShape(
     );
     requireStringField(errors, "dashboardState.domainOperations", domainOperations, "status");
     requireArray(errors, "dashboardState.domainOperations.programs", domainOperations.programs);
+  }
+
+  const semanticGovernance = requireObject(
+    errors,
+    "dashboardState.semanticGovernance",
+    root.semanticGovernance
+  );
+  if (semanticGovernance != null) {
+    requireStringField(errors, "dashboardState.semanticGovernance", semanticGovernance, "schemaVersion");
+    requireStringField(
+      errors,
+      "dashboardState.semanticGovernance",
+      semanticGovernance,
+      "semanticSchemaVersion"
+    );
+    requireStringField(errors, "dashboardState.semanticGovernance", semanticGovernance, "status");
+    requireStringField(errors, "dashboardState.semanticGovernance", semanticGovernance, "profileId");
+    requireStringField(errors, "dashboardState.semanticGovernance", semanticGovernance, "enforcementMode");
+    requireStringField(errors, "dashboardState.semanticGovernance", semanticGovernance, "unknownLayerMode");
+    const gate = requireObject(
+      errors,
+      "dashboardState.semanticGovernance.gate",
+      semanticGovernance.gate
+    );
+    if (gate != null) {
+      requireStringField(errors, "dashboardState.semanticGovernance.gate", gate, "verdict");
+      requireBooleanField(errors, "dashboardState.semanticGovernance.gate", gate, "canProceed");
+      requireStringField(errors, "dashboardState.semanticGovernance.gate", gate, "reason");
+    }
+    for (const [fieldName, requiredFields] of [
+      ["sourceGraph", ["path", "status", "expectedTool"]],
+      ["governanceEvaluation", ["path", "expectedTool", "verdict"]],
+      ["semanticWarehouse", ["path", "expectedTool", "status"]],
+      ["waiverGovernance", ["ledgerPath", "expectedTool", "status", "policy"]],
+      ["enforcement", ["reportPath", "expectedTool", "status"]],
+      ["policyPacks", ["guidePath", "status"]],
+    ] as const) {
+      const child = requireObject(
+        errors,
+        `dashboardState.semanticGovernance.${fieldName}`,
+        semanticGovernance[fieldName]
+      );
+      if (child != null) {
+        for (const requiredField of requiredFields) {
+          requireStringField(
+            errors,
+            `dashboardState.semanticGovernance.${fieldName}`,
+            child,
+            requiredField
+          );
+        }
+      }
+    }
+    const visualGraph = requireObject(
+      errors,
+      "dashboardState.semanticGovernance.visualGraph",
+      semanticGovernance.visualGraph
+    );
+    if (visualGraph != null) {
+      requireArray(errors, "dashboardState.semanticGovernance.visualGraph.nodes", visualGraph.nodes);
+      requireArray(errors, "dashboardState.semanticGovernance.visualGraph.edges", visualGraph.edges);
+      requireStringArrayField(errors, "dashboardState.semanticGovernance.visualGraph", visualGraph, "legend");
+    }
+    requireArray(errors, "dashboardState.semanticGovernance.commands", semanticGovernance.commands);
+    requireStringArrayField(errors, "dashboardState.semanticGovernance", semanticGovernance, "apiRoutes");
+    requireStringArrayField(errors, "dashboardState.semanticGovernance", semanticGovernance, "evidenceRefs");
+  }
+
+  const agentCommandBridge = requireObject(
+    errors,
+    "dashboardState.agentCommandBridge",
+    root.agentCommandBridge
+  );
+  if (agentCommandBridge != null) {
+    requireStringField(errors, "dashboardState.agentCommandBridge", agentCommandBridge, "schemaVersion");
+    requireStringField(errors, "dashboardState.agentCommandBridge", agentCommandBridge, "status");
+    requireStringField(errors, "dashboardState.agentCommandBridge", agentCommandBridge, "executionMode");
+    requireBooleanField(
+      errors,
+      "dashboardState.agentCommandBridge",
+      agentCommandBridge,
+      "dashboardDoesNotRunTools"
+    );
+    requireBooleanField(
+      errors,
+      "dashboardState.agentCommandBridge",
+      agentCommandBridge,
+      "requiresAgentExecution"
+    );
+    requireStringField(errors, "dashboardState.agentCommandBridge", agentCommandBridge, "policy");
+    requireStringField(errors, "dashboardState.agentCommandBridge", agentCommandBridge, "inboxPath");
+    requireStringField(errors, "dashboardState.agentCommandBridge", agentCommandBridge, "outboxPath");
+    const channelModel = requireObject(
+      errors,
+      "dashboardState.agentCommandBridge.channelModel",
+      agentCommandBridge.channelModel
+    );
+    if (channelModel != null) {
+      requireStringField(
+        errors,
+        "dashboardState.agentCommandBridge.channelModel",
+        channelModel,
+        "humanToAgent"
+      );
+      requireStringField(
+        errors,
+        "dashboardState.agentCommandBridge.channelModel",
+        channelModel,
+        "agentToHuman"
+      );
+      requireStringField(
+        errors,
+        "dashboardState.agentCommandBridge.channelModel",
+        channelModel,
+        "readOnlyBoundary"
+      );
+    }
+    const commandPacketSchema = requireObject(
+      errors,
+      "dashboardState.agentCommandBridge.commandPacketSchema",
+      agentCommandBridge.commandPacketSchema
+    );
+    if (commandPacketSchema != null) {
+      requireStringArrayField(
+        errors,
+        "dashboardState.agentCommandBridge.commandPacketSchema",
+        commandPacketSchema,
+        "required"
+      );
+    }
+    requireArray(
+      errors,
+      "dashboardState.agentCommandBridge.suggestedCommands",
+      agentCommandBridge.suggestedCommands
+    );
+    const sseFeedbackLoop = requireObject(
+      errors,
+      "dashboardState.agentCommandBridge.sseFeedbackLoop",
+      agentCommandBridge.sseFeedbackLoop
+    );
+    if (sseFeedbackLoop != null) {
+      requireStringField(
+        errors,
+        "dashboardState.agentCommandBridge.sseFeedbackLoop",
+        sseFeedbackLoop,
+        "route"
+      );
+      requireStringArrayField(
+        errors,
+        "dashboardState.agentCommandBridge.sseFeedbackLoop",
+        sseFeedbackLoop,
+        "events"
+      );
+      requireStringField(
+        errors,
+        "dashboardState.agentCommandBridge.sseFeedbackLoop",
+        sseFeedbackLoop,
+        "expectedLatency"
+      );
+    }
   }
 
   const realityModel = requireObject(

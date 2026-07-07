@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -16,6 +17,13 @@ const formSchemaModule = await import("../dist/tools/form-schema.js");
 const serverFlowDashboardModule = await import("../dist/generators/server-flow-dashboard.js");
 const agentSkillsRegistryModule = await import("../dist/data/agent-skills-registry.js");
 const agentSkillsGeneratorModule = await import("../dist/generators/agent-skills.js");
+const semanticGovernanceModule = await import("../dist/tools/semantic-governance.js");
+const semanticWarehouseModule = await import("../dist/tools/semantic-warehouse.js");
+const semanticWaiversModule = await import("../dist/tools/semantic-waivers.js");
+const semanticEnforcementModule = await import("../dist/tools/semantic-enforcement.js");
+const semanticPolicyPacksModule = await import("../dist/tools/semantic-policy-packs.js");
+const safeWorkspaceWriteModule = await import("../dist/tools/safe-workspace-write.js");
+const governanceApprovalModule = await import("../dist/tools/governance-approval.js");
 
 const { collectFiles, buildSummary } = initModule;
 const { validateWorkspace } = validateModule;
@@ -36,6 +44,29 @@ const { buildInitFormSchema } = formSchemaModule;
 const { generateServerFlowDashboardFiles } = serverFlowDashboardModule;
 const { recommendAgentSkills, SKILL_REGISTRY, AGENT_REGISTRY } = agentSkillsRegistryModule;
 const { generateSelectedSkills } = agentSkillsGeneratorModule;
+const {
+  scanSourceGraph,
+  validateSemanticGovernance,
+  buildSemanticContextPack,
+} = semanticGovernanceModule;
+const {
+  buildSemanticWarehouse,
+  querySemanticWarehouse,
+} = semanticWarehouseModule;
+const {
+  buildWaiverApprovalEvidenceDigest,
+  buildWaiverApprovalPayload,
+  buildWaiverRevocationPayload,
+  validateArchitectureWaivers,
+} = semanticWaiversModule;
+const { runSemanticEnforcement } = semanticEnforcementModule;
+const {
+  buildPolicyPackApprovalPayload,
+  exportArchitecturePolicyPack,
+  importArchitecturePolicyPack,
+} = semanticPolicyPacksModule;
+const { writeContainedTextAtomic } = safeWorkspaceWriteModule;
+const { stableSerialize } = governanceApprovalModule;
 const packageJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf-8"));
 const CURRENT_VERSION = packageJson.version;
 const EXPECTED_USER_REALITY_PROGRESS_STAGES = [
@@ -48,6 +79,33 @@ const EXPECTED_USER_REALITY_PROGRESS_STAGES = [
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+{
+  const root = createWorkspace();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-init-mcp-outside-"));
+  const linked = path.join(root, "linked-outside");
+  let symlinkCreated = false;
+  try {
+    fs.symlinkSync(outside, linked, "junction");
+    symlinkCreated = true;
+  } catch {
+    symlinkCreated = false;
+  }
+
+  if (symlinkCreated) {
+    assert.throws(
+      () =>
+        writeContainedTextAtomic(
+          root,
+          path.join(linked, "escape.txt"),
+          "must not escape\n",
+          "utf-8"
+        ),
+      /symbolic link directory|escaped workspace/
+    );
+    assert.equal(fs.existsSync(path.join(outside, "escape.txt")), false);
+  }
 }
 
 {
@@ -110,6 +168,91 @@ function generateWorkspace() {
 
 function readJson(root, relativePath) {
   return JSON.parse(fs.readFileSync(path.join(root, relativePath), "utf-8"));
+}
+
+function fileSha256(fullPath) {
+  return createHash("sha256").update(fs.readFileSync(fullPath)).digest("hex");
+}
+
+function createGovernanceTrust(root, reviewerId = "principal-architect") {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
+  fs.mkdirSync(path.join(root, ".github", "ai-harness"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".github", "ai-harness", "governance-trust.json"),
+    JSON.stringify(
+      {
+        schemaVersion: "1.0.0",
+        generatedAt: "test",
+        reviewers: [
+          {
+            id: reviewerId,
+            status: "active",
+            publicKeyPem,
+          },
+        ],
+      },
+      null,
+      2
+    ) + "\n",
+    "utf-8"
+  );
+  fs.mkdirSync(path.join(root, "docs", "ai-harness", "ontology", "state"), {
+    recursive: true,
+  });
+  fs.writeFileSync(
+    path.join(root, "docs", "ai-harness", "ontology", "state", "waiver-revocations.json"),
+    JSON.stringify(
+      {
+        schemaVersion: "1.0.0",
+        generatedAt: "test",
+        policy: "Signed revocation receipts override active waiver approvals.",
+        revocations: [],
+      },
+      null,
+      2
+    ) + "\n",
+    "utf-8"
+  );
+  return { reviewerId, privateKey };
+}
+
+function signGovernancePayload(privateKey, payload) {
+  return `ed25519:${sign(
+    null,
+    Buffer.from(stableSerialize(payload), "utf-8"),
+    privateKey
+  ).toString("base64")}`;
+}
+
+function runGit(root, args) {
+  const result = spawnSync("git", args, {
+    cwd: root,
+    encoding: "utf-8",
+    windowsHide: true,
+  });
+  assert.equal(
+    result.status,
+    0,
+    `git ${args.join(" ")} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
+  );
+}
+
+function signedWaiver(root, trust, waiver) {
+  const approvalReady = {
+    ...waiver,
+    approvedBy: trust.reviewerId,
+    approvalSignature: "",
+  };
+  const evidenceDigest = buildWaiverApprovalEvidenceDigest(root, approvalReady);
+  assert.deepEqual(evidenceDigest.errors, []);
+  return {
+    ...approvalReady,
+    approvalSignature: signGovernancePayload(
+      trust.privateKey,
+      buildWaiverApprovalPayload(approvalReady, evidenceDigest)
+    ),
+  };
 }
 
 function runNode(args, options = {}) {
@@ -179,6 +322,7 @@ async function terminateProcess(childProcess) {
 async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   return await new Promise((resolve, reject) => {
     const request = http.get(endpoint);
+    let buffer = "";
     const timer = setTimeout(() => {
       request.destroy();
       reject(new Error(`Timed out waiting for ${eventName}`));
@@ -187,11 +331,16 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     request.on("response", (response) => {
       response.setEncoding("utf-8");
       response.on("data", (chunk) => {
-        const text = String(chunk);
-        if (text.includes(`event: ${eventName}`)) {
-          clearTimeout(timer);
-          request.destroy();
-          resolve(text);
+        buffer += String(chunk);
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+        for (const text of parts) {
+          if (text.includes(`event: ${eventName}`)) {
+            clearTimeout(timer);
+            request.destroy();
+            resolve(text);
+            return;
+          }
         }
       });
     });
@@ -235,11 +384,52 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     "docs/ai-harness/dashboard/state/design-profile.json",
     "docs/ai-harness/dashboard/backend-app-blueprint.html",
     "docs/context/context-index.md",
+    ".github/ai-harness/architecture-ontology.policy.json",
+    "docs/ai-harness/ontology/README.md",
+    "docs/ai-harness/ontology/policy-authoring.md",
+    "docs/ai-harness/ontology/prompt-templates/semantic-context-pack.md",
+    "docs/ai-harness/ontology/policy-packs/README.md",
+    "docs/ai-harness/ontology/architecture-profiles.catalog.json",
+    "docs/ai-harness/ontology/schemas/architecture-ontology.schema.json",
+    "docs/ai-harness/ontology/schemas/source-graph.schema.json",
+    "docs/ai-harness/ontology/schemas/governance-evaluation.schema.json",
+    "docs/ai-harness/ontology/schemas/bypass-ledger.schema.json",
+    "docs/ai-harness/ontology/schemas/semantic-warehouse.schema.json",
+    "docs/ai-harness/ontology/schemas/waiver-validation.schema.json",
+    "docs/ai-harness/ontology/schemas/enforcement-report.schema.json",
+    "docs/ai-harness/ontology/schemas/policy-pack.schema.json",
+    "docs/ai-harness/ontology/state/source-graph.json",
+    "docs/ai-harness/ontology/state/governance-evaluation.json",
+    "docs/ai-harness/ontology/state/semantic-warehouse.json",
+    "docs/ai-harness/ontology/state/waiver-validation.json",
+    "docs/ai-harness/ontology/state/enforcement-report.json",
+    "docs/ai-harness/ontology/state/enforcement-report.md",
+    "docs/ai-harness/ontology/policy-packs/import-review.example.json",
+    "docs/ai-harness/ontology/state/bypass-ledger.json",
+    "docs/ai-harness/ontology/state/context-pack.example.json",
   ]) {
     assert.ok(byPath.has(requiredPath), `${requiredPath} should be generated`);
   }
 
   const state = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+  const architectureProfileCatalog = JSON.parse(
+    byPath.get("docs/ai-harness/ontology/architecture-profiles.catalog.json").content
+  );
+  assert.ok(architectureProfileCatalog.profiles.some((profile) => profile.profileId === "clean"));
+  assert.ok(architectureProfileCatalog.profiles.some((profile) => profile.profileId === "hexagonal"));
+  assert.ok(architectureProfileCatalog.profiles.some((profile) => profile.profileId === "ddd"));
+  assert.ok(architectureProfileCatalog.profiles.some((profile) => profile.profileId === "event-driven"));
+  assert.match(byPath.get("docs/ai-harness/ontology/policy-authoring.md").content, /Source comments may reference waiver ids only/);
+  assert.match(byPath.get("docs/ai-harness/ontology/prompt-templates/semantic-context-pack.md").content, /Authority order/);
+  assert.match(byPath.get("docs/ai-harness/ontology/policy-packs/README.md").content, /No automatic central upload/);
+  assert.match(byPath.get("docs/ai-harness/ontology/state/enforcement-report.md").content, /CI\/PR-ready report/);
+  const enforcementReport = JSON.parse(byPath.get("docs/ai-harness/ontology/state/enforcement-report.json").content);
+  assert.equal(enforcementReport.optInOnly, true);
+  assert.equal(enforcementReport.gate, "disabled");
+  const policyPackSchema = JSON.parse(byPath.get("docs/ai-harness/ontology/schemas/policy-pack.schema.json").content);
+  assert.ok(policyPackSchema.required.includes("trust"));
+  const policyPackReview = JSON.parse(byPath.get("docs/ai-harness/ontology/policy-packs/import-review.example.json").content);
+  assert.equal(policyPackReview.applied, false);
   const dashboardStateSchema = JSON.parse(
     byPath.get("docs/ai-harness/dashboard/state/dashboard-state.schema.json").content
   );
@@ -261,18 +451,49 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.trustReadinessBrief.properties.evidenceChecks);
   assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.trustReadinessBrief.properties.routeContracts);
   assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.progressFlow);
+  assert.ok(dashboardStateSchema.properties.semanticGovernance.properties.visualGraph);
+  assert.ok(dashboardStateSchema.properties.semanticGovernance.properties.commands);
+  assert.ok(dashboardStateSchema.properties.semanticGovernance.required.includes("semanticWarehouse"));
+  assert.ok(dashboardStateSchema.properties.semanticGovernance.required.includes("waiverGovernance"));
+  assert.ok(dashboardStateSchema.properties.semanticGovernance.required.includes("enforcement"));
+  assert.ok(dashboardStateSchema.properties.agentCommandBridge.properties.sseFeedbackLoop);
+  assert.ok(dashboardStateSchema.properties.agentCommandBridge.properties.suggestedCommands);
+  assert.ok(dashboardStateSchema.properties.agentCommandBridge.required.includes("commandPacketSchema"));
+  assert.ok(dashboardStateSchema.properties.agentCommandBridge.required.includes("dashboardDoesNotRunTools"));
   for (const key of DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS) {
     assert.ok(key in state, `dashboard-state.json should include ${key}`);
   }
   assert.equal(state.meta.schemaVersion, CURRENT_VERSION);
+  assert.ok(state.semanticGovernance);
+  assert.equal(state.semanticGovernance.schemaVersion, CURRENT_VERSION);
+  assert.ok(state.semanticGovernance.profileId);
+  assert.ok(state.semanticGovernance.visualGraph.nodes.length > 0);
+  assert.ok(state.semanticGovernance.visualGraph.edges.length > 0);
+  assert.ok(state.semanticGovernance.apiRoutes.includes("/api/harness-dashboard/v1/query?scope=architecture&q=governance"));
+  assert.ok(state.semanticGovernance.apiRoutes.includes("/api/harness-dashboard/v1/architecture"));
+  assert.ok(state.agentCommandBridge);
+  assert.equal(state.agentCommandBridge.status, "draft-only-read-only");
+  assert.equal(state.agentCommandBridge.executionMode, "draft-only");
+  assert.equal(state.agentCommandBridge.dashboardDoesNotRunTools, true);
+  assert.equal(state.agentCommandBridge.requiresAgentExecution, true);
+  assert.match(state.agentCommandBridge.policy, /never runs tools/);
+  assert.ok(state.agentCommandBridge.suggestedCommands.length >= 3);
+  assert.ok(state.agentCommandBridge.suggestedCommands.every((item) => /^Draft request:/.test(item.label)));
+  assert.match(state.agentCommandBridge.sseFeedbackLoop.expectedLatency, /immediate/);
   assert.equal(state.projectWorldModel.mission.statement, params.purpose);
   const legacyShape = JSON.parse(JSON.stringify(state));
   delete legacyShape.projectionConfidence;
   delete legacyShape.sessionTraceability;
   delete legacyShape.userRealityCheck;
+  delete legacyShape.semanticGovernance;
+  delete legacyShape.agentCommandBridge;
   const legacyShapeValidation = validateDashboardStateShape(legacyShape);
   assert.equal(legacyShapeValidation.valid, true, legacyShapeValidation.errors.join("\n"));
   assert.equal(legacyShape.projectionConfidence.status, "projection-debt");
+  assert.equal(legacyShape.semanticGovernance.status, "legacy-backfill-pending-scan");
+  assert.equal(legacyShape.semanticGovernance.gate.canProceed, false);
+  assert.equal(legacyShape.agentCommandBridge.executionMode, "draft-only");
+  assert.equal(legacyShape.agentCommandBridge.dashboardDoesNotRunTools, true);
   assert.equal(legacyShape.sessionTraceability.status, "trace-debt");
   assert.equal(legacyShape.sessionTraceability.entries[0].traceIntegrity.status, "complete");
   assert.equal(legacyShape.sessionTraceability.entries[0].traceSource, "recorded-event");
@@ -376,6 +597,16 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     item.route === "/api/harness-dashboard/v1/reality-check" &&
     item.expectedPayloadKeys.includes("userRealityCheck")
   ));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.routeContracts.some((item) =>
+    item.route === "/api/harness-dashboard/v1/architecture" &&
+    item.expectedPayloadKeys.includes("semanticGovernance") &&
+    item.expectedPayloadKeys.includes("agentCommandBridge")
+  ));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.routeContracts.some((item) =>
+    item.route === "/api/harness-dashboard/v1/agent-bridge" &&
+    item.expectedPayloadKeys.includes("agentCommandBridge") &&
+    item.expectedPayloadKeys.includes("agentResumeBrief")
+  ));
   assert.equal(Array.isArray(state.userRealityCheck.trustReadinessBrief.questions), true);
   assert.equal(state.userRealityCheck.trustReadinessBrief.questions.length >= 5, true);
   assert.ok(state.userRealityCheck.trustReadinessBrief.questions.every((item) =>
@@ -395,6 +626,8 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.equal(typeof state.userRealityCheck.trustReadinessBrief.commands?.length, "number");
   assert.ok(state.userRealityCheck.trustReadinessBrief.commands.length > 0);
   assert.ok(state.userRealityCheck.trustReadinessBrief.apiRouteChips.includes("/api/harness-dashboard/v1/reality-check"));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.apiRouteChips.includes("/api/harness-dashboard/v1/architecture"));
+  assert.ok(state.userRealityCheck.trustReadinessBrief.apiRouteChips.includes("/api/harness-dashboard/v1/agent-bridge"));
   assert.ok(state.userRealityCheck.actionPlan.length >= 6);
   assert.ok(Array.isArray(state.userRealityCheck.nextActionRunway));
   assert.equal(state.userRealityCheck.nextActionRunway.length >= 4, true);
@@ -502,6 +735,11 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     item.successSignal
   ));
   assert.ok(state.dashboardQualityScorecard.userPerspectiveAudit.apiRouteChips.includes("/api/harness-dashboard/v1/reality-check"));
+  assert.ok(state.dashboardQualityScorecard.userPerspectiveAudit.dimensions.some((item) =>
+    item.id === "listener-api-usefulness" &&
+    item.apiRouteChips.includes("/api/harness-dashboard/v1/architecture") &&
+    item.apiRouteChips.includes("/api/harness-dashboard/v1/agent-bridge")
+  ));
   assert.ok(state.decisionContracts.some((decision) => decision.id === "decision-agent-platform-selection"));
   assert.ok(state.governanceEvidenceBrief.unresolvedDecisions.includes("decision-agent-platform-selection"));
   assert.ok(state.agentResumeBrief.governanceOnlyDecisions.includes("decision-agent-platform-selection"));
@@ -697,6 +935,31 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(html, /Tech Stack/);
   assert.match(html, /Project Composition/);
   assert.match(html, /Architecture Map/);
+  assert.match(html, /Semantic Governance Cockpit/);
+  assert.match(html, /Architecture Layer Map/);
+  assert.match(html, /Agent Command Bridge/);
+  assert.match(html, /view-architecture/);
+  assert.match(html, /data-agent-command-build/);
+  assert.match(html, /Build draft packet/);
+  assert.match(html, /Copy draft for Agent/);
+  assert.match(html, /query\?scope=architecture/);
+  assert.match(html, /rule-flow-map/);
+  assert.match(html, /architectureRuleFlowMap/);
+  assert.match(html, /role="status" aria-live="polite" aria-atomic="true"/);
+  assert.match(html, /id="agent-command-preview" aria-label="Agent command draft packet" tabindex="0"/);
+  assert.match(html, /executionMode/);
+  assert.match(html, /dashboardDoesNotRunTools/);
+  assert.match(html, /sourceStateHash/);
+  assert.ok(html.includes('selectedRoute.startsWith("/api/harness-dashboard/v1/")'));
+  assert.match(html, /apiLookupRejected/);
+  assert.match(html, /eventSource/);
+  assert.match(html, /prefers-reduced-motion: reduce/);
+  assert.match(html, /matchMedia\("\(prefers-reduced-motion: reduce\)"\)/);
+  assert.match(html, /Primary system/);
+  assert.doesNotMatch(html, /GitHub Pages target if approved/);
+  assert.doesNotMatch(html, /project Supabase plan, if present/);
+  assert.doesNotMatch(html, /supabase\/\*\.sql/);
+  assert.match(html, /\.command-composer select, \.command-composer textarea \{ width: 100%; min-width: 0; max-width: 100%; \}/);
   assert.doesNotMatch(html, /Task Flow/);
   assert.doesNotMatch(html, /query-box/);
   assert.match(html, /Timeline range/);
@@ -770,8 +1033,1256 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(summary, /ensure-listening/);
 
   const validation = validateWorkspace(root);
-  assert.equal(validation.isInitialized, true);
-  assert.equal(validation.completeness, 100);
+  assert.equal(validation.isInitialized, false);
+  assert.equal(validation.completeness < 100, true);
+  const semanticProjectionItems = validation.items.filter((item) =>
+    item.path.startsWith("docs/ai-harness/ontology/state/") &&
+    [
+      "source-graph.json",
+      "governance-evaluation.json",
+      "semantic-warehouse.json",
+      "waiver-validation.json",
+      "enforcement-report.json",
+    ].some((fileName) => item.path.endsWith(fileName))
+  );
+  assert.equal(semanticProjectionItems.length, 5);
+  assert.ok(semanticProjectionItems.every((item) => item.status === "outdated"));
+  assert.match(validation.summary, /Bootstrap-only semantic projection|Semantic warehouse has no fact rows/);
+
+  const generatedWarehouse = buildSemanticWarehouse({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    maxFiles: 1,
+  });
+  assert.ok(generatedWarehouse.views.claims.some((row) => row.claimId === "claim.data.integrity"));
+  assert.ok(generatedWarehouse.views.completedFacts.some((row) => row.rowType === "completedSessionTrace"));
+  assert.ok(generatedWarehouse.views.claims.every((row) => row.sourceRefs.includes("docs/ai-harness/dashboard/state/dashboard-state.json")));
+  assert.ok(generatedWarehouse.views.completedFacts.every((row) => row.sourceRefs.includes("docs/ai-harness/dashboard/state/dashboard-state.json")));
+}
+
+{
+  const { root } = generateWorkspace();
+  fs.rmSync(path.join(root, "docs", "ai-harness", "ontology"), {
+    recursive: true,
+    force: true,
+  });
+  fs.rmSync(path.join(root, ".github", "ai-harness", "architecture-ontology.policy.json"), {
+    force: true,
+  });
+  const validation = validateWorkspace(root);
+  assert.equal(validation.isInitialized, false);
+  assert.ok(validation.completeness < 100);
+  assert.ok(validation.items.some((item) =>
+    item.path === ".github/ai-harness/architecture-ontology.policy.json" &&
+    item.status === "missing" &&
+    item.severity === "required"
+  ));
+  assert.ok(validation.items.some((item) =>
+    item.path === "docs/ai-harness/ontology/state/governance-evaluation.json" &&
+    item.status === "missing"
+  ));
+}
+
+{
+  const root = createWorkspace();
+  fs.mkdirSync(path.join(root, "src", "controllers"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src", "data"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src", "services"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "src", "data", "UserRepository.ts"),
+    "export class UserRepository { findUser(id: string) { return { id }; } }\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "services", "UserService.ts"),
+    [
+      "import { UserRepository } from '../data/UserRepository.js';",
+      "export class UserService {",
+      "  constructor(private readonly repository = new UserRepository()) {}",
+      "  find(id: string) { return this.repository.findUser(id); }",
+      "}",
+      "",
+    ].join("\n"),
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "controllers", "UserController.ts"),
+    [
+      "import { UserRepository } from '../data/UserRepository.js';",
+      "export class UserController {",
+      "  async handler(id: string) {",
+      "    await import('../services/UserService.js');",
+      "    return new UserRepository().findUser(id);",
+      "  }",
+      "}",
+      "",
+    ].join("\n"),
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "controllers", "AdminController.ts"),
+    [
+      "import { UserRepository } from '../data/UserRepository.js';",
+      "export class AdminController {",
+      "  handler(id: string) {",
+      "    return new UserRepository().findUser(id);",
+      "  }",
+      "}",
+      "",
+    ].join("\n"),
+    "utf-8"
+  );
+
+  const graph = scanSourceGraph({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+  });
+  assert.ok(graph.files.some((file) => file.path === "src/controllers/UserController.ts"));
+  assert.ok(graph.files.some((file) => file.layer === "data-access"));
+  assert.ok(graph.edges.some((edge) =>
+    edge.fromLayer === "presentation" &&
+    edge.toLayer === "data-access" &&
+    edge.kind === "imports"
+  ));
+
+  const evaluation = validateSemanticGovernance({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+  });
+  assert.equal(evaluation.verdict, "block");
+  assert.ok(evaluation.violations.some((violation) =>
+    violation.ruleId === "n-tier.presentation-must-not-import-data-access" &&
+    violation.sourcePath === "src/controllers/UserController.ts"
+  ));
+
+  const pack = buildSemanticContextPack({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+    tokenBudget: "balanced",
+  });
+  const packAgain = buildSemanticContextPack({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+    tokenBudget: "balanced",
+  });
+  const leanPack = buildSemanticContextPack({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+    tokenBudget: "lean",
+  });
+  assert.equal(pack.verdict, "block");
+  assert.equal(packAgain.contentHash, pack.contentHash);
+  assert.equal(pack.compression.advisoryCompressionOnly, true);
+  assert.equal(pack.compression.authority, "exact-graph-policy-receipts");
+  assert.equal(leanPack.compression.maxFindings < pack.compression.maxFindings, true);
+  assert.match(pack.promptTemplate, /exact source graph/);
+  assert.ok(pack.sourceRefs.includes(".github/ai-harness/architecture-ontology.policy.json"));
+  assert.ok(pack.sourceRefs.includes("src/controllers/UserController.ts"));
+  assert.match(JSON.stringify(pack.jsonLd), /DependencyEdge/);
+  assert.ok(pack.ruleFacts.some((fact) => fact.ruleId === "n-tier.presentation-must-not-import-data-access"));
+  assert.ok(pack.antiPatterns.some((pattern) =>
+    pattern.ruleId === "n-tier.presentation-must-not-import-data-access" &&
+    pattern.occurrenceCount > 1 &&
+    /Repeated/.test(pattern.attentionPrompt)
+  ));
+  assert.ok(pack.quantizedSignatures.length > 0);
+  assert.ok(pack.quantizedSignatures.every((signature) =>
+    signature.advisoryOnly === true &&
+    Array.isArray(signature.sourceRefs) &&
+    signature.sourceRefs.length > 0
+  ));
+  assert.ok(pack.spatialMaps.some((map) => map.includes("[LAYER MAP]")));
+
+  const warehouse = buildSemanticWarehouse({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+  });
+  assert.ok(warehouse.viewSummaries.some((view) => view.view === "files" && view.rowCount > 0));
+  assert.ok(warehouse.viewSummaries.some((view) => view.view === "dependencyEdges" && view.rowCount > 0));
+  assert.ok(warehouse.viewSummaries.some((view) => view.view === "rules" && view.rowCount > 0));
+  assert.ok(warehouse.viewSummaries.some((view) => view.view === "violations" && view.rowCount > 0));
+  const allWarehouseRows = Object.values(warehouse.views).flat();
+  assert.ok(allWarehouseRows.length > 0);
+  assert.ok(allWarehouseRows.every((row) =>
+    row.id &&
+    row.rowType &&
+    Array.isArray(row.sourceRefs) &&
+    row.sourceRefs.length > 0 &&
+    row.provenance &&
+    Array.isArray(row.provenance.sourceRefs) &&
+    row.provenance.sourceRefs.length > 0
+  ));
+
+  const blockingQuery = querySemanticWarehouse({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+    queryId: "rules_blocking_file",
+    targetPath: "src/controllers/UserController.ts",
+  });
+  const blockingQueryAgain = querySemanticWarehouse({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+    queryId: "rules_blocking_file",
+    targetPath: "src/controllers/UserController.ts",
+  });
+  assert.deepEqual(blockingQueryAgain, blockingQuery, "semantic warehouse queries must be deterministic");
+  assert.ok(blockingQuery.rows.some((row) => row.ruleId === "n-tier.presentation-must-not-import-data-access"));
+  assert.ok(blockingQuery.sourceRefs.includes("src/controllers/UserController.ts"));
+
+  const edgeQuery = querySemanticWarehouse({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+    queryId: "dependency_edges_for_file",
+    targetPath: "src/controllers/UserController.ts",
+  });
+  assert.ok(edgeQuery.rows.some((row) => row.toPath === "src/data/UserRepository.ts"));
+
+  const controllerViolation = evaluation.violations.find((violation) =>
+    violation.ruleId === "n-tier.presentation-must-not-import-data-access" &&
+    violation.sourcePath === "src/controllers/UserController.ts"
+  );
+  assert.ok(controllerViolation);
+  const trust = createGovernanceTrust(root);
+  runGit(root, ["init"]);
+  runGit(root, ["config", "user.email", "harness@example.invalid"]);
+  runGit(root, ["config", "user.name", "Harness Test"]);
+  runGit(root, [
+    "add",
+    ".github/ai-harness/governance-trust.json",
+    "docs/ai-harness/ontology/state/waiver-revocations.json",
+  ]);
+  runGit(root, ["commit", "-m", "anchor empty waiver revocations"]);
+  fs.mkdirSync(path.join(root, "docs", "decisions"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs", "ai-harness", "ontology", "state"), { recursive: true });
+  fs.appendFileSync(
+    path.join(root, "src", "controllers", "UserController.ts"),
+    "\n// semantic-waiver: waiver.valid.001\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "docs", "decisions", "waiver-valid.md"),
+    "# Valid waiver evidence\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "docs", "decisions", "waiver-valid-approval.md"),
+    "# Valid waiver approval\n",
+    "utf-8"
+  );
+  const validWaiver = signedWaiver(root, trust, {
+    id: "waiver.valid.001",
+    ruleId: controllerViolation.ruleId,
+    edgeFingerprint: controllerViolation.fingerprint,
+    owner: "architecture-owner",
+    approvalRef: "docs/decisions/waiver-valid-approval.md",
+    status: "active",
+    createdAt: "2026-07-01T00:00:00.000Z",
+    expiresAt: "2026-07-15T00:00:00.000Z",
+    evidenceRefs: ["docs/decisions/waiver-valid.md"],
+    maxUses: 1,
+    rationale: "Temporary fixture exception with exact fingerprint.",
+  });
+  fs.writeFileSync(
+    path.join(root, "docs", "ai-harness", "ontology", "state", "bypass-ledger.json"),
+    JSON.stringify(
+      {
+        schemaVersion: "1.0.0",
+        generatedAt: "test",
+        policy: "Source comments reference waiver ids only.",
+        waivers: [validWaiver],
+      },
+      null,
+      2
+    ) + "\n",
+    "utf-8"
+  );
+  const validWaiverValidation = validateArchitectureWaivers({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+    now: "2026-07-08T00:00:00.000Z",
+  });
+  assert.equal(validWaiverValidation.verdict, "allow");
+  assert.equal(validWaiverValidation.metrics.validWaivers, 1);
+  assert.ok(validWaiverValidation.findings.some((finding) =>
+    finding.status === "valid" &&
+    finding.waiverId === "waiver.valid.001" &&
+    finding.edgeFingerprint === controllerViolation.fingerprint
+  ));
+
+  const revocation = {
+    id: "waiver-revocation.valid.001",
+    waiverId: "waiver.valid.001",
+    ruleId: controllerViolation.ruleId,
+    edgeFingerprint: controllerViolation.fingerprint,
+    revokedBy: trust.reviewerId,
+    revokedAt: "2026-07-09T00:00:00.000Z",
+    reason: "Regression fixture revocation.",
+    revocationSignature: "",
+  };
+  const signedRevocation = {
+    ...revocation,
+    revocationSignature: signGovernancePayload(
+      trust.privateKey,
+      buildWaiverRevocationPayload(revocation)
+    ),
+  };
+  fs.writeFileSync(
+    path.join(root, "docs", "ai-harness", "ontology", "state", "waiver-revocations.json"),
+    JSON.stringify(
+      {
+        schemaVersion: "1.0.0",
+        generatedAt: "test",
+        policy: "Signed revocation receipts override active waiver approvals.",
+        revocations: [signedRevocation],
+      },
+      null,
+      2
+    ) + "\n",
+    "utf-8"
+  );
+  const revokedWaiverValidation = validateArchitectureWaivers({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+    now: "2026-07-10T00:00:00.000Z",
+  });
+  assert.equal(revokedWaiverValidation.verdict, "block");
+  assert.equal(revokedWaiverValidation.metrics.validWaivers, 0);
+  assert.ok(revokedWaiverValidation.findings.some((finding) =>
+    finding.waiverId === "waiver.valid.001" &&
+    /trusted signed revocation/.test(finding.message)
+  ));
+
+  runGit(root, ["add", "docs/ai-harness/ontology/state/waiver-revocations.json"]);
+  runGit(root, ["commit", "-m", "anchor signed waiver revocation"]);
+  fs.writeFileSync(
+    path.join(root, "docs", "ai-harness", "ontology", "state", "waiver-revocations.json"),
+    JSON.stringify(
+      {
+        schemaVersion: "1.0.0",
+        generatedAt: "test",
+        policy: "Signed revocation receipts override active waiver approvals.",
+        revocations: [],
+      },
+      null,
+      2
+    ) + "\n",
+    "utf-8"
+  );
+  runGit(root, ["add", "docs/ai-harness/ontology/state/waiver-revocations.json"]);
+  runGit(root, ["commit", "-m", "attempt waiver revocation rollback"]);
+  const rollbackValidation = validateArchitectureWaivers({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+    now: "2026-07-10T00:00:00.000Z",
+  });
+  assert.equal(rollbackValidation.verdict, "block");
+  assert.equal(rollbackValidation.metrics.validWaivers, 0);
+  assert.ok(rollbackValidation.findings.some((finding) =>
+    finding.waiverId === "waiver.valid.001" &&
+    /append-only/.test(finding.message)
+  ));
+}
+
+{
+  const root = createWorkspace();
+  fs.mkdirSync(path.join(root, "docs", "ai-harness", "ontology", "state"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs", "decisions"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "docs", "decisions", "adr-1.md"),
+    "# ADR 1\n\nWaiver evidence.\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "docs", "ai-harness", "ontology", "state", "bypass-ledger.json"),
+    JSON.stringify(
+      {
+        schemaVersion: "1.0.0",
+        generatedAt: "test",
+        policy: "test waiver ledger",
+        waivers: [
+          {
+            id: "waiver.test.001",
+            ruleId: "clean.application-must-not-import-infrastructure",
+            edgeFingerprint: "edge-fingerprint-test",
+            owner: "test-owner",
+            status: "active",
+            expiresAt: "2099-01-01",
+            evidenceRefs: ["docs/decisions/adr-1.md"],
+          },
+        ],
+      },
+      null,
+      2
+    ) + "\n",
+    "utf-8"
+  );
+  const waiverQuery = querySemanticWarehouse({
+    workspacePath: root,
+    architectureProfile: "clean",
+    strictUnknown: true,
+    queryId: "evidence_for_waiver",
+    waiverId: "waiver.test.001",
+  });
+  assert.equal(waiverQuery.rowCount >= 2, true);
+  assert.ok(waiverQuery.rows.some((row) => row.rowType === "waiver" && row.waiverId === "waiver.test.001"));
+  assert.ok(waiverQuery.rows.some((row) => row.rowType === "evidenceRef" && row.ref === "docs/decisions/adr-1.md"));
+  assert.ok(waiverQuery.sourceRefs.includes("docs/ai-harness/ontology/state/bypass-ledger.json"));
+  assert.ok(waiverQuery.sourceRefs.includes("docs/decisions/adr-1.md"));
+}
+
+{
+  const root = createWorkspace();
+  fs.mkdirSync(path.join(root, "src", "controllers"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src", "data"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs", "decisions"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs", "ai-harness", "ontology", "state"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "src", "data", "UserRepository.ts"),
+    "export class UserRepository {}\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "controllers", "SelfAuthorizingController.ts"),
+    [
+      "import { UserRepository } from '../data/UserRepository.js';",
+      "// semantic-waiver: waiver.self.001 allow bypass",
+      "export class SelfAuthorizingController { repo = new UserRepository(); }",
+      "",
+    ].join("\n"),
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "controllers", "UnknownWaiverController.ts"),
+    [
+      "import { UserRepository } from '../data/UserRepository.js';",
+      "// semantic-waiver: waiver.unknown.404",
+      "export class UnknownWaiverController { repo = new UserRepository(); }",
+      "",
+    ].join("\n"),
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "docs", "decisions", "waiver-expired.md"),
+    "# Expired waiver evidence\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "docs", "decisions", "waiver-mismatch.md"),
+    "# Mismatch waiver evidence\n",
+    "utf-8"
+  );
+  const negativeEvaluation = validateSemanticGovernance({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+  });
+  const negativeViolation = negativeEvaluation.violations.find((violation) =>
+    violation.ruleId === "n-tier.presentation-must-not-import-data-access"
+  );
+  assert.ok(negativeViolation);
+  fs.writeFileSync(
+    path.join(root, "docs", "ai-harness", "ontology", "state", "bypass-ledger.json"),
+    JSON.stringify(
+      {
+        schemaVersion: "1.0.0",
+        generatedAt: "test",
+        policy: "Source comments reference waiver ids only.",
+        waivers: [
+          {
+            id: "waiver.self.001",
+            ruleId: negativeViolation.ruleId,
+            edgeFingerprint: negativeViolation.fingerprint,
+            owner: "architecture-owner",
+            status: "active",
+            createdAt: "2026-07-01T00:00:00.000Z",
+            expiresAt: "2026-07-15T00:00:00.000Z",
+            evidenceRefs: ["docs/decisions/waiver-expired.md"],
+            maxUses: 1,
+            rationale: "Self-authorizing comments must still fail.",
+          },
+          {
+            id: "waiver.expired.001",
+            ruleId: negativeViolation.ruleId,
+            edgeFingerprint: negativeViolation.fingerprint,
+            owner: "architecture-owner",
+            status: "active",
+            createdAt: "2020-01-01T00:00:00.000Z",
+            expiresAt: "2020-01-02T00:00:00.000Z",
+            evidenceRefs: ["docs/decisions/waiver-expired.md"],
+            maxUses: 1,
+            rationale: "Expired fixture.",
+          },
+          {
+            id: "waiver.mismatch.001",
+            ruleId: negativeViolation.ruleId,
+            edgeFingerprint: "not-the-edge-fingerprint",
+            owner: "architecture-owner",
+            status: "active",
+            createdAt: "2026-07-01T00:00:00.000Z",
+            expiresAt: "2026-07-15T00:00:00.000Z",
+            evidenceRefs: ["docs/decisions/waiver-mismatch.md"],
+            maxUses: 1,
+            rationale: "Mismatch fixture.",
+          },
+          {
+            id: "waiver.missing-evidence.001",
+            ruleId: negativeViolation.ruleId,
+            edgeFingerprint: negativeViolation.fingerprint,
+            owner: "architecture-owner",
+            status: "active",
+            createdAt: "2026-07-01T00:00:00.000Z",
+            expiresAt: "2026-07-15T00:00:00.000Z",
+            evidenceRefs: ["docs/decisions/missing.md"],
+            maxUses: 1,
+            rationale: "Missing evidence fixture.",
+          },
+        ],
+      },
+      null,
+      2
+    ) + "\n",
+    "utf-8"
+  );
+  const negativeWaiverValidation = validateArchitectureWaivers({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+    now: "2026-07-08T00:00:00.000Z",
+  });
+  assert.equal(negativeWaiverValidation.verdict, "block");
+  assert.ok(negativeWaiverValidation.findings.some((finding) => finding.status === "self-authorizing-comment"));
+  assert.ok(negativeWaiverValidation.findings.some((finding) => finding.status === "expired"));
+  assert.ok(negativeWaiverValidation.findings.some((finding) => finding.status === "fingerprint-mismatch"));
+  assert.ok(negativeWaiverValidation.findings.some((finding) => finding.status === "missing-evidence"));
+  assert.ok(negativeWaiverValidation.findings.some((finding) => finding.status === "unknown-reference"));
+
+  const negativeEnforcement = runSemanticEnforcement({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    enforcementMode: "strict",
+    strictUnknown: true,
+    now: "2026-07-08T00:00:00.000Z",
+  });
+  assert.equal(negativeEnforcement.gate, "fail");
+  assert.equal(negativeEnforcement.canProceed, false);
+  assert.equal(negativeEnforcement.metrics.waiverBlockFindings > 0, true);
+  assert.match(negativeEnforcement.markdown, /self-authorizing-comment/);
+}
+
+{
+  const root = createWorkspace();
+  fs.mkdirSync(path.join(root, "src", "controllers"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src", "data"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "src", "data", "UserRepository.ts"),
+    "export class UserRepository {}\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "controllers", "ReportOnlyController.ts"),
+    [
+      "import { UserRepository } from '../data/UserRepository.js';",
+      "export class ReportOnlyController {}",
+      "",
+    ].join("\n"),
+    "utf-8"
+  );
+
+  const reportMode = runSemanticEnforcement({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    enforcementMode: "report",
+    strictUnknown: true,
+    now: "2026-07-08T00:00:00.000Z",
+  });
+  assert.equal(reportMode.gate, "warn");
+  assert.equal(reportMode.canProceed, true);
+  assert.ok(reportMode.decisions.some((decision) => decision.status === "warn"));
+
+  const strictMode = runSemanticEnforcement({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    enforcementMode: "strict",
+    strictUnknown: true,
+    now: "2026-07-08T00:00:00.000Z",
+  });
+  assert.equal(strictMode.gate, "fail");
+  assert.equal(strictMode.canProceed, false);
+  assert.ok(strictMode.decisions.some((decision) => decision.status === "blocked"));
+}
+
+{
+  const root = createWorkspace();
+  fs.mkdirSync(path.join(root, "src", "controllers"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src", "data"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs", "decisions"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs", "ai-harness", "ontology", "state"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "src", "data", "UserRepository.ts"),
+    "export class UserRepository {}\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "controllers", "WaivedController.ts"),
+    [
+      "import { UserRepository } from '../data/UserRepository.js';",
+      "// semantic-waiver: waiver.enforcement.001",
+      "export class WaivedController {}",
+      "",
+    ].join("\n"),
+    "utf-8"
+  );
+  const evaluation = validateSemanticGovernance({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+  });
+  const violation = evaluation.violations.find((finding) =>
+    finding.ruleId === "n-tier.presentation-must-not-import-data-access"
+  );
+  assert.ok(violation);
+  const trust = createGovernanceTrust(root);
+  runGit(root, ["init"]);
+  runGit(root, ["config", "user.email", "harness@example.invalid"]);
+  runGit(root, ["config", "user.name", "Harness Test"]);
+  runGit(root, [
+    "add",
+    ".github/ai-harness/governance-trust.json",
+    "docs/ai-harness/ontology/state/waiver-revocations.json",
+  ]);
+  runGit(root, ["commit", "-m", "anchor empty waiver revocations"]);
+  fs.writeFileSync(
+    path.join(root, "docs", "decisions", "waiver-enforcement.md"),
+    "# Enforcement waiver evidence\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "docs", "decisions", "waiver-enforcement-approval.md"),
+    "# Enforcement waiver approval\n",
+    "utf-8"
+  );
+  const enforcementWaiver = signedWaiver(root, trust, {
+    id: "waiver.enforcement.001",
+    ruleId: violation.ruleId,
+    edgeFingerprint: violation.fingerprint,
+    owner: "architecture-owner",
+    approvalRef: "docs/decisions/waiver-enforcement-approval.md",
+    status: "active",
+    createdAt: "2026-07-01T00:00:00.000Z",
+    expiresAt: "2026-07-15T00:00:00.000Z",
+    evidenceRefs: ["docs/decisions/waiver-enforcement.md"],
+    maxUses: 1,
+    rationale: "Temporary enforcement fixture exception with exact fingerprint.",
+  });
+  fs.writeFileSync(
+    path.join(root, "docs", "ai-harness", "ontology", "state", "bypass-ledger.json"),
+    JSON.stringify(
+      {
+        schemaVersion: "1.0.0",
+        generatedAt: "test",
+        policy: "Source comments reference waiver ids only.",
+        waivers: [enforcementWaiver],
+      },
+      null,
+      2
+    ) + "\n",
+    "utf-8"
+  );
+  const strictWaived = runSemanticEnforcement({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    enforcementMode: "strict",
+    strictUnknown: true,
+    now: "2026-07-08T00:00:00.000Z",
+  });
+  assert.equal(strictWaived.gate, "pass");
+  assert.equal(strictWaived.canProceed, true);
+  assert.ok(strictWaived.decisions.some((decision) =>
+    decision.status === "waived" &&
+    decision.waiverId === "waiver.enforcement.001"
+  ));
+  assert.match(strictWaived.markdown, /Semantic Enforcement Report/);
+  assert.match(strictWaived.markdown, /Opt-in/);
+}
+
+{
+  const root = createWorkspace();
+  fs.mkdirSync(path.join(root, "src", "domain"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "src", "domain", "Order.ts"),
+    [
+      "import { MissingAdapter } from './MissingAdapter.js';",
+      "export const orderAdapter = MissingAdapter;",
+      "",
+    ].join("\n"),
+    "utf-8"
+  );
+  const forcedStrictUnknown = runSemanticEnforcement({
+    workspacePath: root,
+    architectureProfile: "ddd",
+    enforcementMode: "strict",
+    strictUnknown: false,
+    now: "2026-07-08T00:00:00.000Z",
+  });
+  assert.equal(forcedStrictUnknown.gate, "fail");
+  assert.equal(forcedStrictUnknown.canProceed, false);
+  assert.equal(forcedStrictUnknown.metrics.strictUnknownForced, true);
+  assert.ok(forcedStrictUnknown.decisions.some((decision) => decision.status === "blocked"));
+}
+
+{
+  const root = createWorkspace();
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.writeFileSync(path.join(root, "src", "a.ts"), "export const a = 1;\n", "utf-8");
+  fs.writeFileSync(path.join(root, "src", "b.ts"), "export const b = 2;\n", "utf-8");
+  const partialScan = runSemanticEnforcement({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    enforcementMode: "ci",
+    maxFiles: 1,
+  });
+  assert.equal(partialScan.gate, "fail");
+  assert.equal(partialScan.canProceed, false);
+  assert.equal(partialScan.metrics.skippedByLimit > 0, true);
+
+  const unsupportedSource = createWorkspace();
+  fs.mkdirSync(path.join(unsupportedSource, "src"), { recursive: true });
+  fs.writeFileSync(
+    path.join(unsupportedSource, "src", "service.py"),
+    "class Service:\n    pass\n",
+    "utf-8"
+  );
+  const unsupportedScan = runSemanticEnforcement({
+    workspacePath: unsupportedSource,
+    architectureProfile: "n-tier",
+    enforcementMode: "ci",
+  });
+  assert.equal(unsupportedScan.gate, "fail");
+  assert.equal(unsupportedScan.metrics.unsupportedFiles, 1);
+}
+
+{
+  const root = createWorkspace();
+  fs.mkdirSync(path.join(root, "src", "controllers"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src", "data"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs", "decisions"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs", "ai-harness", "ontology", "state"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "src", "data", "UserRepository.ts"),
+    "export class UserRepository {}\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "controllers", "LedgerOnlyController.ts"),
+    [
+      "import { UserRepository } from '../data/UserRepository.js';",
+      "export class LedgerOnlyController { repo = new UserRepository(); }",
+      "",
+    ].join("\n"),
+    "utf-8"
+  );
+  const evaluation = validateSemanticGovernance({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+  });
+  const violation = evaluation.violations.find((finding) =>
+    finding.ruleId === "n-tier.presentation-must-not-import-data-access"
+  );
+  assert.ok(violation);
+  fs.writeFileSync(
+    path.join(root, "docs", "decisions", "ledger-only-waiver.md"),
+    "# Ledger-only waiver evidence\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "docs", "ai-harness", "ontology", "state", "bypass-ledger.json"),
+    JSON.stringify(
+      {
+        schemaVersion: "1.0.0",
+        generatedAt: "test",
+        policy: "Source comments reference waiver ids only.",
+        waivers: [
+          {
+            id: "waiver.ledger-only.001",
+            ruleId: violation.ruleId,
+            edgeFingerprint: violation.fingerprint,
+            owner: "architecture-owner",
+            status: "active",
+            createdAt: "2026-07-01T00:00:00.000Z",
+            expiresAt: "2026-07-15T00:00:00.000Z",
+            evidenceRefs: ["docs/decisions/ledger-only-waiver.md"],
+            maxUses: 1,
+            rationale: "This exact waiver lacks the required source reference.",
+          },
+        ],
+      },
+      null,
+      2
+    ) + "\n",
+    "utf-8"
+  );
+  const ledgerOnly = validateArchitectureWaivers({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+    now: "2026-07-08T00:00:00.000Z",
+  });
+  assert.equal(ledgerOnly.verdict, "block");
+  assert.ok(ledgerOnly.findings.some((finding) =>
+    finding.waiverId === "waiver.ledger-only.001" &&
+    /ledger-only waivers/.test(finding.message)
+  ));
+}
+
+{
+  const root = createWorkspace();
+  fs.mkdirSync(path.join(root, "src", "controllers"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src", "data"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs", "decisions"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs", "ai-harness", "ontology", "state"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "src", "data", "UserRepository.ts"),
+    "export class UserRepository {}\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "data", "AuditRepository.ts"),
+    "export class AuditRepository {}\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "controllers", "MultiWaiverController.ts"),
+    [
+      "import { UserRepository } from '../data/UserRepository.js';",
+      "import { AuditRepository } from '../data/AuditRepository.js';",
+      "// semantic-waiver: waiver.multi.001",
+      "// semantic-waiver: waiver.multi.002",
+      "export class MultiWaiverController {",
+      "  user = new UserRepository();",
+      "  audit = new AuditRepository();",
+      "}",
+      "",
+    ].join("\n"),
+    "utf-8"
+  );
+  const evaluation = validateSemanticGovernance({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+  });
+  const multiViolations = evaluation.violations.filter((finding) =>
+    finding.sourcePath === "src/controllers/MultiWaiverController.ts" &&
+    finding.ruleId === "n-tier.presentation-must-not-import-data-access"
+  );
+  assert.equal(multiViolations.length, 2);
+  fs.writeFileSync(
+    path.join(root, "docs", "decisions", "multi-waiver.md"),
+    "# Multi waiver evidence\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "docs", "ai-harness", "ontology", "state", "bypass-ledger.json"),
+    JSON.stringify(
+      {
+        schemaVersion: "1.0.0",
+        generatedAt: "test",
+        policy: "Source comments reference waiver ids only.",
+        waivers: [
+          {
+            id: "waiver.multi.001",
+            ruleId: multiViolations[0].ruleId,
+            edgeFingerprint: multiViolations[0].fingerprint,
+            owner: "architecture-owner",
+            status: "active",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            expiresAt: "2026-07-15T00:00:00.000Z",
+            evidenceRefs: ["docs/decisions/multi-waiver.md"],
+            maxUses: 1,
+            rationale: "Intentionally exceeds policy ttlDays.",
+          },
+          {
+            id: "waiver.multi.002",
+            ruleId: multiViolations[1].ruleId,
+            edgeFingerprint: multiViolations[1].fingerprint,
+            owner: "architecture-owner",
+            status: "active",
+            createdAt: "2026-07-01T00:00:00.000Z",
+            expiresAt: "2026-07-15T00:00:00.000Z",
+            evidenceRefs: ["docs/decisions/multi-waiver.md"],
+            maxUses: 1,
+            rationale: "Intentionally exceeds policy maxActivePerFile when combined.",
+          },
+        ],
+      },
+      null,
+      2
+    ) + "\n",
+    "utf-8"
+  );
+  const policyLimited = validateArchitectureWaivers({
+    workspacePath: root,
+    architectureProfile: "n-tier",
+    strictUnknown: true,
+    now: "2026-07-08T00:00:00.000Z",
+  });
+  assert.equal(policyLimited.verdict, "block");
+  assert.ok(policyLimited.findings.some((finding) => /ttlDays/.test(finding.message)));
+  assert.ok(policyLimited.findings.some((finding) => /maxActivePerFile/.test(finding.message)));
+  assert.equal(policyLimited.metrics.validWaivers, 0);
+}
+
+{
+  const { root } = generateWorkspace();
+  const originalPolicy = readJson(root, ".github/ai-harness/architecture-ontology.policy.json");
+  assert.equal(originalPolicy.profileId, "n-tier");
+
+  const exported = exportArchitecturePolicyPack({
+    workspacePath: root,
+    architectureProfile: "clean",
+    exportedBy: "architecture-owner",
+    writePack: true,
+  });
+  assert.equal(exported.status, "exported");
+  assert.equal(exported.pack.trust.autoUpload, false);
+  assert.equal(exported.pack.trust.reviewRequired, true);
+  assert.equal(exported.pack.trust.localAuthorityDefault, true);
+  assert.ok(exported.packPath);
+  assert.ok(fs.existsSync(path.join(root, exported.packPath)));
+
+  const tamperedPackPath =
+    "docs/ai-harness/ontology/policy-packs/exports/tampered.policy-pack.json";
+  const tamperedPack = JSON.parse(JSON.stringify(exported.pack));
+  tamperedPack.signature.value = "sha256:not-the-pack-signature";
+  fs.mkdirSync(path.dirname(path.join(root, tamperedPackPath)), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, tamperedPackPath),
+    JSON.stringify(tamperedPack, null, 2) + "\n",
+    "utf-8"
+  );
+  const tamperedReview = importArchitecturePolicyPack({
+    workspacePath: root,
+    packPath: tamperedPackPath,
+  });
+  assert.equal(tamperedReview.status, "blocked");
+  assert.ok(tamperedReview.errors.some((error) => /signature\.value/.test(error)));
+
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-init-mcp-policy-outside-"));
+  fs.writeFileSync(
+    path.join(outside, "outside.policy-pack.json"),
+    JSON.stringify(exported.pack, null, 2) + "\n",
+    "utf-8"
+  );
+  const linkedPackDir = path.join(
+    root,
+    "docs",
+    "ai-harness",
+    "ontology",
+    "policy-packs",
+    "linked-outside"
+  );
+  let policySymlinkCreated = false;
+  try {
+    fs.symlinkSync(outside, linkedPackDir, "junction");
+    policySymlinkCreated = true;
+  } catch {
+    policySymlinkCreated = false;
+  }
+  if (policySymlinkCreated) {
+    const linkedReview = importArchitecturePolicyPack({
+      workspacePath: root,
+      packPath:
+        "docs/ai-harness/ontology/policy-packs/linked-outside/outside.policy-pack.json",
+    });
+    assert.equal(linkedReview.status, "blocked");
+    assert.ok(linkedReview.errors.some((error) =>
+      /unsafe|symbolic link|linked/.test(error)
+    ));
+  }
+
+  const reviewedBy = "principal-architect";
+  const trust = createGovernanceTrust(root, reviewedBy);
+  const approvalRef = "docs/decisions/policy-pack-clean-review.md";
+  fs.mkdirSync(path.dirname(path.join(root, approvalRef)), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, approvalRef),
+    "# Policy pack clean profile approval\n\nReviewed for local replacement.\n",
+    "utf-8"
+  );
+  const reviewPreview = importArchitecturePolicyPack({
+    workspacePath: root,
+    packPath: exported.packPath,
+  });
+  assert.ok(reviewPreview.reviewReceiptPath);
+  const approvalSignature = signGovernancePayload(
+    trust.privateKey,
+    buildPolicyPackApprovalPayload({
+      packId: exported.pack.packId,
+      policyHash: exported.pack.policyHash,
+      packSignature: exported.pack.signature.value,
+      reviewedBy,
+      approvalRef,
+      approvalEvidenceHash: fileSha256(path.join(root, approvalRef)),
+      reviewReceiptPath: reviewPreview.reviewReceiptPath,
+    })
+  );
+  const review = importArchitecturePolicyPack({
+    workspacePath: root,
+    packPath: exported.packPath,
+    reviewedBy,
+    approvalRef,
+    approvalSignature,
+    writeReview: true,
+  });
+  assert.equal(review.status, "review-required");
+  assert.equal(review.applied, false);
+  assert.equal(readJson(root, ".github/ai-harness/architecture-ontology.policy.json").profileId, "n-tier");
+  assert.ok(review.expectedReviewSignature);
+  assert.ok(review.reviewReceiptPath);
+  assert.ok(fs.existsSync(path.join(root, review.reviewReceiptPath)));
+  assert.ok(review.conflicts.some((conflict) => conflict.type === "profile-mismatch"));
+
+  const blockedApply = importArchitecturePolicyPack({
+    workspacePath: root,
+    packPath: exported.packPath,
+    applyMerge: true,
+    mergeStrategy: "replace-profile",
+    allowProfileChange: true,
+    allowConflicts: true,
+    reviewedBy,
+    approvalRef,
+    approvalSignature,
+    reviewReceiptPath: review.reviewReceiptPath,
+    reviewSignature: "not-the-expected-signature",
+  });
+  assert.equal(blockedApply.status, "blocked");
+  assert.equal(blockedApply.applied, false);
+  assert.equal(readJson(root, ".github/ai-harness/architecture-ontology.policy.json").profileId, "n-tier");
+
+  const missingReceiptApply = importArchitecturePolicyPack({
+    workspacePath: root,
+    packPath: exported.packPath,
+    applyMerge: true,
+    mergeStrategy: "replace-profile",
+    allowProfileChange: true,
+    allowConflicts: true,
+    reviewedBy,
+    approvalRef,
+    approvalSignature,
+    reviewSignature: review.expectedReviewSignature,
+  });
+  assert.equal(missingReceiptApply.status, "blocked");
+  assert.ok(missingReceiptApply.errors.some((error) => /reviewReceiptPath/.test(error)));
+
+  const reviewSignature = review.expectedReviewSignature;
+  assert.ok(reviewSignature);
+  const merged = importArchitecturePolicyPack({
+    workspacePath: root,
+    packPath: exported.packPath,
+    applyMerge: true,
+    mergeStrategy: "replace-profile",
+    allowProfileChange: true,
+    allowConflicts: true,
+    reviewedBy,
+    approvalRef,
+    approvalSignature,
+    reviewReceiptPath: review.reviewReceiptPath,
+    reviewSignature,
+  });
+  assert.equal(merged.status, "merged");
+  assert.equal(merged.applied, true);
+  assert.ok(merged.backupPath);
+  assert.ok(merged.reviewReceiptPath);
+  assert.ok(fs.existsSync(path.join(root, merged.backupPath)));
+  assert.ok(fs.existsSync(path.join(root, merged.reviewReceiptPath)));
+  assert.equal(readJson(root, ".github/ai-harness/architecture-ontology.policy.json").profileId, "clean");
+}
+
+{
+  const profileFixtures = [
+    {
+      profile: "clean",
+      files: {
+        "src/use-cases/GetUser.ts": [
+          "import { DbClient } from '../infra/DbClient.js';",
+          "export class GetUser { constructor(private readonly db = new DbClient()) {} }",
+          "",
+        ].join("\n"),
+        "src/infra/DbClient.ts": "export class DbClient {}\n",
+      },
+      ruleId: "clean.application-must-not-import-infrastructure",
+      sourcePath: "src/use-cases/GetUser.ts",
+    },
+    {
+      profile: "hexagonal",
+      files: {
+        "src/application/RegisterUser.ts": [
+          "import { UserRepository } from '../adapters/outbound/UserRepository.js';",
+          "export class RegisterUser { constructor(private readonly repo = new UserRepository()) {} }",
+          "",
+        ].join("\n"),
+        "src/adapters/outbound/UserRepository.ts": "export class UserRepository {}\n",
+      },
+      ruleId: "hexagonal.application-must-not-import-infrastructure",
+      sourcePath: "src/application/RegisterUser.ts",
+    },
+    {
+      profile: "ddd",
+      files: {
+        "src/domain/Order.ts": [
+          "import { EventBus } from '../infrastructure/EventBus.js';",
+          "export class Order { publish(bus = new EventBus()) { return bus; } }",
+          "",
+        ].join("\n"),
+        "src/infrastructure/EventBus.ts": "export class EventBus {}\n",
+      },
+      ruleId: "ddd.domain-must-not-import-infrastructure",
+      sourcePath: "src/domain/Order.ts",
+    },
+    {
+      profile: "event-driven",
+      files: {
+        "src/domain/Invoice.ts": [
+          "import { KafkaClient } from '../broker/KafkaClient.js';",
+          "export class Invoice { publish(client = new KafkaClient()) { return client; } }",
+          "",
+        ].join("\n"),
+        "src/broker/KafkaClient.ts": "export class KafkaClient {}\n",
+      },
+      ruleId: "event-driven.domain-must-not-import-infrastructure",
+      sourcePath: "src/domain/Invoice.ts",
+    },
+    {
+      profile: "workspace-init-mcp",
+      files: {
+        "src/data/Registry.ts": [
+          "import { analyzeWorkspace } from '../tools/status.js';",
+          "export const registry = { analyzeWorkspace };",
+          "",
+        ].join("\n"),
+        "src/tools/status.ts": "export function analyzeWorkspace() { return {}; }\n",
+      },
+      ruleId: "workspace-init-mcp.data-access-must-not-import-business",
+      sourcePath: "src/data/Registry.ts",
+    },
+  ];
+
+  for (const fixture of profileFixtures) {
+    const root = createWorkspace();
+    for (const [relativePath, content] of Object.entries(fixture.files)) {
+      const fullPath = path.join(root, relativePath);
+      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      fs.writeFileSync(fullPath, content, "utf-8");
+    }
+    const evaluation = validateSemanticGovernance({
+      workspacePath: root,
+      architectureProfile: fixture.profile,
+      strictUnknown: true,
+    });
+    assert.equal(evaluation.verdict, "block", `${fixture.profile} should block its fixture`);
+    assert.ok(
+      evaluation.violations.some((violation) =>
+        violation.ruleId === fixture.ruleId &&
+        violation.sourcePath === fixture.sourcePath
+      ),
+      `${fixture.profile} should report ${fixture.ruleId}`
+    );
+    assert.equal(evaluation.policyWarnings.length, 0);
+  }
+}
+
+{
+  const root = createWorkspace();
+  fs.mkdirSync(path.join(root, "src", "domain"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "src", "domain", "Order.ts"),
+    [
+      "import { MissingAdapter } from './MissingAdapter.js';",
+      "export const orderAdapter = MissingAdapter;",
+      "",
+    ].join("\n"),
+    "utf-8"
+  );
+  const evaluation = validateSemanticGovernance({
+    workspacePath: root,
+    architectureProfile: "ddd",
+    strictUnknown: true,
+  });
+  const unknownFinding = [...evaluation.violations, ...evaluation.warnings].find((finding) =>
+    finding.ruleId === "semantic.unknown-layer-requires-review"
+  );
+  assert.ok(unknownFinding);
+  assert.match(unknownFinding.asciiMap, /ST:/);
+  assert.match(unknownFinding.asciiMap, /S=src\/domain\/Order.ts/);
+  assert.match(unknownFinding.asciiMap, /T=unresolved\/external/);
+}
+
+{
+  const root = createWorkspace();
+  fs.mkdirSync(path.join(root, ".github", "ai-harness"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".github", "ai-harness", "architecture-ontology.policy.json"),
+    JSON.stringify(
+      {
+        schemaVersion: "0.0.0",
+        profileId: "not-real",
+        layers: [],
+        rules: [],
+        bypassPolicy: {
+          sourceCommentMayOnlyReferenceWaiver: false,
+          waiverLedgerRequired: false,
+        },
+      },
+      null,
+      2
+    ),
+    "utf-8"
+  );
+  fs.mkdirSync(path.join(root, "src", "use-cases"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src", "infra"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "src", "use-cases", "GetUser.ts"),
+    "import { DbClient } from '../infra/DbClient.js';\nexport const getUser = new DbClient();\n",
+    "utf-8"
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "infra", "DbClient.ts"),
+    "export class DbClient {}\n",
+    "utf-8"
+  );
+
+  const evaluation = validateSemanticGovernance({
+    workspacePath: root,
+    architectureProfile: "clean",
+    strictUnknown: true,
+  });
+  assert.equal(evaluation.verdict, "block");
+  assert.ok(evaluation.policyWarnings.some((warning) => /rejected/.test(warning)));
+  assert.equal(evaluation.policy.profileId, "clean");
+  assert.ok(evaluation.violations.some((violation) =>
+    violation.ruleId === "clean.application-must-not-import-infrastructure"
+  ));
+
+  const strictPolicyWarnings = runSemanticEnforcement({
+    workspacePath: root,
+    architectureProfile: "clean",
+    enforcementMode: "ci",
+    strictUnknown: true,
+  });
+  assert.equal(strictPolicyWarnings.gate, "fail");
+  assert.equal(strictPolicyWarnings.canProceed, false);
+  assert.equal(strictPolicyWarnings.metrics.policyWarnings > 0, true);
 }
 
 {
@@ -2549,6 +4060,14 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.evidenceChecks.unresolvedRefs.includes("missing.service-health"));
     assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.evidenceChecks.unresolvedItems.some((item) => item.id === "missing.first-governed-session-closeout"));
     assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.routeContracts.some((item) => item.route === "/api/harness-dashboard/v1/health"));
+    assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.routeContracts.some((item) =>
+      item.route === "/api/harness-dashboard/v1/architecture" &&
+      item.expectedPayloadKeys.includes("semanticGovernance")
+    ));
+    assert.ok(realityCheckPayload.payload.userRealityCheck.trustReadinessBrief.routeContracts.some((item) =>
+      item.route === "/api/harness-dashboard/v1/agent-bridge" &&
+      item.expectedPayloadKeys.includes("agentCommandBridge")
+    ));
     assert.ok(realityCheckPayload.payload.userRealityCheck.nextActionRunway.some((item) =>
       item.actionId === "action.start-local-listener" &&
       item.proofRoute === "/api/harness-dashboard/v1/health" &&
@@ -2631,6 +4150,25 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     ));
     assert.ok(userPerspectiveAuditQuery.payload.indexSummary.sources.includes("dashboardQualityScorecard.userPerspectiveAudit"));
 
+    const architecturePayload = await fetch(apiUrl("architecture"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(architecturePayload.readOnly, true);
+    assert.ok(architecturePayload.capabilities.includes("architecture"));
+    assert.ok(architecturePayload.payload.semanticGovernance.profileId);
+    assert.ok(architecturePayload.payload.semanticGovernance.visualGraph.nodes.length > 0);
+    assert.ok(architecturePayload.payload.agentCommandBridge.suggestedCommands.length >= 3);
+
+    const agentBridgePayload = await fetch(apiUrl("agent-bridge"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(agentBridgePayload.readOnly, true);
+    assert.ok(agentBridgePayload.capabilities.includes("agent-bridge"));
+    assert.equal(agentBridgePayload.payload.agentCommandBridge.status, "draft-only-read-only");
+    assert.equal(agentBridgePayload.payload.agentCommandBridge.dashboardDoesNotRunTools, true);
+    assert.ok(agentBridgePayload.payload.agentCommandBridge.sseFeedbackLoop.events.includes("harness.changed"));
+
+    const architectureQuery = await fetch(apiUrl("query?scope=architecture&q=waiver"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(architectureQuery.readOnly, true);
+    assert.equal(architectureQuery.payload.resultCount > 0, true);
+    assert.ok(architectureQuery.payload.results.some((item) => item.sourcePath.includes("semanticGovernance") || item.sourcePath.includes("agentCommandBridge")));
+
     const briefingResponse = await fetch(apiUrl("briefing"), { headers: authHeaders });
     assert.equal(briefingResponse.status, 200);
     const briefingPayload = await briefingResponse.json();
@@ -2649,6 +4187,22 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
       "harness.snapshot"
     );
     assert.equal(trailingSlashSnapshotEvent.includes("task-bootstrap-refresh-projections"), false);
+    const changedEventPromise = waitForSseEvent(
+      `http://127.0.0.1:${port}/api/harness-dashboard/v1/events?token=${token}`,
+      "harness.changed",
+      2500
+    );
+    await delay(160);
+    const liveState = readJson(root, "docs/ai-harness/dashboard/state/dashboard-state.json");
+    liveState.meta.sourceEventSequence = Number(liveState.meta.sourceEventSequence || 0) + 1;
+    liveState.meta.generatedAt = "sse-immediate-test";
+    const tempStatePath = path.join(path.dirname(statePath), ".dashboard-state.json.sse-test.tmp");
+    fs.writeFileSync(tempStatePath, JSON.stringify(liveState, null, 2) + "\n", "utf-8");
+    fs.renameSync(tempStatePath, statePath);
+    const changedEvent = await changedEventPromise;
+    assert.match(changedEvent, /harness.changed/);
+    assert.match(changedEvent, /sse-immediate-test/);
+    assert.match(changedEvent, /fs\.watch|heartbeat-hash-check/);
     const rejectedTrailingSlashSse = await fetch(apiUrl(`events/?token=bad-token`));
     assert.equal(rejectedTrailingSlashSse.status, 401);
   } finally {

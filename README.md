@@ -5,7 +5,7 @@
 
 `workspace-init-mcp` installs a non-destructive AI Work Harness that lets humans and agents plan, resume, verify, and hand off project work from durable evidence instead of chat history.
 
-Version `4.6.8` strengthens the World Model Harness Dashboard with a required reality-to-action progress flow, local listener bootstrap guidance, static proof fallback, migrated/runtime projection coverage, and stricter tab accessibility semantics. Users can inspect project reality, goal fit, risks, next actions, required proof, progress, and local API evidence routes without reading raw JSON or chat history. It keeps the 4.6.x domain-independent world-model harness: traceable request/process/result records, projection confidence, ranked evidence lookup, extensible domain stress profiles, and a persisted work-review-improve loop.
+Version `5.0.0` is the Semantic Governance major update. It adds a local-first architecture ontology, AST-backed source graph, deterministic semantic warehouse, compact context packs, waiver validation, opt-in enforcement gates, and GitOps policy packs while preserving the existing dashboard, runtime handoff, evidence ledger, and non-destructive reconcile model.
 
 ---
 
@@ -19,9 +19,10 @@ It generates:
 | --- | --- |
 | Agent instructions | Platform-specific guidance for Codex, Copilot, Cursor, Claude Code, Antigravity, OpenHands, and portable MCP clients. |
 | Harness governance | Planning, review, work-packet, evidence, handoff, decision, and reconciliation contracts. |
-| Hypertext dashboard | A single-file `index.html` Project World Model with reality map, goal compass, context-rot monitor, operational command queue, audience lenses, multilingual UI, and slide-show briefing mode. |
+| Hypertext dashboard | A single-file `index.html` Project World Model with reality map, goal compass, context-rot monitor, Architecture governance cockpit, Agent command bridge, audience lenses, multilingual UI, SSE status, and slide-show briefing mode. |
 | Ledger and projections | Canonical JSONL events plus rebuildable JSON state, index, runtime, entity, and embedding projections. |
-| Local listener | Token-protected, loopback-only, read-only dashboard API with SSE and deterministic query support. |
+| Semantic governance | Architecture ontology policy, TypeScript/JavaScript source graph, governance evaluation, waiver ledger validation, semantic warehouse queries, context packs, enforcement reports, and policy packs. |
+| Local listener | Token-protected, loopback-only, read-only dashboard API with deterministic query support and file-watch SSE change events plus heartbeat fallback. |
 | Reconcile tools | Non-destructive refresh of managed harness files while protecting application source roots. |
 | Parallel orchestration | Expected read/write path contracts, chunk conflict audits, worker assignment, and evaluator loops. |
 | Domain operations | Optional built-in or custom stress profiles with evidence gates, report sections, readiness checks, and operations views. |
@@ -30,7 +31,28 @@ The harness is designed for both new services and existing projects that already
 
 ---
 
-## 4.6.8 Highlights
+## 5.0.0 Highlights
+
+### Semantic Governance Major Update
+
+The harness now has a deterministic architecture-governance layer:
+
+- `.github/ai-harness/architecture-ontology.policy.json` declares the local architecture profile, layers, import rules, and bypass policy.
+- `scan_source_graph` builds a TypeScript/JavaScript AST dependency graph with imports, exports, dynamic imports, `require`, selected symbol edges, layers, fingerprints, and evidence refs.
+- `validate_architecture_governance` evaluates exact graph edges against local policy and reports rule ids, source/target paths, fingerprints, confidence, suggested actions, and ASCII review maps.
+- `query_semantic_warehouse` exposes deterministic fact-table views over files, symbols, dependency edges, rules, violations, waivers, evidence refs, dashboard claims, and completed facts.
+- `get_semantic_context_pack` emits compact JSON-LD/tree/rule/anti-pattern/quantized-signature packs for small-model or resumed-agent context, while keeping exact graph/policy receipts authoritative.
+
+### Waivers, Enforcement, And Policy Packs
+
+Practical exceptions are now explicit and auditable:
+
+- `validate_architecture_waivers` ensures source comments can only reference waiver ids; comments cannot self-authorize bypasses.
+- Valid waivers require owner, trusted-reviewer approval signature, status, local evidence refs, bounded TTL, max use, rule id, exact edge fingerprint, and a source comment on the violating file.
+- Waiver revocations are signed receipts in `docs/ai-harness/ontology/state/waiver-revocations.json`; active waiver validation requires that ledger to be anchored in git history and treats previously anchored signed revocations as append-only.
+- `enforce_architecture_governance` is opt-in: `report` mode is advisory, while `strict` and `ci` modes block unwaived violations, blocking waiver findings, partial scans, unsupported source files, and rejected local policies.
+- Work packets and adapter handoffs surface the semantic governance gate so blocked work carries the right warning into other runtimes.
+- `export_architecture_policy_pack` and `import_architecture_policy_pack` support local GitOps policy sharing with no automatic central upload, verified pack signatures, review-only default imports, trusted-reviewer approval signatures, workspace-contained approval evidence, prior review receipts, backups, and merge receipts.
 
 ### Stateful Cognitive Offloading
 
@@ -59,6 +81,7 @@ The dashboard is now the primary stakeholder surface, not a generated Markdown r
 - It embeds CSS, JavaScript, design tokens, chart helpers, and a bounded project snapshot.
 - It can run as a static file or through the generated read-only local listener.
 - It presents the same ledger-backed truth differently for stakeholders, AI agents, and maintainers.
+- Its Architecture tab renders the 5.0.0 semantic governance profile, layer map, rule flow, source graph, waiver/enforcement gates, policy packs, local API route chips, SSE status, and a draft-only Agent request packet composer.
 
 ### Ledger-First Project World Model
 
@@ -94,7 +117,9 @@ The generated HTML dashboard includes:
 - Operational progress, blockers, and timeline views built from user-visible work only.
 - Evidence tab for claim-to-proof traceability.
 - Governance tab for decisions, gates, retros, and platform intake.
-- System and Tech Stack views for runtime, listener, architecture, infrastructure, and integration surfaces.
+- System view for runtime, listener, service topology, and operational readiness.
+- Architecture view for semantic governance, ontology layers, rule flow, waiver/enforcement gates, SSE status, and draft-only Agent request packets.
+- Tech Stack view for project composition, infrastructure, data stores, deployment, and integration surfaces.
 - Audience Lens modes: Stakeholder, AI Agent, Maintainer.
 - Korean/English language switching.
 - Stakeholder slide-show mode for clean briefing and report conversations.
@@ -104,7 +129,7 @@ UI work follows current Chrome/Google I/O modern web guidance as progressive enh
 
 ### Domain Stress And Briefing Packs
 
-4.6.8 keeps the built-in service profiles and custom profile support so the harness can fit a web application, learning plan, research corpus, documentation program, or other governed domain without hard-coding the world around commerce or release work.
+5.0.0 keeps the built-in service profiles and custom profile support so the harness can fit a web application, learning plan, research corpus, documentation program, or other governed domain without hard-coding the world around commerce or release work.
 
 - `identity-commerce-operations`: credential/auth, payment, refund, fulfillment, and operational evidence gates.
 - `legacy-modernization-governance`: AS-IS/TO-BE mapping, migration, rollback, ownership, and compatibility evidence gates.
@@ -284,6 +309,8 @@ The listener exposes read-only routes under:
 /api/harness-dashboard/v1/dictionary
 /api/harness-dashboard/v1/version-control
 /api/harness-dashboard/v1/runtime
+/api/harness-dashboard/v1/architecture
+/api/harness-dashboard/v1/agent-bridge
 /api/harness-dashboard/v1/briefing
 /api/harness-dashboard/v1/health
 /api/harness-dashboard/v1/events
@@ -363,7 +390,7 @@ Main MCP tools include:
 
 ## Quality And Safety Baseline
 
-Version `4.6.8` includes these guardrails:
+Version `5.0.0` includes these guardrails:
 
 - Absolute `workspacePath` enforcement.
 - Non-destructive adoption for legacy projects.
@@ -381,6 +408,11 @@ Version `4.6.8` includes these guardrails:
 - Optional harness engineering generation that fully honors `includeHarnessEngineering: false`.
 - Extensible domain stress profiles so built-in commerce, modernization, and content-release examples do not become hidden defaults.
 - Persisted evaluation-loop receipts for negative review, required fixes, verification evidence, and residual risk.
+- Contained atomic writers and realpath-contained reads for generated state, reconcile, skill installation, dashboard operations, runtime files, semantic reports, native executor logs, and policy-pack imports.
+- AST-backed semantic governance with strict unknown handling, exact-rule/evidence refs, and advisory-only compression aids.
+- Waiver validation that blocks unsigned or untrusted waivers, ledger-only waivers, self-authorizing comments, unknown references, expired entries, missing local evidence, TTL overflow, fingerprint mismatches, and overuse.
+- Opt-in enforcement reports for local review, CI/PR gates, and runtime handoff warnings, with strict/ci fail-closed behavior for policy warnings and partial scans.
+- Policy pack imports that default to review-only and require explicit reviewer, trusted-reviewer approval signature, workspace-contained approval ref, prior review receipt path, exact expected review signature, verified pack signature, and reversible backup before local policy changes.
 
 ---
 
@@ -427,15 +459,21 @@ npm pack --dry-run
 
 ---
 
-## 4.6.8 Release Notes
+## 5.0.0 Release Notes
 
-Major changes in 4.6.8:
+Major changes in 5.0.0:
 
-- Added required `userRealityCheck.progressFlow` stages so the dashboard reads as Reality > Risks > Next Actions > Proof > API instead of separate cards users must mentally stitch together.
-- Added a local listener bootstrap action, status command, static proof fallback, and User Reality Check UI panel so tokenless/static dashboard users know exactly how to turn evidence and route chips into structured read-only previews.
-- Propagated the progress-flow contract through generated schema, dashboard validation, generated `dashboard-ops` legacy repair, reconcile backfills, runtime dashboard synchronization, and tests.
-- Tightened dashboard tab accessibility with roving tab indexes plus explicit `hidden`, `aria-hidden`, and `inert` state for inactive tab panels.
-- Added regression coverage for progress-flow state, listener bootstrap commands, static proof fallback UI, legacy migration, and tab/panel activation semantics.
+- Added a local-first architecture ontology with built-in `n-tier`, `clean`, `hexagonal`, `ddd`, `event-driven`, and `workspace-init-mcp` profiles.
+- Added TypeScript/JavaScript AST source graph scanning and exact architecture governance evaluation.
+- Added semantic context packs with stable hashes, JSON-LD/tree projections, rule facts, anti-pattern prompts, advisory quantized signatures, and prompt templates.
+- Added a deterministic semantic warehouse query layer for source graph, rules, violations, waivers, evidence refs, dashboard claims, and completed facts.
+- Added waiver governance with ledger-required owner/trusted-signature/local-evidence/expiry/max-use/rule/fingerprint fields, source comments that may only reference waiver ids, source-file reference requirements, TTL limits, and per-file active-waiver limits.
+- Added opt-in enforcement reports with advisory `report` mode and fail-closed `strict`/`ci` modes for local or CI/PR gates.
+- Added runtime work packet and adapter handoff warnings for semantic governance gates.
+- Added architecture policy pack export/import for local GitOps sharing with no automatic central upload, verified pack signatures, trusted-reviewer approval signatures, approval evidence hashing, prior review receipts, backups, and merge receipts.
+- Hardened generated writes and reads through contained atomic writer/copy/append/read helpers across initialization, skill install, reconcile, readiness, runtime, dashboard ops, semantic reports, native executor logs, and policy-pack imports.
+- Moved the TypeScript compiler API into runtime dependencies because source graph scanning is a runtime feature.
+- Added regression coverage for safe writer/read symlink/junction escapes, multi-profile forbidden edges, semantic warehouse determinism, context compression, waiver negatives and policy limits, enforcement modes, partial scan gates, and policy pack review/apply flows.
 
 ## 4.6.7 Release Notes
 

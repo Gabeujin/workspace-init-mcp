@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { validateWorkspace } from "./validate.js";
+import { writeContainedTextAtomic } from "./safe-workspace-write.js";
 
 type ReadinessStatus = "ready" | "advancing" | "partial" | "fragile";
 
@@ -349,8 +350,8 @@ export function assessWorkspaceReadiness(
       "readiness",
       "maturity-scorecard.json"
     );
-    fs.mkdirSync(path.dirname(scorecardPath), { recursive: true });
-    fs.writeFileSync(
+    writeContainedTextAtomic(
+      workspacePath,
       scorecardPath,
       `${JSON.stringify(
         {
@@ -776,8 +777,8 @@ export function auditWorkspaceReadinessSemantics(
       "readiness",
       "semantic-audit.json"
     );
-    fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-    fs.writeFileSync(
+    writeContainedTextAtomic(
+      workspacePath,
       reportPath,
       `${JSON.stringify(
         {

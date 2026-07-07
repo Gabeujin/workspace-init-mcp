@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * workspace-init-mcp MCP Server v4.6.8
+ * workspace-init-mcp MCP Server v5.0.0
  *
  * An MCP server that initializes VS Code workspaces with
  * documentation governance, Copilot instructions, and project structure.
@@ -84,6 +84,31 @@ import { buildHarnessProfilesSummary } from "./data/harness-profiles.js";
 import { WORKSPACE_INIT_MCP_VERSION } from "./data/version.js";
 import { generateSelectedSkills } from "./generators/agent-skills.js";
 import { generateServerFlowDashboardFiles } from "./generators/server-flow-dashboard.js";
+import { ARCHITECTURE_PROFILE_IDS } from "./data/ontology-contract.js";
+import {
+  buildSemanticContextPack,
+  scanSourceGraph,
+  validateSemanticGovernance,
+} from "./tools/semantic-governance.js";
+import {
+  SEMANTIC_WAREHOUSE_QUERY_IDS,
+  buildSemanticWarehouse,
+  querySemanticWarehouse,
+} from "./tools/semantic-warehouse.js";
+import {
+  SEMANTIC_ENFORCEMENT_MODES,
+  runSemanticEnforcement,
+} from "./tools/semantic-enforcement.js";
+import {
+  POLICY_PACK_MERGE_STRATEGIES,
+  exportArchitecturePolicyPack,
+  importArchitecturePolicyPack,
+} from "./tools/semantic-policy-packs.js";
+import { validateArchitectureWaivers } from "./tools/semantic-waivers.js";
+import {
+  assertContainedNonSymlinkFile,
+  writeContainedTextAtomic,
+} from "./tools/safe-workspace-write.js";
 
 // ---------------------------------------------------------------------------
 // Encoding helper
@@ -105,6 +130,11 @@ function workspacePathInputSchema(description: string) {
     })
     .describe(description);
 }
+
+const architectureProfileInputSchema = z
+  .enum(ARCHITECTURE_PROFILE_IDS)
+  .optional()
+  .describe("Architecture profile used for semantic layer classification. Default: n-tier");
 
 const LIVE_GOVERNANCE_STATE_PREFIXES = [
   ".governance/reports/",
@@ -148,38 +178,8 @@ function isLiveGovernanceStatePath(relativePath: string): boolean {
   );
 }
 
-/**
- * Write file content with the specified encoding.
- * Handles utf-8-bom by prepending BOM to utf-8 output.
- */
-function writeFileWithEncoding(
-  fullPath: string,
-  content: string,
-  encoding: string
-): void {
-  if (encoding === "utf-8-bom") {
-    fs.writeFileSync(fullPath, "\uFEFF" + content, "utf-8");
-  } else {
-    fs.writeFileSync(fullPath, content, encoding as BufferEncoding);
-  }
-}
-
-function isPathWithin(parentPath: string, candidatePath: string): boolean {
-  const relative = path.relative(parentPath, candidatePath);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
 function assertContainedNonSymlinkWrite(workspacePath: string, fullPath: string): void {
-  const workspaceRealPath = fs.realpathSync.native(workspacePath);
-  const parentPath = path.dirname(fullPath);
-  fs.mkdirSync(parentPath, { recursive: true });
-  const parentRealPath = fs.realpathSync.native(parentPath);
-  if (!isPathWithin(workspaceRealPath, parentRealPath)) {
-    throw new Error(`Generated file write escaped the workspace through a linked directory: ${fullPath}`);
-  }
-  if (fs.existsSync(fullPath) && fs.lstatSync(fullPath).isSymbolicLink()) {
-    throw new Error(`Refusing to overwrite symbolic link generated path: ${fullPath}`);
-  }
+  assertContainedNonSymlinkFile(workspacePath, fullPath);
 }
 
 function writeContainedFileAtomic(
@@ -188,20 +188,25 @@ function writeContainedFileAtomic(
   content: string,
   encoding: string
 ): void {
-  assertContainedNonSymlinkWrite(workspacePath, fullPath);
-  const tempPath = path.join(
-    path.dirname(fullPath),
-    `.${path.basename(fullPath)}.${process.pid}.${Date.now()}.tmp`
+  writeContainedTextAtomic(
+    workspacePath,
+    fullPath,
+    content,
+    encoding as BufferEncoding | "utf-8-bom"
   );
-  try {
-    writeFileWithEncoding(tempPath, content, encoding);
-    fs.renameSync(tempPath, fullPath);
-  } catch (error) {
-    if (fs.existsSync(tempPath)) {
-      fs.rmSync(tempPath, { force: true });
-    }
-    throw error;
-  }
+}
+
+function writeContainedJsonFile(
+  workspacePath: string,
+  relativePath: string,
+  value: unknown
+): void {
+  writeContainedFileAtomic(
+    workspacePath,
+    path.join(workspacePath, relativePath),
+    `${JSON.stringify(value, null, 2)}\n`,
+    "utf-8"
+  );
 }
 
 function restoreDashboardListenerOnHarnessActivity(
@@ -487,7 +492,7 @@ This tool creates a complete workspace setup including:
 - .github/ai-harness/reconcile-policy.json (file-level reconcile safety policy for hold / merge / replace decisions)
 - .github/ai-harness/native-executor-overrides.json (workspace-local handoff and launch tuning for GitHub Copilot, Codex CLI, Claude Code, Gemini CLI, and similar runtimes)
 - docs/ai-harness/readiness/ (remaining-work spec, scoring model, and readiness scorecard template)
-- docs/ai-harness/dashboard/ (Harness Dashboard 4.6.8 Hypertext Project World Model with ledger, projections, single-file HTML, and read-only local API)
+- docs/ai-harness/dashboard/ (Harness Dashboard 5.0.0 Hypertext Project World Model with ledger, projections, single-file HTML, and read-only local API)
 - docs/ai-harness/runtime/ (planner / generator / evaluator runtime state, prompts, and session ledgers)
 - docs/ai-harness/dashboard/scripts/dashboard-ops.mjs (projection rebuild, strict validation, read-only listener, SSE, VCS collection, and public export)
 - .vscode/settings.json (Copilot custom instruction references)
@@ -551,18 +556,21 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
       for (const file of files) {
         const fullPath = path.join(params.workspacePath, file.relativePath);
         try {
-          const dir = path.dirname(fullPath);
-          fs.mkdirSync(dir, { recursive: true });
-
           if (!force && fs.existsSync(fullPath)) {
             if (MANAGED_TEXT_MERGE_PATHS.has(file.relativePath)) {
+              assertContainedNonSymlinkWrite(params.workspacePath, fullPath);
               const existingContent = fs.readFileSync(fullPath, "utf-8");
               const mergedContent = mergeHarnessInstructionBlock(
                 file.content,
                 existingContent
               );
               if (mergedContent !== existingContent) {
-                writeFileWithEncoding(fullPath, mergedContent, encoding);
+                writeContainedFileAtomic(
+                  params.workspacePath,
+                  fullPath,
+                  mergedContent,
+                  encoding
+                );
                 written.push(`${file.relativePath} (merged harness instruction block)`);
               } else {
                 skipped.push(file.relativePath);
@@ -584,7 +592,12 @@ Optional inputs: projectType, techStack, docLanguage, codeCommentLanguage, isMul
             continue;
           }
 
-          writeFileWithEncoding(fullPath, file.content, encoding);
+          writeContainedFileAtomic(
+            params.workspacePath,
+            fullPath,
+            file.content,
+            encoding
+          );
           written.push(file.relativePath);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -1234,7 +1247,7 @@ server.registerTool(
   "get_harness_dashboard_context",
   {
     title: "Get Harness Dashboard Context",
-    description: `Read the Harness Dashboard 4.6.8 Hypertext Project World Model projections for AI Agent resume context.
+    description: `Read the Harness Dashboard 5.0.0 Hypertext Project World Model projections for AI Agent resume context.
 
 This tool is intentionally read-only. It never starts listeners, refreshes VCS,
 mutates dashboard state, appends ledger events, runs shell commands, or calls an LLM.
@@ -1285,6 +1298,701 @@ blockers, authoritative files, projection freshness, and governance evidence.`,
           {
             type: "text" as const,
             text: `Harness Dashboard context read failed: ${msg}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: scan_source_graph
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "scan_source_graph",
+  {
+    title: "Scan Source Graph",
+    description: `Build a deterministic source dependency graph for semantic governance.
+
+This tool is read-only unless writeSnapshot is true. It parses local TypeScript
+and JavaScript files, classifies them into architecture ontology layers, records
+imports/exports/dynamic imports/require plus selected symbol relations, and can
+persist docs/ai-harness/ontology/state/source-graph.json as an audit snapshot.`,
+    inputSchema: z.object({
+      workspacePath: workspacePathInputSchema(
+        "Absolute path to the workspace root directory"
+      ),
+      architectureProfile: architectureProfileInputSchema,
+      maxFiles: z
+        .number()
+        .int()
+        .positive()
+        .max(5000)
+        .optional()
+        .describe("Maximum source files to scan. Default: 500"),
+      writeSnapshot: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, write docs/ai-harness/ontology/state/source-graph.json"
+        ),
+    }),
+  },
+  async (params) => {
+    try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
+      const result = scanSourceGraph({
+        workspacePath: params.workspacePath,
+        architectureProfile: params.architectureProfile,
+        maxFiles: params.maxFiles,
+      });
+      if (params.writeSnapshot) {
+        writeContainedJsonFile(
+          params.workspacePath,
+          "docs/ai-harness/ontology/state/source-graph.json",
+          result
+        );
+      }
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text" as const, text: `Source graph scan failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: validate_architecture_governance
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "validate_architecture_governance",
+  {
+    title: "Validate Architecture Governance",
+    description: `Evaluate the exact source graph against the local architecture ontology policy.
+
+This is the first semantic governance gate for the Workspace Harness. It treats
+the source graph and policy as authoritative; compact maps and vector signatures
+are emitted only as review aids. It is read-only unless writeEvaluation is true.`,
+    inputSchema: z.object({
+      workspacePath: workspacePathInputSchema(
+        "Absolute path to the workspace root directory"
+      ),
+      architectureProfile: architectureProfileInputSchema,
+      strictUnknown: z
+        .boolean()
+        .optional()
+        .describe("If true, unresolved or unclassified edges become block findings"),
+      maxFiles: z
+        .number()
+        .int()
+        .positive()
+        .max(5000)
+        .optional()
+        .describe("Maximum source files to scan. Default: 500"),
+      writeEvaluation: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, write docs/ai-harness/ontology/state/governance-evaluation.json"
+        ),
+    }),
+  },
+  async (params) => {
+    try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
+      const result = validateSemanticGovernance({
+        workspacePath: params.workspacePath,
+        architectureProfile: params.architectureProfile,
+        strictUnknown: params.strictUnknown,
+        maxFiles: params.maxFiles,
+      });
+      if (params.writeEvaluation) {
+        writeContainedJsonFile(
+          params.workspacePath,
+          "docs/ai-harness/ontology/state/governance-evaluation.json",
+          result
+        );
+      }
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Architecture governance validation failed: ${msg}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: get_semantic_context_pack
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "get_semantic_context_pack",
+  {
+    title: "Get Semantic Context Pack",
+    description: `Return a compact ontology-backed context pack for small-model or resumed-agent use.
+
+The pack includes JSON-LD nodes, a tree projection, rule facts, and ASCII layer
+maps. It intentionally preserves exact rule ids, evidence refs, fingerprints,
+and source paths so compressed context can still be audited against source.`,
+    inputSchema: z.object({
+      workspacePath: workspacePathInputSchema(
+        "Absolute path to the workspace root directory"
+      ),
+      architectureProfile: architectureProfileInputSchema,
+      strictUnknown: z
+        .boolean()
+        .optional()
+        .describe("If true, unresolved or unclassified edges become block findings"),
+      maxFiles: z
+        .number()
+        .int()
+        .positive()
+        .max(5000)
+        .optional()
+        .describe("Maximum source files to scan. Default: 500"),
+      tokenBudget: z
+        .enum(["lean", "balanced", "thorough"])
+        .optional()
+        .describe("Context density. Default: lean"),
+      targetPaths: z
+        .array(z.string())
+        .optional()
+        .describe("Optional relative source paths to prioritize in the pack"),
+    }),
+  },
+  async (params) => {
+    try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
+      const result = buildSemanticContextPack({
+        workspacePath: params.workspacePath,
+        architectureProfile: params.architectureProfile,
+        strictUnknown: params.strictUnknown,
+        maxFiles: params.maxFiles,
+        tokenBudget: params.tokenBudget,
+        targetPaths: params.targetPaths,
+      });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Semantic context pack generation failed: ${msg}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: query_semantic_warehouse
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "query_semantic_warehouse",
+  {
+    title: "Query Semantic Warehouse",
+    description: `Query deterministic semantic fact-table projections over source graph, ontology policy, governance violations, waiver ledger, dashboard claims, and completed facts.
+
+Use this when an agent needs specific auditable answers such as which rules block
+a file, which evidence backs a waiver, which dependency edges touch a file, or
+which claims reference an evidence item. The tool is read-only unless
+writeWarehouse is true.`,
+    inputSchema: z.object({
+      workspacePath: workspacePathInputSchema(
+        "Absolute path to the workspace root directory"
+      ),
+      queryId: z
+        .enum(SEMANTIC_WAREHOUSE_QUERY_IDS)
+        .describe("Warehouse query to execute"),
+      architectureProfile: architectureProfileInputSchema,
+      strictUnknown: z
+        .boolean()
+        .optional()
+        .describe("If true, unresolved or unclassified edges become block findings"),
+      maxFiles: z
+        .number()
+        .int()
+        .positive()
+        .max(5000)
+        .optional()
+        .describe("Maximum source files to scan. Default: 500"),
+      targetPath: z
+        .string()
+        .optional()
+        .describe("Relative source path for file-scoped queries"),
+      ruleId: z
+        .string()
+        .optional()
+        .describe("Rule id for violations_by_rule queries"),
+      waiverId: z
+        .string()
+        .optional()
+        .describe("Waiver id for evidence_for_waiver queries"),
+      evidenceRef: z
+        .string()
+        .optional()
+        .describe("Evidence ref for claims_for_evidence queries"),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(500)
+        .optional()
+        .describe("Maximum rows to return. Default: 100"),
+      writeWarehouse: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, write docs/ai-harness/ontology/state/semantic-warehouse.json"
+        ),
+    }),
+  },
+  async (params) => {
+    try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
+      if (params.writeWarehouse) {
+        const warehouse = buildSemanticWarehouse({
+          workspacePath: params.workspacePath,
+          architectureProfile: params.architectureProfile,
+          strictUnknown: params.strictUnknown,
+          maxFiles: params.maxFiles,
+        });
+        writeContainedJsonFile(
+          params.workspacePath,
+          "docs/ai-harness/ontology/state/semantic-warehouse.json",
+          warehouse
+        );
+      }
+      const result = querySemanticWarehouse({
+        workspacePath: params.workspacePath,
+        architectureProfile: params.architectureProfile,
+        strictUnknown: params.strictUnknown,
+        maxFiles: params.maxFiles,
+        queryId: params.queryId,
+        targetPath: params.targetPath,
+        ruleId: params.ruleId,
+        waiverId: params.waiverId,
+        evidenceRef: params.evidenceRef,
+        limit: params.limit,
+      });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Semantic warehouse query failed: ${msg}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: validate_architecture_waivers
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "validate_architecture_waivers",
+  {
+    title: "Validate Architecture Waivers",
+    description: `Validate architecture exception waivers against the exact governance evaluation.
+
+This tool checks that source comments only reference waiver ids, that waiver
+ledger entries contain owner/evidence/expiry/max-use/rationale fields, and that
+active waivers match both the rule id and exact edge fingerprint of a current
+violation. Source comments never self-authorize exceptions.`,
+    inputSchema: z.object({
+      workspacePath: workspacePathInputSchema(
+        "Absolute path to the workspace root directory"
+      ),
+      architectureProfile: architectureProfileInputSchema,
+      strictUnknown: z
+        .boolean()
+        .optional()
+        .describe("If true, unresolved or unclassified edges become block findings"),
+      maxFiles: z
+        .number()
+        .int()
+        .positive()
+        .max(5000)
+        .optional()
+        .describe("Maximum source files to scan. Default: 500"),
+      now: z
+        .string()
+        .optional()
+        .describe("Optional ISO timestamp used for expiry validation"),
+      writeReport: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, write docs/ai-harness/ontology/state/waiver-validation.json"
+        ),
+    }),
+  },
+  async (params) => {
+    try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
+      const result = validateArchitectureWaivers({
+        workspacePath: params.workspacePath,
+        architectureProfile: params.architectureProfile,
+        strictUnknown: params.strictUnknown,
+        maxFiles: params.maxFiles,
+        now: params.now,
+      });
+      if (params.writeReport) {
+        writeContainedJsonFile(
+          params.workspacePath,
+          "docs/ai-harness/ontology/state/waiver-validation.json",
+          result
+        );
+      }
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Architecture waiver validation failed: ${msg}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: enforce_architecture_governance
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "enforce_architecture_governance",
+  {
+    title: "Enforce Architecture Governance",
+    description: `Run the opt-in semantic governance enforcement gate for CI, PR, or handoff checks.
+
+Report mode is advisory and never blocks local progress. Strict and ci modes are
+explicit opt-in gates that fail on unwaived blocking architecture violations or
+blocking waiver-validation findings. Decisions cite exact rule ids, edge
+fingerprints, waiver receipts, and source refs.`,
+    inputSchema: z.object({
+      workspacePath: workspacePathInputSchema(
+        "Absolute path to the workspace root directory"
+      ),
+      architectureProfile: architectureProfileInputSchema,
+      strictUnknown: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, unresolved or unclassified edges become blocking findings. Defaults to true in strict/ci modes."
+        ),
+      maxFiles: z
+        .number()
+        .int()
+        .positive()
+        .max(5000)
+        .optional()
+        .describe("Maximum source files to scan. Default: 500"),
+      enforcementMode: z
+        .enum(SEMANTIC_ENFORCEMENT_MODES)
+        .optional()
+        .describe("report is advisory; strict and ci are opt-in blocking gates"),
+      failOnWarnings: z
+        .boolean()
+        .optional()
+        .describe("If true in strict/ci mode, warning decisions fail the gate"),
+      now: z
+        .string()
+        .optional()
+        .describe("Optional ISO timestamp used for waiver expiry validation"),
+      writeReport: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, write enforcement-report.json and enforcement-report.md under docs/ai-harness/ontology/state/"
+        ),
+    }),
+  },
+  async (params) => {
+    try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
+      const result = runSemanticEnforcement({
+        workspacePath: params.workspacePath,
+        architectureProfile: params.architectureProfile,
+        strictUnknown: params.strictUnknown,
+        maxFiles: params.maxFiles,
+        enforcementMode: params.enforcementMode,
+        failOnWarnings: params.failOnWarnings,
+        now: params.now,
+      });
+      if (params.writeReport) {
+        writeContainedJsonFile(
+          params.workspacePath,
+          "docs/ai-harness/ontology/state/enforcement-report.json",
+          result
+        );
+        writeContainedFileAtomic(
+          params.workspacePath,
+          path.join(
+            params.workspacePath,
+            "docs/ai-harness/ontology/state/enforcement-report.md"
+          ),
+          result.markdown,
+          "utf-8"
+        );
+      }
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Architecture enforcement failed: ${msg}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: export_architecture_policy_pack
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "export_architecture_policy_pack",
+  {
+    title: "Export Architecture Policy Pack",
+    description: `Export the local architecture ontology policy as a reviewable GitOps policy pack.
+
+The pack is local-first: it never uploads to a central service, marks review as
+required, preserves local authority by default, and includes trust metadata,
+policy hash, source refs, and a deterministic pack signature.`,
+    inputSchema: z.object({
+      workspacePath: workspacePathInputSchema(
+        "Absolute path to the workspace root directory"
+      ),
+      architectureProfile: architectureProfileInputSchema,
+      exportedBy: z
+        .string()
+        .optional()
+        .describe("Operator or system name recorded as the pack signer"),
+      trustLevel: z
+        .enum(["local-draft", "team-reviewed", "organization-reviewed"])
+        .optional()
+        .describe("Trust label recorded in pack metadata"),
+      writePack: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, write docs/ai-harness/ontology/policy-packs/exports/*.policy-pack.json"
+        ),
+    }),
+  },
+  async (params) => {
+    try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
+      const result = exportArchitecturePolicyPack({
+        workspacePath: params.workspacePath,
+        architectureProfile: params.architectureProfile,
+        exportedBy: params.exportedBy,
+        trustLevel: params.trustLevel,
+        writePack: params.writePack,
+      });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Architecture policy pack export failed: ${msg}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool: import_architecture_policy_pack
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "import_architecture_policy_pack",
+  {
+    title: "Import Architecture Policy Pack",
+    description: `Review or explicitly merge a local architecture policy pack.
+
+Default behavior is review-only. Applying a pack requires applyMerge=true,
+mergeStrategy=replace-profile, reviewer metadata, a workspace-contained approval
+ref, a trusted-reviewer approval signature, the prior review receipt path, and
+the exact expected review signature returned by that prior review. The tool
+writes reversible backup and review receipt files when a merge is applied.`,
+    inputSchema: z.object({
+      workspacePath: workspacePathInputSchema(
+        "Absolute path to the workspace root directory"
+      ),
+      packPath: z
+        .string()
+        .describe(
+          "Workspace-contained relative or absolute path to a *.policy-pack.json file"
+        ),
+      applyMerge: z
+        .boolean()
+        .optional()
+        .describe("If true, attempt to merge the incoming policy into local authority"),
+      mergeStrategy: z
+        .enum(POLICY_PACK_MERGE_STRATEGIES)
+        .optional()
+        .describe("Default: review-only. Applying requires replace-profile."),
+      allowProfileChange: z
+        .boolean()
+        .optional()
+        .describe("Required when incoming profile differs from local profile"),
+      allowConflicts: z
+        .boolean()
+        .optional()
+        .describe("Required to apply despite blocking rule conflicts"),
+      reviewedBy: z
+        .string()
+        .optional()
+        .describe("Reviewer identity used to compute the review signature"),
+      approvalRef: z
+        .string()
+        .optional()
+        .describe("Durable approval evidence ref used to compute the review signature"),
+      approvalSignature: z
+        .string()
+        .optional()
+        .describe(
+          "Ed25519 trusted-reviewer signature over the policy-pack approval payload"
+        ),
+      reviewSignature: z
+        .string()
+        .optional()
+        .describe("Exact expectedReviewSignature from a prior review result"),
+      reviewReceiptPath: z
+        .string()
+        .optional()
+        .describe(
+          "Workspace-contained import review receipt path returned by a prior review; required for applyMerge"
+        ),
+      writeReview: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, write docs/ai-harness/ontology/policy-packs/imports/*.import-review.json"
+        ),
+    }),
+  },
+  async (params) => {
+    try {
+      assertAbsoluteWorkspacePath(params.workspacePath);
+      const result = importArchitecturePolicyPack({
+        workspacePath: params.workspacePath,
+        packPath: params.packPath,
+        applyMerge: params.applyMerge,
+        mergeStrategy: params.mergeStrategy,
+        allowProfileChange: params.allowProfileChange,
+        allowConflicts: params.allowConflicts,
+        reviewedBy: params.reviewedBy,
+        approvalRef: params.approvalRef,
+        approvalSignature: params.approvalSignature,
+        reviewSignature: params.reviewSignature,
+        reviewReceiptPath: params.reviewReceiptPath,
+        writeReview: params.writeReview,
+      });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Architecture policy pack import failed: ${msg}`,
           },
         ],
         isError: true,
@@ -2686,15 +3394,17 @@ skills and agents, then pass the selected IDs to this tool.`,
       for (const file of files) {
         const fullPath = path.join(params.workspacePath, file.relativePath);
         try {
-          const dir = path.dirname(fullPath);
-          fs.mkdirSync(dir, { recursive: true });
-
           if (!force && fs.existsSync(fullPath)) {
             skipped.push(file.relativePath);
             continue;
           }
 
-          fs.writeFileSync(fullPath, file.content, "utf-8");
+          writeContainedFileAtomic(
+            params.workspacePath,
+            fullPath,
+            file.content,
+            "utf-8"
+          );
           written.push(file.relativePath);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);

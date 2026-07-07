@@ -11,6 +11,13 @@ import {
   normalizeSafeWorkspaceRelativePaths,
   normalizeWorkspaceRelativePath,
 } from "./generated-file-safety.js";
+import {
+  appendContainedText,
+  assertContainedNonSymlinkFile,
+  ensureContainedDirectory,
+  writeContainedJsonAtomic,
+  writeContainedTextAtomic,
+} from "./safe-workspace-write.js";
 
 type HarnessActorRole = "hub" | "planner" | "generator" | "evaluator" | "operator";
 type HarnessAction =
@@ -1152,8 +1159,43 @@ function slugify(value: string): string {
     .slice(0, 48);
 }
 
+const INFERABLE_WORKSPACE_DOC_ROOTS = new Set([
+  "ai-harness",
+  "context",
+  "plans",
+  "reviews",
+  "contracts",
+  "evaluations",
+  "handovers",
+  "qa",
+  "work-logs",
+]);
+
+function inferWorkspacePathFromManagedPath(fullPath: string): string | null {
+  const resolved = path.resolve(fullPath);
+  const parsed = path.parse(resolved);
+  const segments = resolved
+    .slice(parsed.root.length)
+    .split(path.sep)
+    .filter((segment) => segment.length > 0);
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    if (
+      segments[index].toLowerCase() === "docs" &&
+      INFERABLE_WORKSPACE_DOC_ROOTS.has(segments[index + 1].toLowerCase())
+    ) {
+      return path.join(parsed.root, ...segments.slice(0, index));
+    }
+  }
+  return null;
+}
+
 function ensureDir(dirPath: string): void {
-  fs.mkdirSync(dirPath, { recursive: true });
+  const workspacePath = inferWorkspacePathFromManagedPath(dirPath);
+  if (workspacePath != null) {
+    ensureContainedDirectory(workspacePath, dirPath);
+    return;
+  }
+  throw new Error(`Refusing unmanaged runtime directory creation: ${dirPath}`);
 }
 
 interface JsonReadResult<T> {
@@ -1213,36 +1255,33 @@ function readJsonForRuntimeAudit<T>(
 }
 
 function writeJson(filePath: string, value: unknown): void {
-  ensureDir(path.dirname(filePath));
-  const tempPath = path.join(
-    path.dirname(filePath),
-    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`
-  );
-  try {
-    fs.writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
-    fs.renameSync(tempPath, filePath);
-  } catch (err) {
-    try {
-      if (fs.existsSync(tempPath)) {
-        fs.unlinkSync(tempPath);
-      }
-    } catch {
-      // Ignore cleanup failures so the original write error is preserved.
-    }
-    throw err;
+  const workspacePath = inferWorkspacePathFromManagedPath(filePath);
+  if (workspacePath == null) {
+    throw new Error(`Refusing unmanaged runtime JSON write: ${filePath}`);
   }
+  writeContainedJsonAtomic(workspacePath, filePath, value);
+}
+
+function writeTextAtomic(filePath: string, content: string): void {
+  const workspacePath = inferWorkspacePathFromManagedPath(filePath);
+  if (workspacePath == null) {
+    throw new Error(`Refusing unmanaged runtime text write: ${filePath}`);
+  }
+  writeContainedTextAtomic(workspacePath, filePath, content, "utf-8");
 }
 
 function writeTextIfMissing(filePath: string, content: string): void {
-  ensureDir(path.dirname(filePath));
   if (!fs.existsSync(filePath)) {
-    fs.writeFileSync(filePath, content, "utf-8");
+    writeTextAtomic(filePath, content);
   }
 }
 
 function appendText(filePath: string, content: string): void {
-  ensureDir(path.dirname(filePath));
-  fs.appendFileSync(filePath, content, "utf-8");
+  const workspacePath = inferWorkspacePathFromManagedPath(filePath);
+  if (workspacePath == null) {
+    throw new Error(`Refusing unmanaged runtime append: ${filePath}`);
+  }
+  appendContainedText(workspacePath, filePath, content);
 }
 
 function normalizeRuntimePathSegment(value: string, label: string): string {
@@ -2125,16 +2164,15 @@ function recoverHarnessDashboardLedgerManifest(params: {
       recoveryRule:
         "Corrupt rows were excluded from sequence recovery and preserved here for manual audit.",
     });
-    fs.writeFileSync(
+    writeTextAtomic(
       params.ledgerPath,
       `${existingRecords.map((record) => JSON.stringify(record)).join("\n")}${
         existingRecords.length > 0 ? "\n" : ""
-      }`,
-      "utf-8"
+      }`
     );
   }
   if (!fs.existsSync(params.ledgerPath)) {
-    fs.writeFileSync(params.ledgerPath, "", "utf-8");
+    writeTextAtomic(params.ledgerPath, "");
   }
 
   const lastRecord = existingRecords.at(-1);
@@ -2382,8 +2420,7 @@ function buildHandoffInstruction(handoffMarkdownRelativePath: string): string {
 }
 
 function appendLogHeader(fullPath: string, lines: string[]): void {
-  ensureDir(path.dirname(fullPath));
-  fs.appendFileSync(fullPath, `${lines.join("\n")}\n`, "utf-8");
+  appendText(fullPath, `${lines.join("\n")}\n`);
 }
 
 function isProcessRunning(processId: number): boolean {
@@ -3272,10 +3309,9 @@ export function compactHarnessRuntime(
     sessions: archiveSessions,
   };
   writeJson(bundlePaths.bundlePath, archiveBundle);
-  fs.writeFileSync(
+  writeTextAtomic(
     bundlePaths.summaryPath,
-    buildRuntimeArchiveSummaryMarkdown(archiveBundle),
-    "utf-8"
+    buildRuntimeArchiveSummaryMarkdown(archiveBundle)
   );
 
   archiveIndex.updatedAt = archivedAt;
@@ -3570,7 +3606,7 @@ function saveSession(
   const previousActiveSessionId = index.activeSessionId;
 
   writeJson(sessionPath, session);
-  fs.writeFileSync(summaryPath, buildSessionSummaryMarkdown(session), "utf-8");
+  writeTextAtomic(summaryPath, buildSessionSummaryMarkdown(session));
 
   const sessionEntry = {
     id: session.session.id,
@@ -3918,6 +3954,9 @@ function buildWorkPacketMarkdown(packet: Record<string, unknown>): string {
   const requestRecord = isPlainObject(packet.requestRecord)
     ? packet.requestRecord
     : {};
+  const semanticGovernanceGate = isPlainObject(packet.semanticGovernanceGate)
+    ? packet.semanticGovernanceGate
+    : {};
   const taskTracePolicy = isPlainObject(packet.taskTracePolicy)
     ? packet.taskTracePolicy
     : {};
@@ -4025,6 +4064,15 @@ ${recentEvaluationHistory.map((entry) => {
   ].filter(Boolean).join("\n");
 }).join("\n") || "- none yet"}
 
+## Semantic Governance Gate
+
+- Tool: ${String(semanticGovernanceGate.tool || "enforce_architecture_governance")}
+- Default local mode: ${String(semanticGovernanceGate.defaultLocalMode || "report")}
+- Blocking modes: ${Array.isArray(semanticGovernanceGate.blockingModes) ? (semanticGovernanceGate.blockingModes as string[]).join(", ") : "strict, ci"}
+- Report JSON: ${String(semanticGovernanceGate.reportJsonPath || "docs/ai-harness/ontology/state/enforcement-report.json")}
+- Report Markdown: ${String(semanticGovernanceGate.reportMarkdownPath || "docs/ai-harness/ontology/state/enforcement-report.md")}
+- Handoff warning: ${String(semanticGovernanceGate.handoffWarning || "Run the opt-in semantic enforcement gate before closing architecture-sensitive work.")}
+
 ## Stateful Cognitive Offloading
 
 - Inner tier: ${String(workingMemory.innerTier || "compact prompt-facing working memory")}
@@ -4076,6 +4124,9 @@ function buildAdapterPromptBlock(
   const requestRecord = isPlainObject(packet.requestRecord)
     ? packet.requestRecord
     : {};
+  const semanticGovernanceGate = isPlainObject(packet.semanticGovernanceGate)
+    ? packet.semanticGovernanceGate
+    : {};
 
   return [
     `You are continuing governed AI delivery through the "${adapter.title}" adapter.`,
@@ -4098,6 +4149,11 @@ function buildAdapterPromptBlock(
     "- For every meaningful task, preserve originalRequest, processSummary, and resultSummary in the event or execution receipt.",
     "- Use the workingMemory contract: let the harness carry recoverable state while you focus on semantic decisions.",
     "- Treat evaluationLoop.history as the durable record of work -> negative review -> remediation -> verification.",
+    `- Semantic governance gate: run ${String(
+      semanticGovernanceGate.tool || "enforce_architecture_governance"
+    )} in ${String(
+      semanticGovernanceGate.defaultLocalMode || "report"
+    )} mode locally; use strict/ci before release gates when source architecture changed.`,
     "- Before completion, record static analysis, boundary testing, compatibility, dependency audit, maintainability, self-correction, and atomic commit evidence.",
     "- Preserve sessionId, chunkId, currentPhase, nextActor, and leaseStatus unless an MCP runtime tool advances governance.",
     "- If the work is blocked or ambiguous, stop and record the blocker instead of improvising.",
@@ -4139,6 +4195,9 @@ function buildAdapterHandoffMarkdown(handoff: Record<string, unknown>): string {
       : {};
   const evaluationLoop = isPlainObject(handoff.evaluationLoop)
     ? handoff.evaluationLoop
+    : {};
+  const semanticGovernanceGate = isPlainObject(packet.semanticGovernanceGate)
+    ? packet.semanticGovernanceGate
     : {};
   const operatorChecklist = Array.isArray(handoff.operatorChecklist)
     ? (handoff.operatorChecklist as string[])
@@ -4191,6 +4250,15 @@ function buildAdapterHandoffMarkdown(handoff: Record<string, unknown>): string {
 ## Agent Switching Rule
 
 When moving this session between Copilot, Codex, Claude, Gemini, OpenHands, or another runtime, keep \`sessionId\`, \`chunkId\`, \`currentPhase\`, and \`nextActor\` stable. Read the adapter contract and session continuity files before relying on chat history.
+
+## Semantic Governance Gate
+
+- Tool: ${String(semanticGovernanceGate.tool || "enforce_architecture_governance")}
+- Default local mode: ${String(semanticGovernanceGate.defaultLocalMode || "report")}
+- Blocking modes: ${Array.isArray(semanticGovernanceGate.blockingModes) ? (semanticGovernanceGate.blockingModes as string[]).join(", ") : "strict, ci"}
+- Report JSON: ${String(semanticGovernanceGate.reportJsonPath || "docs/ai-harness/ontology/state/enforcement-report.json")}
+- Report Markdown: ${String(semanticGovernanceGate.reportMarkdownPath || "docs/ai-harness/ontology/state/enforcement-report.md")}
+- Handoff warning: ${String(semanticGovernanceGate.handoffWarning || "Run the opt-in semantic enforcement gate before closing architecture-sensitive work.")}
 
 ## Working Memory Contract
 
@@ -4661,8 +4729,33 @@ function writeWorkPacket(
     queuedSessionIds: runtimeIndex.queuedSessionIds,
     governance: session.governance,
     verification: session.verification,
-    requiredReads: buildPhaseReadPaths(session),
+    requiredReads: uniqueStrings([
+      ...buildPhaseReadPaths(session),
+      "docs/ai-harness/ontology/state/enforcement-report.json",
+      "docs/ai-harness/ontology/state/enforcement-report.md",
+    ]),
     expectedWrites: buildPhaseWritePaths(session),
+    semanticGovernanceGate: {
+      tool: "enforce_architecture_governance",
+      optInOnly: true,
+      defaultLocalMode: "report",
+      blockingModes: ["strict", "ci"],
+      reportJsonPath: "docs/ai-harness/ontology/state/enforcement-report.json",
+      reportMarkdownPath: "docs/ai-harness/ontology/state/enforcement-report.md",
+      handoffWarning:
+        session.session.status === "blocked"
+          ? "This work packet is already blocked. Do not continue implementation until the blocker is recorded, reviewed, and either remediated or waived by exact semantic governance evidence."
+          : "Before closing architecture-sensitive work, run enforce_architecture_governance in report mode locally and strict or ci mode for release gates.",
+      authority:
+        "Exact source graph, ontology policy, governance evaluation, and waiver receipts outrank compressed context or prompt guidance.",
+      sourceRefs: [
+        ".github/ai-harness/architecture-ontology.policy.json",
+        "docs/ai-harness/ontology/state/source-graph.json",
+        "docs/ai-harness/ontology/state/governance-evaluation.json",
+        "docs/ai-harness/ontology/state/waiver-validation.json",
+        "docs/ai-harness/ontology/state/enforcement-report.json",
+      ],
+    },
     parallelExecution: {
       hubRole:
         "The main agent is the hub: it decomposes the request, assigns independent chunks, reviews worker receipts, integrates evidence, and decides whether another improvement pass is required.",
@@ -4694,6 +4787,7 @@ function writeWorkPacket(
     },
     qualityGateChecklist: [
       "Static analysis and likely runtime exception scan",
+      "Opt-in semantic governance report, with strict/ci enforcement before release gates when source architecture changed",
       "Boundary testing for edge inputs and limits",
       "Environment and framework/runtime version compatibility check",
       "Dependency audit for newly added or changed libraries",
@@ -4720,9 +4814,8 @@ function writeWorkPacket(
   };
 
   writeJson(workPacketPath, packet);
-  fs.writeFileSync(workPacketMarkdownPath, buildWorkPacketMarkdown(packet), "utf-8");
-  ensureDir(path.dirname(actorInboxPath));
-  fs.writeFileSync(
+  writeTextAtomic(workPacketMarkdownPath, buildWorkPacketMarkdown(packet));
+  writeTextAtomic(
     actorInboxPath,
     [
       `# ${session.session.nextActor} Inbox`,
@@ -4736,8 +4829,7 @@ function writeWorkPacket(
       "",
       buildRoleBrief(session),
       "",
-    ].join("\n"),
-    "utf-8"
+    ].join("\n")
   );
 
   if (leaseStatus === "active") {
@@ -7546,15 +7638,13 @@ export function launchHarnessNativeExecutor(
     });
     const cappedStdout = capTextByBytes(result.stdout ?? "", maxOutputBytes);
     const cappedStderr = capTextByBytes(result.stderr ?? "", maxOutputBytes);
-    fs.appendFileSync(
+    appendText(
       nativePaths.stdoutLogPath,
-      cappedStdout.text,
-      "utf-8"
+      cappedStdout.text
     );
-    fs.appendFileSync(
+    appendText(
       nativePaths.stderrLogPath,
-      cappedStderr.text,
-      "utf-8"
+      cappedStderr.text
     );
 
     const spawnError = result.error as NodeJS.ErrnoException | undefined;
@@ -7638,6 +7728,8 @@ export function launchHarnessNativeExecutor(
     };
   }
 
+  assertContainedNonSymlinkFile(params.workspacePath, nativePaths.stdoutLogPath);
+  assertContainedNonSymlinkFile(params.workspacePath, nativePaths.stderrLogPath);
   const stdoutFd = fs.openSync(nativePaths.stdoutLogPath, "a");
   const stderrFd = fs.openSync(nativePaths.stderrLogPath, "a");
   let child: ChildProcess;
@@ -8030,24 +8122,21 @@ export function prepareHarnessExecutionBridge(
 
   ensureDir(executionPaths.bridgeDir);
   writeJson(executionPaths.bridgeManifestPath, manifest);
-  fs.writeFileSync(
+  writeTextAtomic(
     executionPaths.launchPowershellPath,
-    buildLaunchPowershell(manifest),
-    "utf-8"
+    buildLaunchPowershell(manifest)
   );
-  fs.writeFileSync(
+  writeTextAtomic(
     executionPaths.launchBashPath,
-    buildLaunchBash(manifest),
-    "utf-8"
+    buildLaunchBash(manifest)
   );
   writeJson(
     executionPaths.resultTemplatePath,
     buildExecutionResultTemplate(manifest)
   );
-  fs.writeFileSync(
+  writeTextAtomic(
     executionPaths.resultGuidePath,
-    buildExecutionBridgeGuide(manifest),
-    "utf-8"
+    buildExecutionBridgeGuide(manifest)
   );
   if (runtimeIndex.activeSessionId === sessionId) {
     writeJson(buildRuntimePaths(workspacePath).currentExecutionBridgePath, {
@@ -8174,15 +8263,13 @@ export function prepareHarnessAdapterHandoff(
 
   ensureDir(handoffPaths.handoffDir);
   writeJson(handoffPaths.handoffPath, handoff);
-  fs.writeFileSync(
+  writeTextAtomic(
     handoffPaths.handoffMarkdownPath,
-    buildAdapterHandoffMarkdown(handoff),
-    "utf-8"
+    buildAdapterHandoffMarkdown(handoff)
   );
-  fs.writeFileSync(
+  writeTextAtomic(
     handoffPaths.checklistPath,
-    buildAdapterChecklistMarkdown(handoff),
-    "utf-8"
+    buildAdapterChecklistMarkdown(handoff)
   );
 
   syncDashboardAdapterHandoff(
@@ -8255,10 +8342,9 @@ export function recordHarnessExecutionResult(
   };
 
   writeJson(executionPaths.receiptPath, receipt);
-  fs.writeFileSync(
+  writeTextAtomic(
     executionPaths.receiptMarkdownPath,
-    buildExecutionReceiptMarkdown(receipt),
-    "utf-8"
+    buildExecutionReceiptMarkdown(receipt)
   );
   appendHarnessDashboardLedgerEvent({
     workspacePath: params.workspacePath,

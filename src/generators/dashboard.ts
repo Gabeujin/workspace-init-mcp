@@ -21,6 +21,11 @@ import {
   DASHBOARD_PROJECTION_VERSION,
   DASHBOARD_SCHEMA_VERSION,
 } from "../data/version.js";
+import {
+  buildArchitectureOntologyPolicyForProfile,
+  getArchitectureProfileDefinition,
+  resolveDefaultArchitectureProfileId,
+} from "../data/architecture-profiles.js";
 
 const BOOTSTRAP_SEQUENCE = 1;
 const BOOTSTRAP_TIME = "bootstrap";
@@ -903,6 +908,272 @@ function buildContextRotMonitor(
       "service/work-system owner and real environment evidence",
       "domain stress evidence gates when a profile is active",
     ],
+  };
+}
+
+function buildSemanticGovernanceDashboard(params: WorkspaceInitParams) {
+  const profileId = resolveDefaultArchitectureProfileId(params);
+  const profile = getArchitectureProfileDefinition(profileId);
+  const policy = buildArchitectureOntologyPolicyForProfile(profileId);
+  const layerNodes = policy.layers
+    .slice()
+    .sort((left, right) => right.depth - left.depth || left.label.localeCompare(right.label))
+    .map((layer) => ({
+      id: layer.id,
+      label: layer.label,
+      depth: layer.depth,
+      access: layer.access,
+      volatility: layer.volatility,
+      pathHints: layer.pathHints.slice(0, 5),
+      evidenceRefs: [
+        ".github/ai-harness/architecture-ontology.policy.json",
+        "docs/ai-harness/ontology/architecture-profiles.catalog.json",
+      ],
+    }));
+  const ruleEdges = policy.rules.map((rule) => ({
+    id: rule.id,
+    predicate: rule.predicate,
+    severity: rule.severity,
+    sourceLayer: rule.sourceLayer,
+    targetLayer: rule.targetLayer,
+    suggestedPath: rule.suggestedPath ?? [],
+    rationale: rule.rationale,
+    evidenceRefs: [
+      ".github/ai-harness/architecture-ontology.policy.json",
+      "docs/ai-harness/ontology/schemas/governance-evaluation.schema.json",
+    ],
+  }));
+  return {
+    schemaVersion: DASHBOARD_SCHEMA_VERSION,
+    semanticSchemaVersion: policy.schemaVersion,
+    status: "bootstrap-pending-scan",
+    profileId,
+    profileLabel: profile.label,
+    profileSummary: profile.summary,
+    enforcementMode: policy.enforcementMode,
+    unknownLayerMode: policy.unknownLayerMode,
+    gate: {
+      verdict: "not-run",
+      canProceed: false,
+      reason:
+        "Run scan_source_graph and validate_architecture_governance before treating architecture state as operational truth.",
+      strictModes: ["report", "strict", "ci"],
+    },
+    sourceGraph: {
+      path: "docs/ai-harness/ontology/state/source-graph.json",
+      status: "bootstrap-empty",
+      expectedTool: "scan_source_graph",
+      metrics: {
+        sourceFileCount: 0,
+        dependencyEdgeCount: 0,
+        unresolvedEdges: 0,
+      },
+    },
+    governanceEvaluation: {
+      path: "docs/ai-harness/ontology/state/governance-evaluation.json",
+      expectedTool: "validate_architecture_governance",
+      verdict: "not-run",
+      blockedEdges: 0,
+      warningEdges: 0,
+    },
+    semanticWarehouse: {
+      path: "docs/ai-harness/ontology/state/semantic-warehouse.json",
+      expectedTool: "query_semantic_warehouse",
+      viewNames: [
+        "files",
+        "symbols",
+        "dependencyEdges",
+        "rules",
+        "violations",
+        "waivers",
+        "evidenceRefs",
+        "claims",
+        "completedFacts",
+      ],
+      status: "bootstrap-empty",
+    },
+    waiverGovernance: {
+      ledgerPath: "docs/ai-harness/ontology/state/bypass-ledger.json",
+      revocationLedgerPath: "docs/ai-harness/ontology/state/waiver-revocations.json",
+      trustPath: ".github/ai-harness/governance-trust.json",
+      expectedTool: "validate_architecture_waivers",
+      status: "no-active-waivers",
+      policy:
+        "Source comments may reference waiver ids only; trusted signed approvals and append-only signed revocations decide validity.",
+    },
+    enforcement: {
+      reportPath: "docs/ai-harness/ontology/state/enforcement-report.json",
+      markdownPath: "docs/ai-harness/ontology/state/enforcement-report.md",
+      expectedTool: "enforce_architecture_governance",
+      status: "opt-in",
+      canBlock: true,
+    },
+    policyPacks: {
+      guidePath: "docs/ai-harness/ontology/policy-packs/README.md",
+      expectedTools: [
+        "export_architecture_policy_pack",
+        "import_architecture_policy_pack",
+      ],
+      status: "gitops-ready",
+    },
+    visualGraph: {
+      nodes: layerNodes,
+      edges: ruleEdges,
+      legend: [
+        "Depth shows direction from outer/interface concerns toward inner/domain concerns.",
+        "Block edges are architecture constraints, not generic lint warnings.",
+        "Unknown layers are visible so Agents know what to classify before editing.",
+      ],
+    },
+    commands: [
+      {
+        id: "scan-source-graph",
+        label: "Scan source graph",
+        tool: "scan_source_graph",
+        payload: { workspacePath: params.workspacePath, architectureProfile: profileId },
+        expectedVisibleChange:
+          "source graph metrics and layer cards update after projection refresh",
+      },
+      {
+        id: "validate-governance",
+        label: "Validate architecture governance",
+        tool: "validate_architecture_governance",
+        payload: { workspacePath: params.workspacePath, architectureProfile: profileId, strictUnknown: true },
+        expectedVisibleChange:
+          "governance gate shows allow, warn, or block with exact rule evidence",
+      },
+      {
+        id: "query-warehouse",
+        label: "Query semantic warehouse",
+        tool: "query_semantic_warehouse",
+        payload: {
+          workspacePath: params.workspacePath,
+          architectureProfile: profileId,
+          queryId: "view_summary",
+        },
+        expectedVisibleChange:
+          "warehouse view counts and route preview expose deterministic fact tables",
+      },
+      {
+        id: "enforce-governance",
+        label: "Run opt-in enforcement",
+        tool: "enforce_architecture_governance",
+        payload: {
+          workspacePath: params.workspacePath,
+          architectureProfile: profileId,
+          enforcementMode: "report",
+          strictUnknown: true,
+        },
+        expectedVisibleChange:
+          "enforcement report summarizes blocked, waived, warning, and partial scan gates",
+      },
+    ],
+    apiRoutes: [
+      "/api/harness-dashboard/v1/snapshot",
+      "/api/harness-dashboard/v1/architecture",
+      "/api/harness-dashboard/v1/agent-bridge",
+      "/api/harness-dashboard/v1/query?scope=architecture&q=governance",
+      "/api/harness-dashboard/v1/events",
+    ],
+    evidenceRefs: [
+      ".github/ai-harness/architecture-ontology.policy.json",
+      "docs/ai-harness/ontology/state/source-graph.json",
+      "docs/ai-harness/ontology/state/governance-evaluation.json",
+      "docs/ai-harness/ontology/state/semantic-warehouse.json",
+      "docs/ai-harness/ontology/state/waiver-validation.json",
+      "docs/ai-harness/ontology/state/enforcement-report.json",
+    ],
+  };
+}
+
+function buildAgentCommandBridge(params: WorkspaceInitParams) {
+  const profileId = resolveDefaultArchitectureProfileId(params);
+  return {
+    schemaVersion: DASHBOARD_SCHEMA_VERSION,
+    status: "draft-only-read-only",
+    executionMode: "draft-only",
+    dashboardDoesNotRunTools: true,
+    requiresAgentExecution: true,
+    policy:
+      "The dashboard only drafts Agent request packets. It never runs tools, writes project files, or invokes an LLM; a human or Agent must copy the draft into an authorized MCP/CLI session. Agents report back through ledger events, projection refresh, and SSE.",
+    channelModel: {
+      humanToAgent:
+        "Dashboard prepares a bounded draft request packet with target tool, payload, expected visible change, evidence refs, architecture profile, and source state hash.",
+      agentToHuman:
+        "Agent writes governed events or projection state through dashboard-ops/runtime tools; SSE refreshes the visible dashboard.",
+      readOnlyBoundary:
+        "No dashboard button writes project files, runs shell commands, invokes an LLM, or executes MCP tools through the local listener.",
+    },
+    inboxPath: "docs/ai-harness/runtime/inbox/",
+    outboxPath: "docs/ai-harness/runtime/outbox/",
+    commandPacketSchema: {
+      schemaVersion: DASHBOARD_SCHEMA_VERSION,
+      required: [
+        "commandId",
+        "executionMode",
+        "dashboardDoesNotRunTools",
+        "targetTool",
+        "payload",
+        "expectedVisibleChange",
+        "evidenceRefs",
+      ],
+    },
+    suggestedCommands: [
+      {
+        id: "agent-refresh-dashboard",
+        label: "Draft request: refresh dashboard projections",
+        targetTool: "dashboard-ops refresh",
+        payload: {
+          command:
+            "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+        },
+        expectedVisibleChange:
+          "Projection confidence, listener health, VCS state, and evidence cards update through SSE.",
+        evidenceRefs: [
+          "docs/ai-harness/dashboard/state/dashboard-state.json",
+          "docs/ai-harness/dashboard/events/harness-events.jsonl",
+        ],
+      },
+      {
+        id: "agent-run-semantic-gate",
+        label: "Draft request: semantic governance gate",
+        targetTool: "enforce_architecture_governance",
+        payload: {
+          workspacePath: params.workspacePath,
+          architectureProfile: profileId,
+          enforcementMode: "report",
+          strictUnknown: true,
+        },
+        expectedVisibleChange:
+          "Architecture tab shows updated gate state, rule evidence, and enforcement report refs after refresh.",
+        evidenceRefs: [
+          "docs/ai-harness/ontology/state/enforcement-report.json",
+          "docs/ai-harness/ontology/state/governance-evaluation.json",
+        ],
+      },
+      {
+        id: "agent-open-governed-session",
+        label: "Draft request: governed work session",
+        targetTool: "start_harness_session",
+        payload: {
+          goal: params.purpose,
+          evidenceRefs: [
+            "docs/ai-harness/dashboard/state/dashboard-state.json",
+          ],
+        },
+        expectedVisibleChange:
+          "Work tab and Agent resume board show the active governed session.",
+        evidenceRefs: [
+          "docs/ai-harness/runtime/state/active-session.json",
+          "docs/ai-harness/runtime/state/session-index.json",
+        ],
+      },
+    ],
+    sseFeedbackLoop: {
+      route: "/api/harness-dashboard/v1/events",
+      events: ["harness.snapshot", "harness.changed", "harness.heartbeat", "harness.error"],
+      expectedLatency: "directory-watch immediate change event plus heartbeat hash fallback",
+    },
   };
 }
 
@@ -1837,6 +2108,20 @@ function buildUserRealityCheck(
       staticModeBehavior: "query is displayed but not fetched",
       listenerModeBehavior: "deterministic read-only search payload",
     },
+    {
+      route: "/api/harness-dashboard/v1/architecture",
+      expectedPayloadKeys: ["semanticGovernance", "agentCommandBridge"],
+      usefulFor: "Shows the architecture ontology profile, rule map, semantic gate, and Agent bridge in one structured payload.",
+      staticModeBehavior: "architecture route chip names the proof surface",
+      listenerModeBehavior: "token-authenticated architecture and command-bridge payload",
+    },
+    {
+      route: "/api/harness-dashboard/v1/agent-bridge",
+      expectedPayloadKeys: ["agentCommandBridge", "agentResumeBrief", "agentTaskQueues"],
+      usefulFor: "Shows read-only Agent command drafts, expected visible changes, and handoff queues without letting the dashboard mutate files.",
+      staticModeBehavior: "Agent bridge command packet stays copy-only",
+      listenerModeBehavior: "token-authenticated Agent bridge payload",
+    },
   ];
   const trustReadinessBriefQuestions = [
     {
@@ -1923,7 +2208,7 @@ function buildUserRealityCheck(
     {
       question: "How can the listener and API help now?",
       answer:
-        "The local listener exposes read-only snapshots, traceability, reality-check, task, and query payloads so the dashboard can be rehydrated from durable state instead of memory or chat.",
+        "The local listener exposes read-only snapshots, traceability, reality-check, task, architecture, Agent bridge, and query payloads so the dashboard can be rehydrated from durable state instead of memory or chat.",
       decision:
         "Use static mode for orientation and the token-protected listener for structured proof previews.",
       confidence: "high",
@@ -2016,6 +2301,8 @@ function buildUserRealityCheck(
         "/api/harness-dashboard/v1/reality-check",
         "/api/harness-dashboard/v1/traceability",
         "/api/harness-dashboard/v1/health",
+        "/api/harness-dashboard/v1/architecture",
+        "/api/harness-dashboard/v1/agent-bridge",
         "/api/harness-dashboard/v1/query?scope=reality-check&q=next",
       ],
       staticModeFallback:
@@ -2074,9 +2361,14 @@ function buildUserRealityCheck(
       {
         question: "What can local tools safely read?",
         answer:
-          "The loopback listener serves read-only snapshot, index, task, traceability, reality-check, briefing, health, SSE, and deterministic query payloads.",
+          "The loopback listener serves read-only snapshot, index, task, traceability, reality-check, architecture, Agent bridge, briefing, health, SSE, and deterministic query payloads.",
         sourceRefs: ["listener", "dashboard-runtime.json"],
-        apiRoutes: ["/api/harness-dashboard/v1/reality-check", "/api/harness-dashboard/v1/runtime"],
+        apiRoutes: [
+          "/api/harness-dashboard/v1/reality-check",
+          "/api/harness-dashboard/v1/architecture",
+          "/api/harness-dashboard/v1/agent-bridge",
+          "/api/harness-dashboard/v1/runtime",
+        ],
       },
     ],
     actionPlan: topActionPlan,
@@ -2216,6 +2508,8 @@ function buildDashboardState(params: WorkspaceInitParams) {
   const realityModel = buildRealityModel(params, workspaceId, projectWorldModel);
   const goalCompass = buildGoalCompass(params, domainStress);
   const contextRotMonitor = buildContextRotMonitor(domainStress);
+  const semanticGovernance = buildSemanticGovernanceDashboard(params);
+  const agentCommandBridge = buildAgentCommandBridge(params);
   const contracts = buildServiceContracts(params);
   const stateHashSeed = {
     workspaceId,
@@ -2263,6 +2557,14 @@ function buildDashboardState(params: WorkspaceInitParams) {
     "docs/ai-harness/dashboard/state/dashboard-index.json",
     "docs/ai-harness/runtime/state/session-index.json",
     "docs/ai-harness/runtime/state/active-session.json",
+    ".github/ai-harness/architecture-ontology.policy.json",
+    ".github/ai-harness/governance-trust.json",
+    "docs/ai-harness/ontology/state/source-graph.json",
+    "docs/ai-harness/ontology/state/governance-evaluation.json",
+    "docs/ai-harness/ontology/state/semantic-warehouse.json",
+    "docs/ai-harness/ontology/state/waiver-validation.json",
+    "docs/ai-harness/ontology/state/enforcement-report.json",
+    "docs/ai-harness/ontology/state/waiver-revocations.json",
   ];
   const agentPlatformGovernance = buildAgentPlatformGovernance(params);
   for (const filePath of agentPlatformGovernance.governanceIndexing.evidenceRefs) {
@@ -2490,9 +2792,14 @@ function buildDashboardState(params: WorkspaceInitParams) {
       negativeFinding:
         "Route chips are helpful in local-live mode, but static mode can only name proof paths and users still need token-authenticated listener health to avoid stale reads.",
       userOutcome:
-        "Users can inspect structured read-only payloads for reality, traceability, evidence lookup, tasks, runtime, health, and deterministic query once the listener is started.",
+        "Users can inspect structured read-only payloads for reality, traceability, architecture governance, Agent command handoff, evidence lookup, tasks, runtime, health, and deterministic query once the listener is started.",
       evidenceRefs: ["listener", "userRealityCheck.listenerTrustCard", "docs/ai-harness/dashboard/state/dashboard-runtime.json"],
-      apiRouteChips: ["/api/harness-dashboard/v1/health", "/api/harness-dashboard/v1/runtime"],
+      apiRouteChips: [
+        "/api/harness-dashboard/v1/health",
+        "/api/harness-dashboard/v1/runtime",
+        "/api/harness-dashboard/v1/architecture",
+        "/api/harness-dashboard/v1/agent-bridge",
+      ],
       nextAction:
         "Start the loopback listener and verify health/runtime route chips before relying on live local previews.",
     },
@@ -2745,6 +3052,8 @@ function buildDashboardState(params: WorkspaceInitParams) {
       ],
       edges: projectWorldModel.dependencies,
     },
+    semanticGovernance,
+    agentCommandBridge,
     worldJudgment: {
       status: "bootstrap-not-ready-for-operational-judgment",
       label: "Harness Installed, Evidence Capture Started",
@@ -2876,7 +3185,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
       claims: [
         {
           claimId: "claim.world-model.bootstrap",
-          statement: "The Harness Dashboard 4.6.8 world model exists for this workspace.",
+          statement: "The Harness Dashboard 5.0.0 world model exists for this workspace.",
           subjectRef: `workspace:${workspaceId}`,
           claimStatus: "supported",
           confidence: 0.78,
@@ -3348,13 +3657,15 @@ function buildDashboardState(params: WorkspaceInitParams) {
           "Decisions, agent platform intake, gates, values, definitions of ready/done, cadence, reviews, retros, and improvement actions.",
         Operations:
           "Service topology, environments, dependencies, releases, incidents, SLO/SLI, database, and listener health.",
+        Architecture:
+          "Semantic governance cockpit: ontology profile, layer map, architecture rules, waivers, enforcement, warehouse, SSE, and Agent bridge.",
         TechStack:
           "Project architecture, technology stack, infrastructure, deployment path, data stores, and harness integration.",
       },
       nonDuplicationRules: [
         "Do not repeat the same table across tabs; link to the authoritative tab instead.",
         "When a fact appears in more than one view, each tab must answer a different user question about that fact.",
-        "Overview summarizes; Work sequences; Evidence proves; Governance decides; Operations runs; Tech Stack explains composition.",
+        "Overview summarizes; Work sequences; Evidence proves; Governance decides; Operations runs; Architecture governs boundaries; Tech Stack explains composition.",
       ],
       dashboardCollaborationProtocol: [
         "When the user references a dashboard tab or task, answer as if both user and Agent are looking at that same projected state.",
@@ -3424,6 +3735,8 @@ function buildDashboardState(params: WorkspaceInitParams) {
           "workTimeline",
           "domainStress",
           "domainOperations",
+          "semanticGovernance",
+          "agentCommandBridge",
         ],
         forbiddenAssumptions: [
           "Do not assume service readiness from bootstrap state.",
@@ -3453,7 +3766,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     stakeholderBrief: {
       currentGoal: params.purpose,
       whatChangedSinceLastReview:
-        "Workspace initialized with the Harness Dashboard 4.6.8 Hypertext Project World Model.",
+        "Workspace initialized with the Harness Dashboard 5.0.0 Hypertext Project World Model.",
       whyItMatters:
         "Stakeholders and AI Agents now share a durable, evidence-backed view of project reality.",
       currentRisk:
@@ -3731,7 +4044,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         },
       ],
       singleFileConstraint:
-        "the 4.6.8 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
+        "the 5.0.0 HTML ships a native SVG/HTML Gantt renderer so the dashboard remains single-file, CDN-free, and shareable offline.",
     },
     listener: {
       workspaceId,
@@ -3757,7 +4070,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.8", "world model"],
+          aliases: ["Harness Dashboard 5.0.0", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -3822,7 +4135,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           termId: "term-project-world-model",
           label: "Project World Model",
           type: "domainConcept",
-          aliases: ["Harness Dashboard 4.6.8", "world model"],
+          aliases: ["Harness Dashboard 5.0.0", "world model"],
           definition:
             "The durable ontology and evidence-backed projection set that describes the project reality for stakeholders and AI Agents.",
           owner: "harness-dashboard-operator",
@@ -3913,7 +4226,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         type: "dashboard-bootstrap",
         status: "complete",
         occurredAt: BOOTSTRAP_TIME,
-        summary: "Harness Dashboard 4.6.8 world model bootstrap generated.",
+        summary: "Harness Dashboard 5.0.0 world model bootstrap generated.",
         evidenceRefs: ["event-000001-bootstrap"],
       },
     ],
@@ -3990,7 +4303,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         completeness: "partial",
       },
     },
-    // Runtime-facing facade fields projected from the 4.6.8 world model.
+    // Runtime-facing facade fields projected from the 5.0.0 world model.
     executiveSummary: {
       headline: `${params.workspaceName} Project World Model`,
       overallStatus: "bootstrap",
@@ -4023,7 +4336,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     },
     governanceState: {
       policyId: "project-world-model-4-6",
-      policyLabel: "Harness Dashboard 4.6.8 Hypertext Project World Model",
+      policyLabel: "Harness Dashboard 5.0.0 Hypertext Project World Model",
       status: "active",
       sessionGovernanceRule:
         "Every meaningful AI session must append canonical events, refresh projections, and leave an agent resume brief.",
@@ -4172,7 +4485,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     timeline: [
       {
         id: "timeline-bootstrap",
-        label: "dashboard 4.6.8 Bootstrap",
+        label: "dashboard 5.0.0 Bootstrap",
         type: "governance",
         status: "complete",
         owner: "workspace-init-mcp",
@@ -4198,7 +4511,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
     versionLedger: [
       {
         id: "harness-dashboard-4-6",
-        label: "Harness Dashboard 4.6.8",
+        label: "Harness Dashboard 5.0.0",
         status: "bootstrap",
         scope: "Project World Model",
         progressPercent: 8,
@@ -4238,7 +4551,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
           actor: "initializer",
           action: "bootstrap",
           outcome: "project-world-model-created",
-          note: "dashboard 4.6.8 projections and canonical ledger initialized.",
+          note: "dashboard 5.0.0 projections and canonical ledger initialized.",
         },
       ],
     },
@@ -4649,6 +4962,117 @@ function buildDashboardStateSchema(): string {
       activeProfileIds: { type: "array", items: { type: "string" } },
       status: { type: "string" },
       programs: { type: "array" },
+    },
+  };
+  properties.semanticGovernance = {
+    type: "object",
+    required: [
+      "schemaVersion",
+      "semanticSchemaVersion",
+      "status",
+      "profileId",
+      "gate",
+      "sourceGraph",
+      "governanceEvaluation",
+      "semanticWarehouse",
+      "waiverGovernance",
+      "enforcement",
+      "policyPacks",
+      "visualGraph",
+      "commands",
+      "apiRoutes",
+      "evidenceRefs",
+    ],
+    additionalProperties: true,
+    properties: {
+      schemaVersion: { type: "string" },
+      semanticSchemaVersion: { type: "string" },
+      status: { type: "string" },
+      profileId: { type: "string" },
+      profileLabel: { type: "string" },
+      gate: {
+        type: "object",
+        required: ["verdict", "canProceed", "reason"],
+        additionalProperties: true,
+      },
+      sourceGraph: {
+        type: "object",
+        required: ["path", "status", "expectedTool", "metrics"],
+        additionalProperties: true,
+      },
+      governanceEvaluation: {
+        type: "object",
+        required: ["path", "expectedTool", "verdict"],
+        additionalProperties: true,
+      },
+      semanticWarehouse: {
+        type: "object",
+        required: ["path", "expectedTool", "viewNames", "status"],
+        additionalProperties: true,
+      },
+      waiverGovernance: {
+        type: "object",
+        required: ["ledgerPath", "expectedTool", "status", "policy"],
+        additionalProperties: true,
+      },
+      enforcement: {
+        type: "object",
+        required: ["reportPath", "expectedTool", "status", "canBlock"],
+        additionalProperties: true,
+      },
+      policyPacks: {
+        type: "object",
+        required: ["guidePath", "expectedTools", "status"],
+        additionalProperties: true,
+      },
+      visualGraph: {
+        type: "object",
+        required: ["nodes", "edges", "legend"],
+        additionalProperties: true,
+      },
+      commands: { type: "array" },
+      apiRoutes: { type: "array", items: { type: "string" } },
+      evidenceRefs: { type: "array", items: { type: "string" } },
+    },
+  };
+  properties.agentCommandBridge = {
+    type: "object",
+    required: [
+      "schemaVersion",
+      "status",
+      "executionMode",
+      "dashboardDoesNotRunTools",
+      "requiresAgentExecution",
+      "policy",
+      "channelModel",
+      "inboxPath",
+      "outboxPath",
+      "commandPacketSchema",
+      "suggestedCommands",
+      "sseFeedbackLoop",
+    ],
+    additionalProperties: true,
+    properties: {
+      schemaVersion: { type: "string" },
+      status: { type: "string" },
+      executionMode: { type: "string" },
+      dashboardDoesNotRunTools: { type: "boolean" },
+      requiresAgentExecution: { type: "boolean" },
+      policy: { type: "string" },
+      channelModel: {
+        type: "object",
+        required: ["humanToAgent", "agentToHuman", "readOnlyBoundary"],
+        additionalProperties: true,
+      },
+      inboxPath: { type: "string" },
+      outboxPath: { type: "string" },
+      commandPacketSchema: { type: "object", additionalProperties: true },
+      suggestedCommands: { type: "array" },
+      sseFeedbackLoop: {
+        type: "object",
+        required: ["route", "events", "expectedLatency"],
+        additionalProperties: true,
+      },
     },
   };
   properties.realityModel = {
@@ -5126,7 +5550,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
-    <title>${workspaceName} Harness Dashboard 4.6.8</title>
+    <title>${workspaceName} Harness Dashboard 5.0.0</title>
     <style>
       :root {
         --bg: #f6f8fb;
@@ -5339,6 +5763,43 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       .architecture-node { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; min-height: 112px; display: grid; gap: 6px; }
       .architecture-node.primary { border-color: rgba(23, 105, 170, 0.35); background: #f5f9ff; }
       .architecture-node.warn { border-color: rgba(154, 103, 0, 0.35); background: #fffaf0; }
+      .semantic-cockpit { display: grid; grid-template-columns: minmax(0, 0.58fr) minmax(300px, 0.42fr); gap: 12px; align-items: stretch; }
+      .semantic-hero { border: 1px solid rgba(23, 105, 170, 0.24); border-radius: 8px; background: #f5f9ff; padding: 14px; display: grid; gap: 10px; min-width: 0; }
+      .semantic-hero strong { font-size: 1.25rem; overflow-wrap: anywhere; }
+      .sse-status { border: 1px solid rgba(31, 122, 77, 0.24); border-radius: 8px; background: #f3fbf6; padding: 12px; display: grid; gap: 8px; min-width: 0; }
+      .sse-status.warn { border-color: rgba(154, 103, 0, 0.28); background: #fffaf0; }
+      .semantic-layer-map { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+      .semantic-layer-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px; display: grid; gap: 8px; min-height: 158px; min-width: 0; }
+      .semantic-layer-card.inner { border-color: rgba(31, 122, 77, 0.3); background: #f3fbf6; }
+      .semantic-layer-card.outer { border-color: rgba(23, 105, 170, 0.28); background: #f5f9ff; }
+      .path-hints { display: flex; flex-wrap: wrap; gap: 5px; }
+      .path-hint { border: 1px solid rgba(82, 96, 109, 0.22); border-radius: 999px; background: #f8fafc; padding: 2px 7px; font-size: 0.72rem; color: var(--muted); overflow-wrap: anywhere; }
+      .rule-flow-map { display: grid; gap: 8px; margin-bottom: 12px; }
+      .rule-flow-row { display: grid; grid-template-columns: minmax(0, 0.34fr) minmax(120px, 0.32fr) minmax(0, 0.34fr); gap: 8px; align-items: stretch; }
+      .flow-node, .flow-edge { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 8px; min-width: 0; display: grid; gap: 3px; }
+      .flow-node strong, .flow-edge strong { overflow-wrap: anywhere; }
+      .flow-edge { align-content: center; text-align: center; background: #f8fafc; color: var(--muted); }
+      .flow-edge.block { border-color: rgba(180, 35, 24, 0.3); background: #fff7f5; color: #742626; }
+      .flow-edge.warn { border-color: rgba(154, 103, 0, 0.28); background: #fffaf0; color: #7a5200; }
+      .hidden-count { border: 1px dashed rgba(82, 96, 109, 0.28); border-radius: 8px; background: #f8fafc; padding: 8px; color: var(--muted); font-size: 0.82rem; }
+      .semantic-rule-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+      .semantic-rule-card { border: 1px solid var(--line); border-radius: 8px; background: #fbfcfd; padding: 12px; display: grid; gap: 8px; min-width: 0; }
+      .semantic-rule-card.block { border-color: rgba(180, 35, 24, 0.3); background: #fff7f5; }
+      .semantic-rule-card.warn { border-color: rgba(154, 103, 0, 0.28); background: #fffaf0; }
+      .rule-arrow { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--muted); overflow-wrap: anywhere; }
+      .gate-pipeline { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+      .gate-step { border: 1px solid var(--line); border-radius: 8px; background: #fbfcfd; padding: 12px; display: grid; gap: 8px; min-width: 0; }
+      .gate-step.active { border-color: rgba(23, 105, 170, 0.32); background: #f5f9ff; }
+      .gate-step.blocked { border-color: rgba(180, 35, 24, 0.3); background: #fff7f5; }
+      .agent-bridge { display: grid; grid-template-columns: minmax(300px, 0.42fr) minmax(0, 0.58fr); gap: 12px; align-items: start; }
+      .command-composer { border: 1px solid rgba(23, 105, 170, 0.24); border-radius: 8px; background: #f7fbff; padding: 12px; display: grid; gap: 10px; min-width: 0; }
+      .command-composer label { display: grid; gap: 6px; font-weight: 800; }
+      .command-composer select, .command-composer textarea { width: 100%; min-width: 0; max-width: 100%; }
+      .command-composer textarea { min-height: 92px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: inherit; }
+      .command-status { display: block; }
+      .command-preview { border: 1px solid var(--line); border-radius: 8px; background: #0f1720; color: #d8f3ff; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; max-width: 100%; min-height: 220px; max-height: 420px; overflow: auto; }
+      .bridge-channel { display: grid; gap: 8px; }
+      .bridge-channel .hub-item { background: #fff; }
       .world-map-visual { border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; padding: 12px; display: grid; gap: 12px; }
       .world-node-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
       .world-node { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; display: grid; gap: 6px; }
@@ -5361,8 +5822,8 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       .axis-ticks { position: relative; min-height: 24px; }
       .axis-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--muted); font-size: 0.72rem; white-space: nowrap; }
       @keyframes ganttPulse { to { transform: translateX(100%); } }
-      input, select, button { font: inherit; }
-      input, select { border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: #fff; color: var(--text); }
+      input, select, button { font: inherit; max-width: 100%; }
+      input, select { border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: #fff; color: var(--text); min-width: 0; }
       button.primary { border: 0; border-radius: 6px; padding: 8px 12px; background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; }
       button.secondary { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; background: #fff; color: var(--text); font-weight: 800; cursor: pointer; }
       button.secondary:hover, button.primary:hover { filter: brightness(0.97); }
@@ -5461,7 +5922,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
       .hidden { display: none !important; }
       .mono { font-family: Consolas, "Courier New", monospace; }
       @media (max-width: 900px) {
-        .hero, .control-grid, .overview-guide, .guide-strip, .hub-grid, .task-board-columns, .judgment-console, .judgment-actions, .score-duo, .actionability, .decision-strip, .trust-boundary, .status-rail, .metric-grid, .card-grid, .signal-grid, .open-work-grid, .work-hero, .stack-grid, .architecture-map, .platform-intake, .platform-grid, .trace-flow, .deck-slide, .deck-metrics, .gantt-axis, .gantt-row, .ops-command-hero { grid-template-columns: 1fr; }
+        .hero, .control-grid, .overview-guide, .guide-strip, .hub-grid, .task-board-columns, .judgment-console, .judgment-actions, .score-duo, .actionability, .decision-strip, .trust-boundary, .status-rail, .metric-grid, .card-grid, .signal-grid, .open-work-grid, .work-hero, .stack-grid, .architecture-map, .semantic-cockpit, .semantic-layer-map, .semantic-rule-grid, .rule-flow-row, .gate-pipeline, .agent-bridge, .platform-intake, .platform-grid, .trace-flow, .deck-slide, .deck-metrics, .gantt-axis, .gantt-row, .ops-command-hero { grid-template-columns: 1fr; }
         .panel, .panel-wide { grid-column: span 12; }
         .control-card { min-width: 0; }
         .slide-deck { padding: 12px; }
@@ -5490,7 +5951,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
     <div class="shell">
       <header class="hero">
         <div>
-          <p class="eyebrow">Harness Dashboard 4.6.8</p>
+          <p class="eyebrow">Harness Dashboard 5.0.0</p>
           <h1 id="dashboard-title" data-workspace="${workspaceName}">${workspaceName} Project World Model</h1>
           <p class="lede" id="dashboard-lede">A canonical, ledger-backed view of project reality for stakeholders, AI Agents, and maintainers.</p>
         </div>
@@ -5537,6 +5998,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         <button class="tab" role="tab" id="tab-evidence" aria-controls="view-evidence" aria-selected="false" tabindex="-1" data-purpose="Proof view: claim-to-evidence matrix, missing evidence, source links, Git/SVN records, and validation warnings.">Evidence</button>
         <button class="tab" role="tab" id="tab-governance" aria-controls="view-governance" aria-selected="false" tabindex="-1" data-purpose="Decision view: value hierarchy, readiness judgments, approvals, gates, definition of ready/done, retro and review loops.">Governance</button>
         <button class="tab" role="tab" id="tab-system" aria-controls="view-system" aria-selected="false" tabindex="-1" data-purpose="System topology view: services, environments, dependencies, operations readiness, and listener health without repeating the executive mission.">System</button>
+        <button class="tab" role="tab" id="tab-architecture" aria-controls="view-architecture" aria-selected="false" tabindex="-1" data-purpose="Architecture governance view: ontology profile, layer map, source graph, rules, waivers, enforcement, SSE, and Agent command bridge.">Architecture</button>
         <button class="tab" role="tab" id="tab-tech" aria-controls="view-tech" aria-selected="false" tabindex="-1" data-purpose="Technology stack view: project architecture, runtime stack, infrastructure, data stores, deployment path, and harness integration points.">Tech Stack</button>
       </nav>
       <section id="tab-purpose" class="tab-purpose" aria-live="polite"></section>
@@ -5546,6 +6008,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         <section id="view-evidence" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-evidence" aria-hidden="true" hidden inert></section>
         <section id="view-governance" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-governance" aria-hidden="true" hidden inert></section>
         <section id="view-system" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-system" aria-hidden="true" hidden inert></section>
+        <section id="view-architecture" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-architecture" aria-hidden="true" hidden inert></section>
         <section id="view-tech" class="grid panel-wide hidden" role="tabpanel" aria-labelledby="tab-tech" aria-hidden="true" hidden inert></section>
       </main>
     </div>
@@ -5577,6 +6040,14 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         apiLookupStatus: "",
         apiLookupRoute: "",
         apiLookupPayload: null,
+        eventStatus: "not-connected",
+        lastSseAt: "",
+        sseConnected: false,
+        eventSource: null,
+        agentCommandType: "agent-refresh-dashboard",
+        agentCommandText: "",
+        agentCommandPacket: null,
+        agentCommandCopyStatus: "",
         projectionError: "",
         slideIndex: 0,
         slideDeckOpen: false,
@@ -5673,12 +6144,14 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "tab.evidence": "Evidence",
           "tab.governance": "Governance",
           "tab.system": "Operations",
+          "tab.architecture": "Architecture",
           "tab.tech": "Tech Stack",
           "purpose.overview": "What changed, why it matters, the current risk, the required decision, and whether the state is trustworthy.",
           "purpose.work": "Open work first: progress, remaining time, blockers, status lanes, readiness timeline, and KPI inputs.",
           "purpose.evidence": "Claims, proof, missing evidence, source links, Git/SVN records, and validation warnings.",
           "purpose.governance": "Decisions, AI platform intake, value hierarchy, readiness gates, definitions, cadence, reviews, and retro loops.",
           "purpose.system": "Operational topology, services, environments, dependencies, release/incident/data readiness, and listener health.",
+          "purpose.architecture": "Semantic architecture governance: ontology profile, layer map, rule flow, waivers, enforcement, warehouse, SSE, and Agent bridge.",
           "purpose.tech": "Project composition, technology stack, infrastructure, deployment path, data stores, and harness integration points.",
           "mode": "Mode",
           "source": "Source",
@@ -5793,6 +6266,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "apiLookupStatic": "Local listener is not connected; run the listener bootstrap command shown in User Reality Check, then reopen this dashboard through the local listener.",
           "apiLookupOk": "Read-only local API response loaded.",
           "apiLookupError": "Local API lookup failed",
+          "apiLookupRejected": "Route rejected: dashboard API previews only allow same-origin harness routes.",
           "payloadKeys": "Payload keys",
           "capabilities": "Capabilities",
           "hubLocalApi": "Local listener API",
@@ -5869,6 +6343,44 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "dataStorage": "Data And Storage",
           "harnessIntegration": "Harness Integration",
           "architectureMap": "Architecture Map",
+          "semanticCockpit": "Semantic Governance Cockpit",
+          "architectureLayerMap": "Architecture Layer Map",
+          "governancePipeline": "Governance Pipeline",
+          "ruleFlow": "Rule Flow",
+          "waiverGate": "Waiver Gate",
+          "enforcementGate": "Enforcement Gate",
+          "policyPacks": "Policy Packs",
+          "semanticWarehouse": "Semantic Warehouse",
+          "sourceGraph": "Source Graph",
+          "agentCommandBridge": "Agent Command Bridge",
+          "commandComposer": "Agent Request Draft Composer",
+          "buildCommandPacket": "Build draft packet",
+          "copyCommandPacket": "Copy draft for Agent",
+          "commandPacketReady": "Draft packet ready",
+          "commandCopyOk": "Draft packet copied",
+          "sseLiveStatus": "SSE live status",
+          "architectureRuleFlowMap": "Architecture rule flow map",
+          "hiddenRules": "hidden rules",
+          "lastSseEvent": "Last SSE event",
+          "sseRoute": "SSE route",
+          "immediateUpdate": "Immediate update",
+          "targetTool": "Target tool",
+          "readOnlyBoundary": "Read-only boundary",
+          "humanToAgent": "Human to Agent",
+          "agentToHuman": "Agent to Human",
+          "profile": "Profile",
+          "rules": "Rules",
+          "layers": "Layers",
+          "gate": "Gate",
+          "verdict": "Verdict",
+          "unknownLayerMode": "Unknown layer mode",
+          "enforcementMode": "Enforcement mode",
+          "pathHints": "Path hints",
+          "severity": "Severity",
+          "predicate": "Predicate",
+          "fromLayer": "From layer",
+          "toLayer": "To layer",
+          "commandNote": "Command note",
           "agentPlatformIntake": "AI Agent Platform Intake",
           "platformIntakeCopy": "Select the AI agent platforms that are actually used in this project. Submitting here prepares the exact local command; persistence happens through dashboard-ops so the read-only listener stays safe.",
           "detectedPlatforms": "Detected platforms",
@@ -5969,12 +6481,14 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "tab.evidence": "근거",
           "tab.governance": "거버넌스",
           "tab.system": "운영",
+          "tab.architecture": "아키텍처",
           "tab.tech": "기술 구성",
           "purpose.overview": "무엇이 바뀌었고, 왜 중요한지, 현재 위험과 필요한 결정, 상태 신뢰도를 먼저 보여줍니다.",
           "purpose.work": "열려 있는 작업을 먼저 보여주고 진행률, 남은 기간, 차단 요인, 상태 레인, 준비도 타임라인, KPI 입력값을 다룹니다.",
           "purpose.evidence": "주장, 증거, 빠진 근거, 소스 링크, Git/SVN 기록, 검증 경고를 다룹니다.",
           "purpose.governance": "결정, AI 플랫폼 입력, 가치 우선순위, 준비 게이트, 정의, 주기, 리뷰와 회고 루프를 다룹니다.",
           "purpose.system": "운영 토폴로지, 서비스, 환경, 의존성, 릴리즈/장애/데이터 준비도, 리스너 상태를 다룹니다.",
+          "purpose.architecture": "온톨로지 프로필, 레이어 지도, 규칙 흐름, waiver, enforcement, warehouse, SSE, Agent 브릿지를 함께 보여줍니다.",
           "purpose.tech": "프로젝트 구성, 기술 스택, 인프라, 배포 경로, 데이터 저장소, 하네스 연동 지점을 보여줍니다.",
           "mode": "모드",
           "source": "출처",
@@ -6089,6 +6603,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "apiLookupStatic": "로컬 리스너가 연결되지 않았습니다. 사용자 현실 점검에 표시된 리스너 부트스트랩 명령을 실행한 뒤 로컬 리스너로 대시보드를 다시 여세요.",
           "apiLookupOk": "읽기 전용 로컬 API 응답을 불러왔습니다.",
           "apiLookupError": "로컬 API 조회 실패",
+          "apiLookupRejected": "경로가 거부되었습니다. 대시보드 API 미리보기는 같은 출처의 하네스 경로만 허용합니다.",
           "payloadKeys": "페이로드 키",
           "capabilities": "기능",
           "hubLocalApi": "로컬 리스너 API",
@@ -6165,6 +6680,44 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           "dataStorage": "데이터와 저장소",
           "harnessIntegration": "하네스 연동",
           "architectureMap": "아키텍처 지도",
+          "semanticCockpit": "Semantic Governance Cockpit",
+          "architectureLayerMap": "아키텍처 레이어 지도",
+          "governancePipeline": "거버넌스 파이프라인",
+          "ruleFlow": "규칙 흐름",
+          "waiverGate": "Waiver 게이트",
+          "enforcementGate": "Enforcement 게이트",
+          "policyPacks": "정책 팩",
+          "semanticWarehouse": "Semantic Warehouse",
+          "sourceGraph": "소스 그래프",
+          "agentCommandBridge": "Agent Command Bridge",
+          "commandComposer": "Agent 요청 초안 작성",
+          "buildCommandPacket": "초안 패킷 만들기",
+          "copyCommandPacket": "Agent용 초안 복사",
+          "commandPacketReady": "초안 패킷 준비됨",
+          "commandCopyOk": "초안 패킷을 복사했습니다",
+          "sseLiveStatus": "SSE 실시간 상태",
+          "architectureRuleFlowMap": "아키텍처 규칙 흐름 지도",
+          "hiddenRules": "숨겨진 규칙",
+          "lastSseEvent": "마지막 SSE 이벤트",
+          "sseRoute": "SSE 경로",
+          "immediateUpdate": "즉시 반영",
+          "targetTool": "대상 도구",
+          "readOnlyBoundary": "읽기 전용 경계",
+          "humanToAgent": "Human to Agent",
+          "agentToHuman": "Agent to Human",
+          "profile": "프로필",
+          "rules": "규칙",
+          "layers": "레이어",
+          "gate": "게이트",
+          "verdict": "판정",
+          "unknownLayerMode": "미분류 레이어 모드",
+          "enforcementMode": "Enforcement 모드",
+          "pathHints": "경로 힌트",
+          "severity": "심각도",
+          "predicate": "조건",
+          "fromLayer": "출발 레이어",
+          "toLayer": "도착 레이어",
+          "commandNote": "명령 메모",
           "agentPlatformIntake": "AI 에이전트 플랫폼 입력",
           "platformIntakeCopy": "이 프로젝트에서 실제로 사용하는 AI 에이전트 플랫폼을 선택하세요. 제출은 정확한 로컬 명령을 준비하며, 읽기 전용 listener 보호를 위해 실제 기록은 dashboard-ops가 수행합니다.",
           "detectedPlatforms": "감지된 플랫폼",
@@ -6476,10 +7029,15 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           render();
           return;
         }
+        if (!selectedRoute.startsWith("/api/harness-dashboard/v1/")) {
+          app.apiLookupStatus = t("apiLookupRejected");
+          render();
+          return;
+        }
         app.apiLookupStatus = t("openApiRoute") + ': ' + selectedRoute;
         render();
         try {
-          const requestUrl = selectedRoute.charAt(0) === "/" ? "." + selectedRoute : selectedRoute;
+          const requestUrl = "." + selectedRoute;
           const response = await fetch(requestUrl, {
             headers: { "x-harness-dashboard-token": localApiToken },
             cache: "no-store",
@@ -8065,12 +8623,29 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           badge(source.status || "observed"),
           esc((source.promotesClaimIds || []).join(", ") || t("none")),
         ]);
+        const hasGitHubActions = tech.some((item) => item.label === "GitHub Actions");
+        const hasGitHubPages = tech.some((item) => item.label === "GitHub Pages");
+        const hasSupabase = tech.some((item) => item.label === "Supabase");
+        const hasPostgres = tech.some((item) => item.label === "Postgres");
+        const hasLocalStorage = tech.some((item) => item.label === "localStorage");
         const architecture = [
-          ["primary", "Frontend", service.label || service.id || "project service", service.lifecycleState || "unknown"],
-          ["", "Build / CI", tech.some((item) => item.label === "GitHub Actions") ? "GitHub Actions" : "not evidenced", release.status || "unknown"],
-          ["", "Deploy", tech.some((item) => item.label === "GitHub Pages") ? "GitHub Pages" : "deployment target not evidenced", release.targetEnvironment || "unknown"],
-          ["warn", "Data", tech.some((item) => item.label === "Supabase") ? "Supabase / Postgres" : (db.migrationStatus || "not connected"), db.backupFreshness || "backup unknown"],
+          ["primary", "Primary system", service.label || service.id || "project service", service.lifecycleState || "unknown"],
+          ["", "Build / verification", hasGitHubActions ? "GitHub Actions" : "toolchain not evidenced", release.status || "unknown"],
+          ["", "Distribution", hasGitHubPages ? "GitHub Pages" : "target not evidenced", release.targetEnvironment || "unknown"],
+          ["warn", "State / data", db.migrationStatus || (hasSupabase || hasPostgres ? "declared" : "not connected"), db.backupFreshness || "backup unknown"],
         ].map(([klass, title, primary, secondary]) => '<div class="architecture-node ' + esc(klass) + '"><span class="rail-label">' + esc(title) + '</span><strong>' + esc(primary) + '</strong><span class="source">' + esc(secondary) + '</span></div>').join("");
+        const infraRows = [
+          ["Release readiness", badge(release.status || "unknown"), esc(release.releaseId || release.version || "not declared")],
+          ["Build / verification", badge(hasGitHubActions ? "observed" : "missing-evidence"), esc(hasGitHubActions ? ".github/workflows/deploy.yml" : "workflow not evidenced")],
+          ["Distribution target", badge((release.targetEnvironment || hasGitHubPages) ? "declared" : "unknown"), esc(release.targetEnvironment || (hasGitHubPages ? "GitHub Pages" : "not declared"))],
+          ["Rollback", badge(release.rollbackCommand ? "declared" : "missing-evidence"), esc(release.rollbackCommand || "not declared")],
+        ];
+        const dataRows = [
+          ["Data readiness", badge(db.migrationStatus || "not-connected"), esc(db.schemaVersion || "not declared")],
+          ["Structured data store", badge(hasPostgres ? "observed" : "unknown"), esc(hasPostgres ? "SQL schema evidence" : "not evidenced")],
+        ];
+        if (hasSupabase) dataRows.push(["Managed backend", badge("declared"), esc("Supabase evidence observed")]);
+        if (hasLocalStorage) dataRows.push(["Browser/client persistence", badge("declared"), esc("localStorage evidence observed")]);
         document.getElementById("view-tech").innerHTML =
           panel(t("stackComposition"), metricGrid([
             ["Services", (serviceRegistry.services || []).length, "serviceRegistry"],
@@ -8080,20 +8655,206 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           ]) + '<p><strong>' + esc(t("currentGoal")) + ':</strong> ' + esc((state.stakeholderBrief || {}).currentGoal || "") + '</p>', true) +
           panel(t("architectureMap"), '<div class="architecture-map">' + architecture + '</div>', true) +
           panel(t("technologyStack"), '<div class="stack-grid">' + tech.map((item) => '<article class="stack-card"><strong>' + esc(item.label) + '</strong><span>' + esc(item.role) + '</span><span class="source">' + esc(t("confidence")) + ': ' + esc(item.confidence) + '</span><span class="source">' + esc(t("evidenceSource")) + ': ' + esc(item.evidence) + '</span></article>').join("") + '</div>', true) +
-          panel(t("infraDeploy"), table(["Layer", "State", t("evidence")], [
-            ["Release", badge(release.status || "unknown"), esc(release.releaseId || release.version || "not declared")],
-            ["CI/CD", badge(tech.some((item) => item.label === "GitHub Actions") ? "observed" : "missing-evidence"), esc(".github/workflows/deploy.yml")],
-            ["Hosting", badge(tech.some((item) => item.label === "GitHub Pages") ? "declared" : "unknown"), esc(release.targetEnvironment || "GitHub Pages target if approved")],
-            ["Rollback", badge(release.rollbackCommand ? "declared" : "missing-evidence"), esc(release.rollbackCommand || "not declared")],
-          ]), true) +
-          panel(t("dataStorage"), table(["Asset", "State", t("evidence")], [
-            ["Database", badge(db.migrationStatus || "not-connected"), esc(db.schemaVersion || "not declared")],
-            ["Supabase", badge(tech.some((item) => item.label === "Supabase") ? "declared" : "unknown"), esc("project Supabase plan, if present")],
-            ["Postgres SQL", badge(tech.some((item) => item.label === "Postgres") ? "observed" : "unknown"), esc("supabase/*.sql")],
-            ["Browser persistence", badge(tech.some((item) => item.label === "localStorage") ? "declared" : "unknown"), esc("local save fallback")],
-          ]), true) +
+          panel(t("infraDeploy"), table(["Layer", "State", t("evidence")], infraRows), true) +
+          panel(t("dataStorage"), table(["Asset", "State", t("evidence")], dataRows), true) +
           panel(t("harnessIntegration") + " / Agent Context Packs", '<p class="muted">AI Agents should resume from the projected world model, not from chat memory. This panel intentionally describes project composition instead of exposing dashboard API routes.</p>' + renderAgentContextPacks(), true) +
           panel("Evidence Sources", table(["Source", "Type", "Status", "Promotes"], sourceRows), true);
+      }
+      function semanticState() {
+        return app.state.semanticGovernance || {};
+      }
+      function agentBridgeState() {
+        return app.state.agentCommandBridge || {};
+      }
+      function selectedAgentCommand() {
+        const bridge = agentBridgeState();
+        const commands = Array.isArray(bridge.suggestedCommands) ? bridge.suggestedCommands : [];
+        return commands.find((command) => command.id === app.agentCommandType) || commands[0] || null;
+      }
+      function buildAgentCommandPacket() {
+        const bridge = agentBridgeState();
+        const command = selectedAgentCommand() || {};
+        const noteNode = document.getElementById("agent-command-note");
+        const note = noteNode && typeof noteNode.value === "string" ? noteNode.value.trim() : app.agentCommandText;
+        app.agentCommandText = note || "";
+        const packet = {
+          schemaVersion: (bridge.commandPacketSchema || {}).schemaVersion || ((app.state.meta || {}).schemaVersion || "5.0.0"),
+          createdFrom: "harness-dashboard.architecture",
+          commandId: command.id || app.agentCommandType || "agent-command",
+          executionMode: bridge.executionMode || "draft-only",
+          dashboardDoesNotRunTools: bridge.dashboardDoesNotRunTools !== false,
+          requiresAgentExecution: bridge.requiresAgentExecution !== false,
+          targetTool: command.targetTool || "",
+          payload: command.payload || {},
+          operatorNote: app.agentCommandText,
+          architectureProfile: (app.state.semanticGovernance || {}).profileId || "",
+          sourceStateHash: ((app.state.meta || {}).sourceStateHash || ""),
+          expectedVisibleChange: command.expectedVisibleChange || "",
+          evidenceRefs: command.evidenceRefs || [],
+          readOnlyBoundary: (bridge.channelModel || {}).readOnlyBoundary || "",
+          sseFeedbackLoop: bridge.sseFeedbackLoop || {},
+        };
+        app.agentCommandPacket = packet;
+        app.agentCommandCopyStatus = t("commandPacketReady");
+        addUiEvent("agent-command-packet", packet.commandId);
+        return packet;
+      }
+      async function copyAgentCommandPacket() {
+        const packet = app.agentCommandPacket || buildAgentCommandPacket();
+        const text = JSON.stringify(packet, null, 2);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          try {
+            await navigator.clipboard.writeText(text);
+            app.agentCommandCopyStatus = t("commandCopyOk");
+          } catch {
+            app.agentCommandCopyStatus = t("commandPacketReady");
+          }
+        } else {
+          app.agentCommandCopyStatus = t("commandPacketReady");
+        }
+        addUiEvent("agent-command-copy", packet.commandId);
+        renderArchitecture();
+        bindDynamicControls();
+      }
+      function renderSseStatus(bridge) {
+        const loop = bridge.sseFeedbackLoop || {};
+        const status = app.eventStatus || "not-connected";
+        const live = /snapshot|changed|heartbeat|connected/i.test(status);
+        return '<div class="sse-status ' + (live ? "" : "warn") + '" role="status" aria-live="polite" aria-atomic="true">' +
+          '<span class="rail-label">' + esc(t("sseLiveStatus")) + '</span>' +
+          '<strong>' + esc(status) + '</strong>' +
+          metricGrid([
+            [t("lastSseEvent"), app.lastSseAt || t("notDeclared"), "EventSource"],
+            [t("sseRoute"), loop.route || "/api/harness-dashboard/v1/events", "loopback"],
+            [t("immediateUpdate"), loop.expectedLatency || "file-watch plus heartbeat fallback", "SSE contract"],
+            [t("source"), app.source || t("notDeclared"), "dashboard client"],
+          ]) +
+          '<p class="muted">' + esc((loop.events || []).join(", ") || "harness.snapshot, harness.changed, harness.heartbeat") + '</p>' +
+          '</div>';
+      }
+      function renderAgentCommandBridge() {
+        const bridge = agentBridgeState();
+        const commands = Array.isArray(bridge.suggestedCommands) ? bridge.suggestedCommands : [];
+        const command = selectedAgentCommand() || {};
+        const options = commands.map((item) => '<option value="' + esc(item.id) + '">' + esc(item.label || item.id) + '</option>').join("");
+        const packet = app.agentCommandPacket || {
+          commandId: command.id || app.agentCommandType,
+          executionMode: bridge.executionMode || "draft-only",
+          dashboardDoesNotRunTools: bridge.dashboardDoesNotRunTools !== false,
+          requiresAgentExecution: bridge.requiresAgentExecution !== false,
+          targetTool: command.targetTool || "",
+          payload: command.payload || {},
+          architectureProfile: (app.state.semanticGovernance || {}).profileId || "",
+          sourceStateHash: ((app.state.meta || {}).sourceStateHash || ""),
+          expectedVisibleChange: command.expectedVisibleChange || "",
+          evidenceRefs: command.evidenceRefs || [],
+        };
+        const channel = bridge.channelModel || {};
+        return '<div class="agent-bridge">' +
+          '<div class="command-composer">' +
+            '<label>' + esc(t("commandComposer")) + '<select id="agent-command-type" aria-describedby="agent-command-status">' + options + '</select></label>' +
+            '<label>' + esc(t("commandNote")) + '<textarea id="agent-command-note" aria-describedby="agent-command-status" placeholder="' + esc(t("expectedVisibleChange")) + '">' + esc(app.agentCommandText || "") + '</textarea></label>' +
+            '<div class="button-row">' +
+              '<button class="primary" type="button" data-agent-command-build>' + esc(t("buildCommandPacket")) + '</button>' +
+              '<button class="secondary" type="button" data-agent-command-copy>' + esc(t("copyCommandPacket")) + '</button>' +
+            '</div>' +
+            '<span class="source command-status" id="agent-command-status" role="status" aria-live="polite" aria-atomic="true">' + esc(app.agentCommandCopyStatus || bridge.policy || "") + '</span>' +
+            '<div class="bridge-channel">' +
+              '<article class="hub-item"><span class="rail-label">' + esc(t("humanToAgent")) + '</span><p>' + esc(channel.humanToAgent || "") + '</p></article>' +
+              '<article class="hub-item"><span class="rail-label">' + esc(t("agentToHuman")) + '</span><p>' + esc(channel.agentToHuman || "") + '</p></article>' +
+              '<article class="hub-item warn"><span class="rail-label">' + esc(t("readOnlyBoundary")) + '</span><p>' + esc(channel.readOnlyBoundary || "") + '</p></article>' +
+            '</div>' +
+          '</div>' +
+          '<pre class="command-preview" id="agent-command-preview" aria-label="Agent command draft packet" tabindex="0">' + esc(JSON.stringify(packet, null, 2)) + '</pre>' +
+        '</div>';
+      }
+      function renderSemanticArchitecture() {
+        const semantic = semanticState();
+        const bridge = agentBridgeState();
+        const graph = semantic.visualGraph || {};
+        const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+        const edges = Array.isArray(graph.edges) ? graph.edges : [];
+        const layerCards = nodes.slice(0, rowLimit(16)).map((node) => {
+          const depth = Number(node.depth || 0);
+          const klass = depth <= 1 ? "inner" : "outer";
+          const hints = (node.pathHints || []).slice(0, 4).map((hint) => '<span class="path-hint">' + esc(hint) + '</span>').join("");
+          return '<article class="semantic-layer-card ' + klass + '">' +
+            '<span class="rail-label">' + esc(t("layers") + " " + depth) + '</span>' +
+            '<strong>' + esc(node.label || node.id) + '</strong>' +
+            '<span>' + badge(node.access || "unknown") + ' ' + badge(node.volatility || "unknown") + '</span>' +
+            '<div class="path-hints">' + hints + '</div>' +
+          '</article>';
+        }).join("");
+        const ruleCards = edges.slice(0, rowLimit(12)).map((edge) => {
+          const severity = String(edge.severity || "info").toLowerCase();
+          return '<article class="semantic-rule-card ' + esc(severity) + '">' +
+            '<span class="rail-label">' + esc(t("severity")) + ': ' + esc(edge.severity || "unknown") + '</span>' +
+            '<strong>' + esc(edge.id || edge.predicate || "rule") + '</strong>' +
+            '<span class="rule-arrow">' + esc(edge.sourceLayer || "?") + ' -> ' + esc(edge.targetLayer || "?") + '</span>' +
+            '<p><strong>' + esc(t("predicate")) + ':</strong> ' + esc(edge.predicate || "") + '</p>' +
+          '</article>';
+        }).join("");
+        const nodeById = new Map(nodes.map((node) => [String(node.id), node]));
+        const visibleRuleEdges = edges.slice(0, rowLimit(8));
+        const ruleFlowRows = visibleRuleEdges.map((edge) => {
+          const severity = String(edge.severity || "info").toLowerCase();
+          const source = nodeById.get(String(edge.sourceLayer)) || {};
+          const target = nodeById.get(String(edge.targetLayer)) || {};
+          return '<div class="rule-flow-row">' +
+            '<div class="flow-node"><span class="rail-label">' + esc(t("fromLayer")) + '</span><strong>' + esc(source.label || edge.sourceLayer || "?") + '</strong><span class="source">' + esc(edge.sourceLayer || "") + '</span></div>' +
+            '<div class="flow-edge ' + esc(severity) + '"><span class="rail-label">' + esc(edge.severity || "rule") + '</span><strong>' + esc(edge.predicate || edge.id || "governs") + '</strong></div>' +
+            '<div class="flow-node"><span class="rail-label">' + esc(t("toLayer")) + '</span><strong>' + esc(target.label || edge.targetLayer || "?") + '</strong><span class="source">' + esc(edge.targetLayer || "") + '</span></div>' +
+          '</div>';
+        }).join("");
+        const hiddenRuleCount = edges.length > visibleRuleEdges.length
+          ? '<div class="hidden-count">+' + esc(edges.length - visibleRuleEdges.length) + ' ' + esc(t("hiddenRules")) + '</div>'
+          : "";
+        const ruleFlowMap = '<div class="rule-flow-map" aria-label="' + esc(t("architectureRuleFlowMap")) + '">' + ruleFlowRows + hiddenRuleCount + '</div>';
+        const pipeline = [
+          [t("sourceGraph"), semantic.sourceGraph || {}, "source-graph"],
+          [t("governancePipeline"), semantic.governanceEvaluation || {}, "governance-evaluation"],
+          [t("semanticWarehouse"), semantic.semanticWarehouse || {}, "semantic-warehouse"],
+          [t("waiverGate"), semantic.waiverGovernance || {}, "waiver-governance"],
+          [t("enforcementGate"), semantic.enforcement || {}, "enforcement"],
+          [t("policyPacks"), semantic.policyPacks || {}, "policy-packs"],
+        ].map(([label, value, id]) => {
+          const status = value.status || value.verdict || semantic.gate?.verdict || "unknown";
+          const active = /not-run|bootstrap|opt-in|gitops|empty/i.test(status);
+          return '<article class="gate-step ' + (active ? "active" : "") + '">' +
+            '<span class="rail-label">' + esc(id) + '</span>' +
+            '<strong>' + esc(label) + '</strong>' +
+            badge(status) +
+            '<span class="source">' + esc(value.expectedTool || (value.expectedTools || []).join(", ") || value.path || value.reportPath || "") + '</span>' +
+          '</article>';
+        }).join("");
+        const cockpit = '<div class="semantic-cockpit">' +
+          '<div class="semantic-hero">' +
+            '<span class="rail-label">' + esc(t("semanticCockpit")) + '</span>' +
+            '<strong>' + esc(semantic.profileLabel || semantic.profileId || t("profile")) + '</strong>' +
+            '<p>' + esc(semantic.profileSummary || "") + '</p>' +
+            metricGrid([
+              [t("profile"), semantic.profileId || t("notDeclared"), "architecture profile"],
+              [t("verdict"), (semantic.gate || {}).verdict || "not-run", "semantic gate"],
+              [t("rules"), edges.length, "policy.rules"],
+              [t("layers"), nodes.length, "policy.layers"],
+              [t("unknownLayerMode"), semantic.unknownLayerMode || "report", "classification"],
+              [t("enforcementMode"), semantic.enforcementMode || "report", "policy"],
+            ]) +
+            '<p><strong>' + esc(t("gate")) + ':</strong> ' + esc((semantic.gate || {}).reason || "") + '</p>' +
+            '<div class="api-route-list">' + apiRouteList(semantic.apiRoutes || []) + '</div>' +
+          '</div>' +
+          renderSseStatus(bridge) +
+        '</div>';
+        return panel(t("semanticCockpit"), cockpit, true) +
+          panel(t("architectureLayerMap"), '<div class="semantic-layer-map">' + layerCards + '</div>', true) +
+          panel(t("governancePipeline"), '<div class="gate-pipeline">' + pipeline + '</div>', true) +
+          panel(t("ruleFlow"), ruleFlowMap + '<div class="semantic-rule-grid">' + ruleCards + '</div>', true) +
+          panel(t("agentCommandBridge"), renderAgentCommandBridge(), true);
+      }
+      function renderArchitecture() {
+        const target = document.getElementById("view-architecture");
+        if (!target) return;
+        target.innerHTML = renderSemanticArchitecture();
       }
       function worldPrism(labelA, labelB, labelC) {
         return '<div class="world-prism" aria-hidden="true"><span class="prism-layer" style="--z:-58px"></span><span class="prism-layer" style="--z:0px"></span><span class="prism-layer" style="--z:58px"></span><span class="prism-node one">' + esc(labelA) + '</span><span class="prism-node two">' + esc(labelB) + '</span><span class="prism-node three">' + esc(labelC) + '</span></div>';
@@ -8309,6 +9070,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         renderEvidence();
         renderGovernance();
         renderSystem();
+        renderArchitecture();
         renderTechStack();
         renderTabPurpose();
         renderSlideDeck();
@@ -8365,6 +9127,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           ["tab-evidence", "tab.evidence", "purpose.evidence", "Evidence"],
           ["tab-governance", "tab.governance", "purpose.governance", "Governance"],
           ["tab-system", "tab.system", "purpose.system", "System"],
+          ["tab-architecture", "tab.architecture", "purpose.architecture", "Architecture"],
           ["tab-tech", "tab.tech", "purpose.tech", "TechStack"],
         ];
         for (const [id, labelKey, purposeKey, lensKey] of tabs) {
@@ -8392,21 +9155,45 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         if (timelineRange) timelineRange.value = app.timelineRange;
         const reportFocus = document.getElementById("report-focus");
         if (reportFocus) reportFocus.value = app.reportFocus;
+        const agentCommandType = document.getElementById("agent-command-type");
+        if (agentCommandType) agentCommandType.value = app.agentCommandType;
+        const agentCommandNote = document.getElementById("agent-command-note");
+        if (agentCommandNote && agentCommandNote.value !== app.agentCommandText) agentCommandNote.value = app.agentCommandText || "";
         document.querySelectorAll("[data-work-view]").forEach((button) => {
           button.setAttribute("aria-pressed", String(button.getAttribute("data-work-view") === app.workView));
         });
       }
       function connectEvents() {
         if (!window.EventSource || app.mode === "Degraded Offline" || !localApiToken) return;
+        if (app.eventSource && app.eventSource.readyState !== window.EventSource.CLOSED) {
+          app.sseConnected = true;
+          return;
+        }
+        if (app.eventSource && app.eventSource.close) {
+          app.eventSource.close();
+        }
         try {
           const eventsUrl = "./api/harness-dashboard/v1/events?token=" + encodeURIComponent(localApiToken);
           const source = new EventSource(eventsUrl);
+          app.eventSource = source;
+          app.sseConnected = true;
+          app.eventStatus = "connecting";
+          source.onopen = () => {
+            app.sseConnected = true;
+            app.eventStatus = "sse-open";
+            app.lastSseAt = new Date().toISOString();
+            renderMode();
+            renderArchitecture();
+            bindDynamicControls();
+          };
           source.addEventListener("harness.snapshot", (event) => {
             const envelope = JSON.parse(event.data);
             app.state = envelope.payload || app.state;
             app.mode = "Local Live";
             app.source = "SSE harness.snapshot";
             app.stale = false;
+            app.eventStatus = "harness.snapshot";
+            app.lastSseAt = new Date().toISOString();
             render();
           });
           source.addEventListener("harness.changed", (event) => {
@@ -8415,13 +9202,40 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
             app.mode = "Local Live";
             app.source = "SSE harness.changed";
             app.stale = false;
+            app.eventStatus = "harness.changed";
+            app.lastSseAt = new Date().toISOString();
+            app.agentCommandCopyStatus = "";
             render();
           });
-          source.onerror = () => {
-            app.mode = app.stale ? "Degraded Offline" : "Static Snapshot";
+          source.addEventListener("harness.heartbeat", () => {
+            app.eventStatus = "harness.heartbeat";
+            app.lastSseAt = new Date().toISOString();
             renderMode();
+            renderArchitecture();
+            bindDynamicControls();
+          });
+          source.addEventListener("harness.error", () => {
+            app.eventStatus = "harness.error";
+            app.lastSseAt = new Date().toISOString();
+            renderMode();
+            renderArchitecture();
+            bindDynamicControls();
+          });
+          source.onerror = () => {
+            const closed = source.readyState === window.EventSource.CLOSED;
+            app.sseConnected = !closed;
+            if (closed && app.eventSource === source) app.eventSource = null;
+            app.eventStatus = closed ? "sse-error" : "sse-reconnecting";
+            if (closed) app.mode = app.stale ? "Degraded Offline" : "Static Snapshot";
+            renderMode();
+            renderArchitecture();
+            bindDynamicControls();
           };
         } catch {
+          if (app.eventSource && app.eventSource.close) app.eventSource.close();
+          app.eventSource = null;
+          app.sseConnected = false;
+          app.eventStatus = "sse-unavailable";
           app.mode = "Static Snapshot";
         }
       }
@@ -8445,7 +9259,8 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         renderTabPurpose();
         const purpose = document.getElementById("tab-purpose");
         if (purpose && window.scrollY > purpose.offsetTop) {
-          purpose.scrollIntoView({ block: "start", behavior: "smooth" });
+          const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          purpose.scrollIntoView({ block: "start", behavior: prefersReducedMotion ? "auto" : "smooth" });
         }
       }
       document.querySelectorAll('[role="tab"]').forEach((tab) => {
@@ -8491,11 +9306,34 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           addUiEvent("report-focus", reportFocusLabel(app.reportFocus));
           render();
         }
+        if (target.id === "agent-command-type") {
+          app.agentCommandType = target.value || "agent-refresh-dashboard";
+          app.agentCommandPacket = null;
+          app.agentCommandCopyStatus = "";
+          renderArchitecture();
+          bindDynamicControls();
+        }
+      });
+      document.addEventListener("input", (event) => {
+        const target = event.target;
+        if (target && target.id === "agent-command-note") {
+          app.agentCommandText = target.value || "";
+        }
       });
       document.addEventListener("click", async (event) => {
         const rawTarget = event.target;
-        const target = rawTarget && rawTarget.closest ? rawTarget.closest("[data-slideshow-open], [data-slide-close], [data-slide-prev], [data-slide-next], [data-slide-fullscreen], [data-slide-go], [data-work-view], [data-focus-work], [data-jump-tab], [data-platform-submit], [data-report-focus], [data-ops-lens], [data-report-copy], [data-report-print], [data-evidence-ref], [data-api-route]") : rawTarget;
+        const target = rawTarget && rawTarget.closest ? rawTarget.closest("[data-slideshow-open], [data-slide-close], [data-slide-prev], [data-slide-next], [data-slide-fullscreen], [data-slide-go], [data-work-view], [data-focus-work], [data-jump-tab], [data-platform-submit], [data-agent-command-build], [data-agent-command-copy], [data-report-focus], [data-ops-lens], [data-report-copy], [data-report-print], [data-evidence-ref], [data-api-route]") : rawTarget;
         if (!target || !target.getAttribute) return;
+        if (target.hasAttribute("data-agent-command-build")) {
+          buildAgentCommandPacket();
+          renderArchitecture();
+          bindDynamicControls();
+          return;
+        }
+        if (target.hasAttribute("data-agent-command-copy")) {
+          await copyAgentCommandPacket();
+          return;
+        }
         const apiRoute = target.getAttribute("data-api-route");
         if (apiRoute) {
           await lookupApiRoute(apiRoute);
@@ -8645,7 +9483,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
 }
 
 function buildDashboardReadme(): string {
-  return `# Harness Dashboard 4.6.8: Project World Model
+  return `# Harness Dashboard 5.0.0: Project World Model
 
 The dashboard is a ledger-backed Project World Model, not a Markdown-derived report page.
 
@@ -8723,7 +9561,7 @@ function buildDesignFrameworkHtml(): string {
 <meta charset="utf-8" />
 <title>Harness Dashboard Design Framework</title>
 <body>
-  <h1>Harness Dashboard 4.6.8 Design Framework</h1>
+  <h1>Harness Dashboard 5.0.0 Design Framework</h1>
   <p>Executive Overview first. Same data, different density for Stakeholder, AI Agent, and Maintainer modes.</p>
   <ul>
     <li>Modes: Local Live, Static Snapshot, Degraded Offline.</li>
@@ -8743,7 +9581,7 @@ function buildBackendBlueprintHtml(): string {
 <title>Optional Backend Dashboard Blueprint</title>
 <body>
   <h1>Optional Backend Dashboard Blueprint</h1>
-  <p>The default 4.6.8 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
+  <p>The default 5.0.0 dashboard uses a local read-only bridge. A full backend dashboard is an optional future implementation, not generated by default.</p>
   <ul>
     <li>Must preserve ledger-first governance.</li>
     <li>Must not replace the local single-file dashboard contract.</li>
@@ -8883,7 +9721,7 @@ export function generateDashboardFiles(
         "Specification for future opt-in backend dashboard implementation.",
       nonGoals: [
         "No backend dashboard app is generated by default.",
-        "No database is required for 4.6.8 MVP.",
+        "No database is required for 5.0.0 MVP.",
         "No persistent UI writes are allowed by default.",
       ],
     }),

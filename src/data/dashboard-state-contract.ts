@@ -18,6 +18,8 @@ export const DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS = [
   "serviceCreationContract",
   "runningServiceContract",
   "dependencyGraph",
+  "semanticGovernance",
+  "agentCommandBridge",
   "worldJudgment",
   "judgmentConsole",
   "criticalSignals",

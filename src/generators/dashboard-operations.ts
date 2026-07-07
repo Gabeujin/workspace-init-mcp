@@ -12,7 +12,7 @@ import {
 function buildDashboardOpsReadme(): string {
   return `# Harness Dashboard Operations
 
-The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 4.6.8 Hypertext Project World Model.
+The generated \`dashboard-ops.mjs\` script operates the Harness Dashboard 5.0.0 Hypertext Project World Model.
 It treats the JSONL event ledger as canonical, the JSON state files as disposable projections,
 and the HTML file as a portable stakeholder projection.
 
@@ -47,7 +47,7 @@ and the HTML file as a portable stakeholder projection.
 
 The listener exposes read-only v1 routes under \`/api/harness-dashboard/v1/\`:
 \`snapshot\`, \`index\`, \`tasks\`, \`agent-tasks\`, \`traceability\`, \`reality-check\`, \`evidence-ref\`, \`sessions\`, \`dictionary\`, \`version-control\`,
-\`runtime\`, \`briefing\`, \`health\`, \`events\`, and deterministic \`query\`.
+\`runtime\`, \`architecture\`, \`agent-bridge\`, \`briefing\`, \`health\`, \`events\`, and deterministic \`query\`.
 
 Default protections: local token required by \`x-harness-dashboard-token\` or Bearer auth for REST routes;
 query-string tokens are accepted only for the SSE \`events\` route because browser EventSource cannot set
@@ -119,8 +119,36 @@ function now() {
   return new Date().toISOString();
 }
 
+function isPathWithin(parentPath, candidatePath) {
+  const relative = path.relative(parentPath, candidatePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
 function ensureDir(dir) {
-  fs.mkdirSync(dir, { recursive: true });
+  const absoluteDir = path.resolve(dir);
+  if (!isPathWithin(workspaceRoot, absoluteDir)) {
+    throw new Error("Refusing to create directory outside workspace: " + absoluteDir);
+  }
+  const relativeDir = path.relative(workspaceRoot, absoluteDir);
+  const segments = relativeDir.split(path.sep).filter((segment) => segment && segment !== ".");
+  let current = workspaceRoot;
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    if (fs.existsSync(current)) {
+      const stat = fs.lstatSync(current);
+      if (stat.isSymbolicLink()) {
+        throw new Error("Refusing to write through symbolic link directory: " + current);
+      }
+      if (!stat.isDirectory()) {
+        throw new Error("Expected directory path is occupied by a file: " + current);
+      }
+      if (!isPathWithin(workspaceRoot, fs.realpathSync(current))) {
+        throw new Error("Directory escaped workspace through linked path: " + current);
+      }
+      continue;
+    }
+    fs.mkdirSync(current);
+  }
 }
 
 function stableHash(value) {
@@ -134,11 +162,34 @@ function fileHash(fullPath) {
   return crypto.createHash("sha256").update(fs.readFileSync(fullPath)).digest("hex");
 }
 
-function writeTextAtomic(fullPath, content) {
-  ensureDir(path.dirname(fullPath));
-  const tempPath = path.join(path.dirname(fullPath), "." + path.basename(fullPath) + "." + process.pid + "." + Date.now() + ".tmp");
-  fs.writeFileSync(tempPath, content, "utf-8");
-  fs.renameSync(tempPath, fullPath);
+function assertContainedFile(fullPath) {
+  const absolutePath = path.resolve(fullPath);
+  if (!isPathWithin(workspaceRoot, absolutePath)) {
+    throw new Error("Refusing to write outside workspace: " + absolutePath);
+  }
+  ensureDir(path.dirname(absolutePath));
+  if (fs.existsSync(absolutePath)) {
+    const stat = fs.lstatSync(absolutePath);
+    if (stat.isSymbolicLink()) {
+      throw new Error("Refusing to overwrite symbolic link path: " + absolutePath);
+    }
+    if (!isPathWithin(workspaceRoot, fs.realpathSync(absolutePath))) {
+      throw new Error("File escaped workspace through linked target: " + absolutePath);
+    }
+  }
+  return absolutePath;
+}
+
+function writeTextAtomic(fullPath, content, options = {}) {
+  const absolutePath = assertContainedFile(fullPath);
+  const tempPath = path.join(path.dirname(absolutePath), "." + path.basename(absolutePath) + "." + process.pid + "." + Date.now() + ".tmp");
+  fs.writeFileSync(tempPath, content, { encoding: "utf-8", mode: options.mode });
+  fs.renameSync(tempPath, absolutePath);
+}
+
+function appendText(fullPath, content) {
+  const absolutePath = assertContainedFile(fullPath);
+  fs.appendFileSync(absolutePath, content, "utf-8");
 }
 
 function writeJson(fullPath, value) {
@@ -150,8 +201,7 @@ function readJson(fullPath) {
 }
 
 function logLine(message) {
-  ensureDir(logDir);
-  fs.appendFileSync(logPath, "[" + now() + "] " + message + "\\n", "utf-8");
+  appendText(logPath, "[" + now() + "] " + message + "\\n");
 }
 
 function quarantineCorruptJson(fullPath, error) {
@@ -675,6 +725,120 @@ function backfillUserPerspectiveAudit(state, workspaceId, workspaceName, purpose
   });
 }
 
+function backfillSemanticGovernance(state) {
+  if (isPlainObject(state.semanticGovernance)) return;
+  state.semanticGovernance = {
+    schemaVersion: SCHEMA_VERSION,
+    semanticSchemaVersion: SCHEMA_VERSION,
+    status: "legacy-backfill-pending-scan",
+    profileId: "legacy-unknown",
+    profileLabel: "Legacy architecture profile pending",
+    profileSummary: "This dashboard state predates semantic governance projections and must be refreshed before architecture claims are trusted.",
+    enforcementMode: "report",
+    unknownLayerMode: "report",
+    gate: {
+      verdict: "not-run",
+      canProceed: false,
+      reason: "Legacy backfill is fail-closed; run source graph scan and architecture governance validation.",
+      strictModes: ["report", "strict", "ci"]
+    },
+    sourceGraph: {
+      path: "docs/ai-harness/ontology/state/source-graph.json",
+      status: "legacy-backfill-missing",
+      expectedTool: "scan_source_graph",
+      metrics: { sourceFileCount: 0, dependencyEdgeCount: 0, unresolvedEdges: 0 }
+    },
+    governanceEvaluation: {
+      path: "docs/ai-harness/ontology/state/governance-evaluation.json",
+      expectedTool: "validate_architecture_governance",
+      verdict: "not-run",
+      blockedEdges: 0,
+      warningEdges: 0
+    },
+    semanticWarehouse: {
+      path: "docs/ai-harness/ontology/state/semantic-warehouse.json",
+      expectedTool: "query_semantic_warehouse",
+      viewNames: ["files", "symbols", "dependencyEdges", "rules", "violations", "waivers"],
+      status: "legacy-backfill-empty"
+    },
+    waiverGovernance: {
+      ledgerPath: "docs/ai-harness/ontology/state/bypass-ledger.json",
+      revocationLedgerPath: "docs/ai-harness/ontology/state/waiver-revocations.json",
+      trustPath: ".github/ai-harness/governance-trust.json",
+      expectedTool: "validate_architecture_waivers",
+      status: "legacy-backfill-pending",
+      policy: "Legacy backfills are migration aids only; signed waiver and revocation ledgers must be refreshed before trust claims."
+    },
+    enforcement: {
+      reportPath: "docs/ai-harness/ontology/state/enforcement-report.json",
+      markdownPath: "docs/ai-harness/ontology/state/enforcement-report.md",
+      expectedTool: "enforce_architecture_governance",
+      status: "legacy-backfill-opt-in",
+      canBlock: true
+    },
+    policyPacks: {
+      guidePath: "docs/ai-harness/ontology/policy-packs/README.md",
+      expectedTools: ["export_architecture_policy_pack", "import_architecture_policy_pack"],
+      status: "legacy-backfill-pending"
+    },
+    visualGraph: {
+      nodes: [],
+      edges: [],
+      legend: ["Legacy projection requires semantic governance refresh."]
+    },
+    commands: [{
+      id: "legacy-refresh-semantic-governance",
+      label: "Refresh semantic governance projection",
+      tool: "validate_architecture_governance",
+      payload: { architectureProfile: "legacy-unknown" },
+      expectedVisibleChange: "Architecture tab replaces fail-closed backfill with scanned source graph and governance evaluation.",
+      evidenceRefs: ["legacy-dashboard-state"]
+    }],
+    apiRoutes: [
+      "/api/harness-dashboard/v1/architecture",
+      "/api/harness-dashboard/v1/query?scope=architecture&q=governance",
+      "/api/harness-dashboard/v1/events"
+    ],
+    evidenceRefs: ["legacy-dashboard-state"]
+  };
+}
+
+function backfillAgentCommandBridge(state) {
+  if (isPlainObject(state.agentCommandBridge)) return;
+  state.agentCommandBridge = {
+    schemaVersion: SCHEMA_VERSION,
+    status: "legacy-backfill-draft-only",
+    executionMode: "draft-only",
+    dashboardDoesNotRunTools: true,
+    requiresAgentExecution: true,
+    policy: "Legacy dashboard state was backfilled with a draft-only Agent bridge. The dashboard never runs tools; copy drafts into an authorized Agent session.",
+    channelModel: {
+      humanToAgent: "Dashboard prepares bounded draft request packets with target tool, payload, expected visible change, and evidence refs.",
+      agentToHuman: "Agent writes governed events or projection state; dashboard listener reflects changes through SSE after refresh.",
+      readOnlyBoundary: "No dashboard button writes project files, runs shell commands, invokes an LLM, or executes MCP tools."
+    },
+    inboxPath: "docs/ai-harness/runtime/inbox/",
+    outboxPath: "docs/ai-harness/runtime/outbox/",
+    commandPacketSchema: {
+      schemaVersion: SCHEMA_VERSION,
+      required: ["commandId", "executionMode", "dashboardDoesNotRunTools", "targetTool", "payload", "expectedVisibleChange", "evidenceRefs"]
+    },
+    suggestedCommands: [{
+      id: "legacy-refresh-dashboard",
+      label: "Draft request: refresh dashboard projections",
+      targetTool: "dashboard-ops refresh",
+      payload: { command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh" },
+      expectedVisibleChange: "Projection confidence, semantic governance, and Agent resume state update after refresh.",
+      evidenceRefs: ["legacy-dashboard-state"]
+    }],
+    sseFeedbackLoop: {
+      route: "/api/harness-dashboard/v1/events",
+      events: ["harness.snapshot", "harness.changed", "harness.heartbeat", "harness.error"],
+      expectedLatency: "directory-watch immediate change event plus heartbeat hash fallback"
+    }
+  };
+}
+
 function normalizeDashboardStateForValidation(state) {
   if (Array.isArray(state.entities)) {
     state.entities = state.entities.map((entity) => {
@@ -702,6 +866,8 @@ function normalizeDashboardStateForValidation(state) {
   backfillSessionTraceability(state, workspaceId, workspaceName, purpose);
   backfillUserRealityCheck(state, workspaceId, workspaceName, purpose);
   backfillUserPerspectiveAudit(state, workspaceId, workspaceName, purpose);
+  backfillSemanticGovernance(state);
+  backfillAgentCommandBridge(state);
   if (!isPlainObject(state.realityModel)) {
     state.realityModel = {
       schemaVersion: SCHEMA_VERSION,
@@ -854,7 +1020,7 @@ function appendLedgerEvent(event, expectedLastSequence) {
   }
   const eventHash = stableHash(event);
   const record = Object.assign({}, event, { eventHash });
-  fs.appendFileSync(ledgerPath, JSON.stringify(record) + "\\n", "utf-8");
+  appendText(ledgerPath, JSON.stringify(record) + "\\n");
   const nextManifest = Object.assign({}, manifest, {
     firstSequence: Number(manifest.firstSequence || record.sequence),
     lastSequence: record.sequence,
@@ -902,6 +1068,8 @@ function envelope(payload, extra = {}) {
       "dictionary",
       "version-control",
       "runtime",
+      "architecture",
+      "agent-bridge",
       "briefing",
       "sse",
       "deterministic-query"
@@ -2100,6 +2268,8 @@ function deriveIndex(state) {
     userRealityCheck: state.userRealityCheck || null,
     governanceActionabilityScore: state.governanceActionabilityScore || null,
     agentPlatformGovernance: state.agentPlatformGovernance || null,
+    semanticGovernance: state.semanticGovernance || null,
+    agentCommandBridge: state.agentCommandBridge || null,
     audienceLens: state.audienceLens || null,
     realityModel: state.realityModel || null,
     goalCompass: state.goalCompass || null,
@@ -2132,6 +2302,8 @@ function deriveIndex(state) {
       "/api/harness-dashboard/v1/dictionary",
       "/api/harness-dashboard/v1/version-control",
       "/api/harness-dashboard/v1/runtime",
+      "/api/harness-dashboard/v1/architecture",
+      "/api/harness-dashboard/v1/agent-bridge",
       "/api/harness-dashboard/v1/briefing",
       "/api/harness-dashboard/v1/health",
       "/api/harness-dashboard/v1/events",
@@ -3325,7 +3497,7 @@ function ensureToken() {
     }
   }
   const token = crypto.randomBytes(32).toString("hex");
-  fs.writeFileSync(tokenPath, token + "\\n", { encoding: "utf-8", mode: 0o600 });
+  writeTextAtomic(tokenPath, token + "\\n", { mode: 0o600 });
   return token;
 }
 
@@ -3638,6 +3810,9 @@ function evidenceCollections(publicState) {
   const workTimeline = objectValue(publicState.workTimeline);
   const readinessMap = objectValue(publicState.workReadinessMap);
   const taskBoard = objectValue(publicState.userTaskBoard);
+  const semanticGovernance = objectValue(publicState.semanticGovernance);
+  const semanticGraph = objectValue(semanticGovernance.visualGraph);
+  const agentCommandBridge = objectValue(publicState.agentCommandBridge);
   const qualityScorecard = objectValue(publicState.dashboardQualityScorecard);
   const userPerspectiveAudit = objectValue(qualityScorecard.userPerspectiveAudit);
   const userPerspectiveAuditDimensions = Array.isArray(userPerspectiveAudit.dimensions)
@@ -3668,6 +3843,12 @@ function evidenceCollections(publicState) {
     { kind: "trust-readiness-dimension", sourcePath: "userRealityCheck.trustReadinessBrief.scoreDimensions", rows: arrayValue(trustReadiness.scoreDimensions), fields: ["id", "label", "score", "status", "currentFinding", "passCriteria", "evidenceRefs", "apiRouteChips", "nextAction"], scopes: ["all", "reality-check", "evidence"] },
     { kind: "trust-readiness-unresolved-evidence", sourcePath: "userRealityCheck.trustReadinessBrief.evidenceChecks.unresolvedItems", rows: arrayValue(trustEvidenceChecks.unresolvedItems), fields: ["id", "label", "requiredEvidenceType", "owner", "sourceRefs", "apiRouteChips", "nextAction"], scopes: ["all", "reality-check", "evidence", "tasks"] },
     { kind: "trust-readiness-route-contract", sourcePath: "userRealityCheck.trustReadinessBrief.routeContracts", rows: arrayValue(trustReadiness.routeContracts), fields: ["route", "expectedPayloadKeys", "usefulFor", "staticModeBehavior", "listenerModeBehavior"], scopes: ["all", "reality-check", "evidence"] },
+    { kind: "semantic-governance", sourcePath: "semanticGovernance", rows: [semanticGovernance], fields: ["status", "profileId", "profileLabel", "profileSummary", "enforcementMode", "unknownLayerMode", "apiRoutes", "evidenceRefs"], scopes: ["all", "architecture", "evidence"] },
+    { kind: "semantic-layer", sourcePath: "semanticGovernance.visualGraph.nodes", rows: arrayValue(semanticGraph.nodes), fields: ["id", "label", "depth", "access", "volatility", "pathHints", "evidenceRefs"], scopes: ["all", "architecture", "evidence"] },
+    { kind: "semantic-rule", sourcePath: "semanticGovernance.visualGraph.edges", rows: arrayValue(semanticGraph.edges), fields: ["id", "predicate", "severity", "sourceLayer", "targetLayer", "rationale", "evidenceRefs"], scopes: ["all", "architecture", "evidence"] },
+    { kind: "semantic-command", sourcePath: "semanticGovernance.commands", rows: arrayValue(semanticGovernance.commands), fields: ["id", "label", "tool", "payload", "expectedVisibleChange", "evidenceRefs"], scopes: ["all", "architecture", "tasks", "evidence"] },
+    { kind: "agent-command-bridge", sourcePath: "agentCommandBridge", rows: [agentCommandBridge], fields: ["status", "policy", "inboxPath", "outboxPath"], scopes: ["all", "architecture", "tasks"] },
+    { kind: "agent-command", sourcePath: "agentCommandBridge.suggestedCommands", rows: arrayValue(agentCommandBridge.suggestedCommands), fields: ["id", "label", "targetTool", "payload", "expectedVisibleChange", "evidenceRefs"], scopes: ["all", "architecture", "tasks"] },
     { kind: "vcs-record", sourcePath: "vcsChangeRecords", rows: arrayValue(publicState.vcsChangeRecords), fields: ["commitId", "revisionId", "summary", "linkedSessionIds", "linkedTaskIds", "linkedDecisionIds"], scopes: ["all", "evidence"] },
     { kind: "work-item", sourcePath: "workTimeline.items", rows: arrayValue(workTimeline.items), fields: ["id", "title", "status", "owner", "lane", "evidenceRefs", "nextActionRef", "exitCriteria"], scopes: ["all", "tasks", "evidence"] },
     { kind: "readiness-row", sourcePath: "workReadinessMap.rows", rows: arrayValue(readinessMap.rows), fields: ["id", "title", "status", "owner", "evidenceRefs", "nextActionRef", "exitCriteria"], scopes: ["all", "tasks", "evidence"] },
@@ -3826,6 +4007,8 @@ function apiPayload(routeName) {
   if (routeName === "dictionary") return sanitizePublic({ dictionary: state.dictionary, ontology: state.ontology });
   if (routeName === "version-control") return sanitizePublic({ versionControl: state.versionControl, vcsChangeRecords: state.vcsChangeRecords });
   if (routeName === "runtime") return sanitizePublic(loadJsonOrFallback(runtimePath, deriveRuntime(state)));
+  if (routeName === "architecture") return sanitizePublic({ semanticGovernance: state.semanticGovernance, agentCommandBridge: state.agentCommandBridge });
+  if (routeName === "agent-bridge") return sanitizePublic({ agentCommandBridge: state.agentCommandBridge, agentResumeBrief: state.agentResumeBrief, agentTaskQueues: state.agentTaskQueues });
   if (routeName === "briefing") return buildReportPack(publicState, { audience: "maintainer", focus: "today", public: true });
   if (routeName === "health") return sanitizePublic({ ok: true, mode: "Local Live", statePathHash: fileHash(statePath), generatedAt: now() });
   return null;
@@ -3843,6 +4026,7 @@ function deterministicQuery(url) {
     : scope === "agent-tasks" ? sanitizePublic({ agentTaskQueues: state.agentTaskQueues, agentResumeBrief: state.agentResumeBrief })
     : scope === "traceability" ? sanitizePublic({ projectionConfidence: state.projectionConfidence, sessionTraceability: state.sessionTraceability })
     : scope === "reality-check" ? sanitizePublic({ userRealityCheck: state.userRealityCheck, projectionConfidence: state.projectionConfidence, sessionTraceability: state.sessionTraceability, dashboardQualityScorecard: state.dashboardQualityScorecard })
+    : scope === "architecture" ? sanitizePublic({ semanticGovernance: state.semanticGovernance, agentCommandBridge: state.agentCommandBridge })
     : scope === "decisions" ? { decisionContracts: publicState.decisionContracts }
     : scope === "evidence" ? { artifacts: publicState.artifacts, governanceEvidenceBrief: publicState.governanceEvidenceBrief, versionControl: publicState.versionControl }
     : publicState;
@@ -3861,24 +4045,59 @@ function serveEvents(request, response, token) {
     response.write("data: " + JSON.stringify(envelope(payload)) + "\\n\\n");
   }
   let lastStateHash = fileHash(statePath);
+  let closed = false;
+  let changeTimer = null;
   try {
     send("harness.snapshot", publicSnapshotPayload(loadState()));
   } catch (error) {
     send("harness.error", { at: now(), error: String(error && error.message || error), statePathHash: lastStateHash });
+  }
+  function emitChanged(reason) {
+    if (closed) return;
+    if (changeTimer) clearTimeout(changeTimer);
+    changeTimer = setTimeout(() => {
+      if (closed) return;
+      try {
+        const currentStateHash = fileHash(statePath);
+        if (currentStateHash !== lastStateHash) {
+          lastStateHash = currentStateHash;
+          send("harness.changed", Object.assign(publicSnapshotPayload(loadState()), { sseReason: reason || "state-file-changed" }));
+        }
+      } catch (error) {
+        send("harness.error", { at: now(), error: String(error && error.message || error), statePathHash: fileHash(statePath), sseReason: reason || "state-file-changed" });
+      }
+    }, 120);
+  }
+  let watcher = null;
+  try {
+    const watchedStateFile = path.basename(statePath);
+    watcher = fs.watch(stateDir, { persistent: false }, (eventType, filename) => {
+      const changedName = filename ? String(filename) : "";
+      if (!changedName || changedName === watchedStateFile || changedName.includes(watchedStateFile)) {
+        emitChanged("fs.watch:" + String(eventType || "change"));
+      }
+    });
+  } catch (error) {
+    send("harness.error", { at: now(), error: String(error && error.message || error), statePathHash: lastStateHash, sseReason: "fs.watch-unavailable" });
   }
   const interval = setInterval(() => {
     try {
       const currentStateHash = fileHash(statePath);
       if (currentStateHash !== lastStateHash) {
         lastStateHash = currentStateHash;
-        send("harness.changed", publicSnapshotPayload(loadState()));
+        send("harness.changed", Object.assign(publicSnapshotPayload(loadState()), { sseReason: "heartbeat-hash-check" }));
       }
       send("harness.heartbeat", { at: now(), statePathHash: currentStateHash, tokenPath: path.relative(workspaceRoot, tokenPath).replace(/\\\\/g, "/") });
     } catch (error) {
       send("harness.error", { at: now(), error: String(error && error.message || error), statePathHash: fileHash(statePath) });
     }
   }, 5000);
-  request.on("close", () => clearInterval(interval));
+  request.on("close", () => {
+    closed = true;
+    clearInterval(interval);
+    if (changeTimer) clearTimeout(changeTimer);
+    if (watcher && watcher.close) watcher.close();
+  });
 }
 
 function updateRuntimeListener(patch) {

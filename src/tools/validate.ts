@@ -199,6 +199,162 @@ const EXPECTED_FILES: Omit<ValidationItem, "status">[] = [
     severity: "required",
   },
   {
+    path: ".github/ai-harness/governance-trust.json",
+    label: "Governance approval trust anchors",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: ".github/ai-harness/architecture-ontology.policy.json",
+    label: "Architecture ontology policy",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/README.md",
+    label: "Semantic governance ontology guide",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/policy-authoring.md",
+    label: "Architecture policy authoring guide",
+    category: "governance",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/ontology/prompt-templates/semantic-context-pack.md",
+    label: "Semantic context pack prompt template",
+    category: "governance",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/ontology/policy-packs/README.md",
+    label: "Architecture policy pack GitOps guide",
+    category: "governance",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/ontology/architecture-profiles.catalog.json",
+    label: "Architecture profiles catalog",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/schemas/architecture-ontology.schema.json",
+    label: "Architecture ontology schema",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/schemas/source-graph.schema.json",
+    label: "Source graph schema",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/schemas/governance-evaluation.schema.json",
+    label: "Semantic governance evaluation schema",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/schemas/bypass-ledger.schema.json",
+    label: "Architecture waiver ledger schema",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/schemas/waiver-revocations.schema.json",
+    label: "Architecture waiver revocation ledger schema",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/schemas/semantic-warehouse.schema.json",
+    label: "Semantic warehouse schema",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/schemas/waiver-validation.schema.json",
+    label: "Waiver validation schema",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/schemas/enforcement-report.schema.json",
+    label: "Semantic enforcement report schema",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/schemas/policy-pack.schema.json",
+    label: "Architecture policy pack schema",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/state/source-graph.json",
+    label: "Semantic source graph state",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/state/governance-evaluation.json",
+    label: "Semantic governance evaluation state",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/state/semantic-warehouse.json",
+    label: "Semantic warehouse state",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/state/waiver-validation.json",
+    label: "Waiver validation state",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/state/enforcement-report.json",
+    label: "Semantic enforcement report state",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/state/enforcement-report.md",
+    label: "Semantic enforcement report Markdown",
+    category: "governance",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/ontology/state/bypass-ledger.json",
+    label: "Architecture waiver ledger",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/state/waiver-revocations.json",
+    label: "Architecture waiver revocation ledger",
+    category: "governance",
+    severity: "required",
+  },
+  {
+    path: "docs/ai-harness/ontology/state/context-pack.example.json",
+    label: "Semantic context pack example",
+    category: "governance",
+    severity: "recommended",
+  },
+  {
+    path: "docs/ai-harness/ontology/policy-packs/import-review.example.json",
+    label: "Policy pack import review example",
+    category: "governance",
+    severity: "recommended",
+  },
+  {
     path: "docs/reviews/README.md",
     label: "Review ledger docs",
     category: "docs",
@@ -490,12 +646,119 @@ const RUNTIME_STATE_PATHS = new Set([
   "docs/ai-harness/runtime/state/current-native-execution.json",
 ]);
 
+const SEMANTIC_JSON_PATHS = new Set([
+  ".github/ai-harness/governance-trust.json",
+  ".github/ai-harness/architecture-ontology.policy.json",
+  "docs/ai-harness/ontology/architecture-profiles.catalog.json",
+  "docs/ai-harness/ontology/schemas/architecture-ontology.schema.json",
+  "docs/ai-harness/ontology/schemas/source-graph.schema.json",
+  "docs/ai-harness/ontology/schemas/governance-evaluation.schema.json",
+  "docs/ai-harness/ontology/schemas/bypass-ledger.schema.json",
+  "docs/ai-harness/ontology/schemas/waiver-revocations.schema.json",
+  "docs/ai-harness/ontology/schemas/semantic-warehouse.schema.json",
+  "docs/ai-harness/ontology/schemas/waiver-validation.schema.json",
+  "docs/ai-harness/ontology/schemas/enforcement-report.schema.json",
+  "docs/ai-harness/ontology/schemas/policy-pack.schema.json",
+  "docs/ai-harness/ontology/state/source-graph.json",
+  "docs/ai-harness/ontology/state/governance-evaluation.json",
+  "docs/ai-harness/ontology/state/semantic-warehouse.json",
+  "docs/ai-harness/ontology/state/waiver-validation.json",
+  "docs/ai-harness/ontology/state/enforcement-report.json",
+  "docs/ai-harness/ontology/state/bypass-ledger.json",
+  "docs/ai-harness/ontology/state/waiver-revocations.json",
+  "docs/ai-harness/ontology/state/context-pack.example.json",
+  "docs/ai-harness/ontology/policy-packs/import-review.example.json",
+]);
+
+const SEMANTIC_STATE_PROJECTION_PATHS = new Set([
+  "docs/ai-harness/ontology/state/source-graph.json",
+  "docs/ai-harness/ontology/state/governance-evaluation.json",
+  "docs/ai-harness/ontology/state/semantic-warehouse.json",
+  "docs/ai-harness/ontology/state/waiver-validation.json",
+  "docs/ai-harness/ontology/state/enforcement-report.json",
+]);
+
 function formatJsonError(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return `Invalid JSON: ${error.message}`;
   }
 
   return "Invalid JSON: parse failed";
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function arrayLength(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function semanticProjectionReadiness(
+  relativePath: string,
+  parsed: Record<string, unknown>
+): string | null {
+  if (!SEMANTIC_STATE_PROJECTION_PATHS.has(relativePath)) {
+    return null;
+  }
+
+  if (parsed.generatedAt === "bootstrap" || parsed.snapshotHash === "bootstrap") {
+    return "Bootstrap-only semantic projection; run semantic governance tools before treating it as current evidence";
+  }
+
+  if (relativePath === "docs/ai-harness/ontology/state/source-graph.json") {
+    const scan = isPlainRecord(parsed.scan) ? parsed.scan : {};
+    const sourceFileCount =
+      typeof scan.sourceFileCount === "number"
+        ? scan.sourceFileCount
+        : arrayLength(parsed.files);
+    if (!Array.isArray(parsed.files) || !Array.isArray(parsed.edges) || sourceFileCount < 1) {
+      return "Source graph has no scanned source files; run scan_source_graph";
+    }
+    return null;
+  }
+
+  if (relativePath === "docs/ai-harness/ontology/state/governance-evaluation.json") {
+    const sourceGraphRef = typeof parsed.sourceGraphRef === "string" ? parsed.sourceGraphRef : "";
+    const findings = arrayLength(parsed.violations) + arrayLength(parsed.warnings);
+    if (!sourceGraphRef || !Array.isArray(parsed.violations) || !Array.isArray(parsed.warnings)) {
+      return "Governance evaluation is missing source graph evidence arrays";
+    }
+    if (findings === 0 && !parsed.evaluationHash && !parsed.sourceGraphHash) {
+      return "Governance evaluation has no findings or source graph hash; run validate_architecture_governance";
+    }
+    return null;
+  }
+
+  if (relativePath === "docs/ai-harness/ontology/state/semantic-warehouse.json") {
+    const summaries = Array.isArray(parsed.viewSummaries) ? parsed.viewSummaries : [];
+    const totalRows = summaries.reduce((sum, item) => {
+      if (!isPlainRecord(item)) {
+        return sum;
+      }
+      return sum + (typeof item.rowCount === "number" ? item.rowCount : 0);
+    }, 0);
+    if (!isPlainRecord(parsed.views) || totalRows < 1) {
+      return "Semantic warehouse has no fact rows; run query_semantic_warehouse";
+    }
+    return null;
+  }
+
+  if (relativePath === "docs/ai-harness/ontology/state/waiver-validation.json") {
+    if (!Array.isArray(parsed.findings) || !isPlainRecord(parsed.metrics)) {
+      return "Waiver validation is missing findings or metrics; run validate_architecture_waivers";
+    }
+    return null;
+  }
+
+  if (relativePath === "docs/ai-harness/ontology/state/enforcement-report.json") {
+    if (parsed.gate === "disabled" || parsed.optInOnly !== true) {
+      return "Enforcement report is still disabled bootstrap state; run enforce_architecture_governance";
+    }
+    return null;
+  }
+
+  return null;
 }
 
 function inspectExpectedFile(
@@ -551,6 +814,34 @@ function inspectExpectedFile(
         ? undefined
         : "Runtime state contract validation failed",
     };
+  }
+
+  if (SEMANTIC_JSON_PATHS.has(expected.path)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(fullPath, "utf-8")) as Record<
+        string,
+        unknown
+      >;
+      const hasSchema =
+        typeof parsed.schemaVersion === "string" ||
+        typeof parsed.$schema === "string";
+      const projectionReadinessIssue = hasSchema
+        ? semanticProjectionReadiness(expected.path, parsed)
+        : null;
+      return {
+        ...expected,
+        status: hasSchema && projectionReadinessIssue == null ? "present" : "outdated",
+        details: hasSchema
+          ? projectionReadinessIssue ?? undefined
+          : "Missing schemaVersion or $schema",
+      };
+    } catch (error) {
+      return {
+        ...expected,
+        status: "outdated",
+        details: formatJsonError(error),
+      };
+    }
   }
 
   if (
@@ -630,6 +921,12 @@ export function validateWorkspace(workspacePath: string): ValidationResult {
   ) {
     suggestions.push(
       "Runtime orchestration state is present but invalid. Reconcile docs/ai-harness/runtime/state/*.json before continuing governed execution."
+    );
+  }
+
+  if (outdated.some((item) => SEMANTIC_STATE_PROJECTION_PATHS.has(item.path))) {
+    suggestions.push(
+      "Semantic governance projection files are bootstrap scaffolds or stale. Run `scan_source_graph`, `validate_architecture_governance`, `query_semantic_warehouse`, and the waiver/enforcement checks before treating architecture evidence as complete."
     );
   }
 

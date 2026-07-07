@@ -23,6 +23,7 @@ import {
   generateGitAttributes,
   generateHarnessCoreAgentSkills,
   generateHarnessFiles,
+  generateOntologyFiles,
   generateReadinessFiles,
   generateRuntimeOrchestratorFiles,
   generateInitialChangelog,
@@ -75,6 +76,7 @@ export function collectFiles(params: WorkspaceInitParams): GeneratedFile[] {
   // 6. AI harness engineering artifacts
   if (params.includeHarnessEngineering !== false) {
     files.push(...generateHarnessFiles(params));
+    files.push(...generateOntologyFiles(params));
     files.push(...generateRuntimeOrchestratorFiles(params));
     files.push(...generateReadinessFiles(params));
     files.push(...generateDashboardFiles(params));

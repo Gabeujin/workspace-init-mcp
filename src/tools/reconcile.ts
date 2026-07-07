@@ -27,6 +27,11 @@ import {
   normalizeWorkspaceRelativePath,
 } from "./generated-file-safety.js";
 import {
+  copyContainedFileAtomic,
+  ensureContainedDirectory,
+  writeContainedTextAtomic,
+} from "./safe-workspace-write.js";
+import {
   type FileEncoding,
   type LineEnding,
   type WorkspaceInitParams,
@@ -181,20 +186,12 @@ const LEGACY_RESOURCE_ROOTS: Array<{
 ];
 
 function writeFileWithEncoding(
+  workspacePath: string,
   fullPath: string,
   content: string,
   encoding: FileEncoding
 ): void {
-  if (encoding === "utf-8-bom") {
-    fs.writeFileSync(fullPath, "\uFEFF" + content, "utf-8");
-    return;
-  }
-
-  fs.writeFileSync(fullPath, content, encoding as BufferEncoding);
-}
-
-function ensureDir(fullPath: string): void {
-  fs.mkdirSync(fullPath, { recursive: true });
+  writeContainedTextAtomic(workspacePath, fullPath, content, encoding);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -1651,25 +1648,28 @@ function archiveManagedFile(
   }
 
   const backupPath = path.join(reportRoot, "managed-backup", relativePath);
-  ensureDir(path.dirname(backupPath));
-  fs.copyFileSync(sourcePath, backupPath);
+  copyContainedFileAtomic(workspacePath, sourcePath, backupPath);
   return {
     originalPath: relativePath,
     backupPath: path.relative(workspacePath, backupPath).replace(/\\/g, "/"),
   };
 }
 
-function copyDirectoryRecursive(sourceDir: string, targetDir: string): void {
-  ensureDir(targetDir);
+function copyDirectoryRecursive(
+  workspacePath: string,
+  sourceDir: string,
+  targetDir: string
+): void {
+  ensureContainedDirectory(workspacePath, sourceDir);
+  ensureContainedDirectory(workspacePath, targetDir);
   for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
     const sourcePath = path.join(sourceDir, entry.name);
     const targetPath = path.join(targetDir, entry.name);
     if (entry.isDirectory()) {
-      copyDirectoryRecursive(sourcePath, targetPath);
+      copyDirectoryRecursive(workspacePath, sourcePath, targetPath);
       continue;
     }
-    ensureDir(path.dirname(targetPath));
-    fs.copyFileSync(sourcePath, targetPath);
+    copyContainedFileAtomic(workspacePath, sourcePath, targetPath);
   }
 }
 
@@ -1740,10 +1740,9 @@ function importLegacyAgentResources(
     }
 
     if (kind === "skills") {
-      copyDirectoryRecursive(sourcePath, targetPath);
+      copyDirectoryRecursive(workspacePath, sourcePath, targetPath);
     } else {
-      ensureDir(path.dirname(targetPath));
-      fs.copyFileSync(sourcePath, targetPath);
+      copyContainedFileAtomic(workspacePath, sourcePath, targetPath);
     }
   }
 
@@ -2463,7 +2462,7 @@ export function exportReconcilePreflightReport(
     })
   );
   const paths = buildReconcilePreflightPaths(workspacePath);
-  ensureDir(paths.reportRoot);
+  ensureContainedDirectory(workspacePath, paths.reportRoot);
 
   const report = {
     schemaVersion: "1.1.0",
@@ -2490,12 +2489,12 @@ export function exportReconcilePreflightReport(
     dryRunPlan,
   });
 
-  fs.writeFileSync(paths.reportJsonPath, reportJson, "utf-8");
-  fs.writeFileSync(paths.reportMarkdownPath, reportMarkdown, "utf-8");
-  fs.writeFileSync(paths.reportHtmlPath, reportHtml, "utf-8");
-  fs.writeFileSync(paths.latestReportJsonPath, reportJson, "utf-8");
-  fs.writeFileSync(paths.latestReportMarkdownPath, reportMarkdown, "utf-8");
-  fs.writeFileSync(paths.latestReportHtmlPath, reportHtml, "utf-8");
+  writeContainedTextAtomic(workspacePath, paths.reportJsonPath, reportJson, "utf-8");
+  writeContainedTextAtomic(workspacePath, paths.reportMarkdownPath, reportMarkdown, "utf-8");
+  writeContainedTextAtomic(workspacePath, paths.reportHtmlPath, reportHtml, "utf-8");
+  writeContainedTextAtomic(workspacePath, paths.latestReportJsonPath, reportJson, "utf-8");
+  writeContainedTextAtomic(workspacePath, paths.latestReportMarkdownPath, reportMarkdown, "utf-8");
+  writeContainedTextAtomic(workspacePath, paths.latestReportHtmlPath, reportHtml, "utf-8");
 
   const reportJsonPath = path.relative(workspacePath, paths.reportJsonPath).replace(/\\/g, "/");
   const reportMarkdownPath = path
@@ -2778,8 +2777,12 @@ export function reconcileWorkspaceInitialization(
           backupFiles.push(archived);
         }
       }
-      ensureDir(path.dirname(pendingWrite.fullPath));
-      writeFileWithEncoding(pendingWrite.fullPath, pendingWrite.content, encoding);
+      writeFileWithEncoding(
+        options.workspacePath,
+        pendingWrite.fullPath,
+        pendingWrite.content,
+        encoding
+      );
     }
 
     if (importLegacyResources) {
@@ -2790,7 +2793,7 @@ export function reconcileWorkspaceInitialization(
   let reportJsonPath: string | null = null;
   let reportMarkdownPath: string | null = null;
   if (writeMigrationReport) {
-    ensureDir(migrationPaths.reportRoot);
+    ensureContainedDirectory(options.workspacePath, migrationPaths.reportRoot);
     const report = {
       schemaVersion: "1.0.0",
       toolVersion: RECONCILE_VERSION,
@@ -2816,11 +2819,30 @@ export function reconcileWorkspaceInitialization(
     };
     const reportJson = `${JSON.stringify(report, null, 2)}\n`;
     const reportMarkdown = buildReportMarkdown(report);
-    ensureDir(migrationPaths.reportRoot);
-    writeFileWithEncoding(migrationPaths.reportJsonPath, reportJson, encoding);
-    writeFileWithEncoding(migrationPaths.reportMarkdownPath, reportMarkdown, encoding);
-    writeFileWithEncoding(migrationPaths.latestReportJsonPath, reportJson, encoding);
-    writeFileWithEncoding(migrationPaths.latestReportMarkdownPath, reportMarkdown, encoding);
+    writeFileWithEncoding(
+      options.workspacePath,
+      migrationPaths.reportJsonPath,
+      reportJson,
+      encoding
+    );
+    writeFileWithEncoding(
+      options.workspacePath,
+      migrationPaths.reportMarkdownPath,
+      reportMarkdown,
+      encoding
+    );
+    writeFileWithEncoding(
+      options.workspacePath,
+      migrationPaths.latestReportJsonPath,
+      reportJson,
+      encoding
+    );
+    writeFileWithEncoding(
+      options.workspacePath,
+      migrationPaths.latestReportMarkdownPath,
+      reportMarkdown,
+      encoding
+    );
     reportJsonPath = path
       .relative(options.workspacePath, migrationPaths.reportJsonPath)
       .replace(/\\/g, "/");
@@ -2959,8 +2981,7 @@ export function restoreReconcileBackup(
       continue;
     }
 
-    ensureDir(path.dirname(targetPath));
-    fs.copyFileSync(sourcePath, targetPath);
+    copyContainedFileAtomic(workspacePath, sourcePath, targetPath);
     restoredFiles.push(backup.originalPath);
   }
 

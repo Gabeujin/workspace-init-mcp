@@ -12,6 +12,10 @@ import {
   isUnsafeWorkspaceRelativePath,
   normalizeWorkspaceRelativePath,
 } from "./generated-file-safety.js";
+import {
+  ensureContainedDirectory,
+  writeContainedTextAtomic,
+} from "./safe-workspace-write.js";
 
 export const MANAGED_FILE_INVENTORY_PATH = ".github/ai-harness/managed-file-inventory.json";
 export const MANAGED_INVENTORY_SCHEMA_VERSION = "1.0.0";
@@ -138,10 +142,6 @@ export interface ReconcilePreflightExportResult {
 
 export function computeContentSha256(content: string): string {
   return crypto.createHash("sha256").update(content, "utf-8").digest("hex");
-}
-
-function ensureDir(fullPath: string): void {
-  fs.mkdirSync(fullPath, { recursive: true });
 }
 
 function classifyManagedPath(relativePath: string): string {
@@ -998,13 +998,13 @@ export function auditWorkspaceManagedSemanticDiff(
   let reportMarkdownPath: string | null = null;
   if (writeReport) {
     const paths = buildManagedSemanticDiffPaths(workspacePath);
-    ensureDir(paths.reportRoot);
+    ensureContainedDirectory(workspacePath, paths.reportRoot);
     const json = `${JSON.stringify(resultBase, null, 2)}\n`;
     const markdown = buildManagedSemanticDiffMarkdown(resultBase);
-    fs.writeFileSync(paths.reportJsonPath, json, "utf-8");
-    fs.writeFileSync(paths.reportMarkdownPath, markdown, "utf-8");
-    fs.writeFileSync(paths.latestReportJsonPath, json, "utf-8");
-    fs.writeFileSync(paths.latestReportMarkdownPath, markdown, "utf-8");
+    writeContainedTextAtomic(workspacePath, paths.reportJsonPath, json, "utf-8");
+    writeContainedTextAtomic(workspacePath, paths.reportMarkdownPath, markdown, "utf-8");
+    writeContainedTextAtomic(workspacePath, paths.latestReportJsonPath, json, "utf-8");
+    writeContainedTextAtomic(workspacePath, paths.latestReportMarkdownPath, markdown, "utf-8");
     reportJsonPath = path.relative(workspacePath, paths.reportJsonPath).replace(/\\/g, "/");
     reportMarkdownPath = path.relative(workspacePath, paths.reportMarkdownPath).replace(/\\/g, "/");
   }
@@ -1035,7 +1035,7 @@ export function exportReconcilePreflightReport(
   const riskAudit = auditWorkspaceUpgradeRisk(workspacePath);
   const semanticDiff = auditWorkspaceManagedSemanticDiff(workspacePath, false);
   const paths = buildReconcilePreflightPaths(workspacePath);
-  ensureDir(paths.reportRoot);
+  ensureContainedDirectory(workspacePath, paths.reportRoot);
 
   const report = {
     schemaVersion: "1.0.0",
@@ -1059,12 +1059,12 @@ export function exportReconcilePreflightReport(
     semanticDiff,
   });
 
-  fs.writeFileSync(paths.reportJsonPath, reportJson, "utf-8");
-  fs.writeFileSync(paths.reportMarkdownPath, reportMarkdown, "utf-8");
-  fs.writeFileSync(paths.reportHtmlPath, reportHtml, "utf-8");
-  fs.writeFileSync(paths.latestReportJsonPath, reportJson, "utf-8");
-  fs.writeFileSync(paths.latestReportMarkdownPath, reportMarkdown, "utf-8");
-  fs.writeFileSync(paths.latestReportHtmlPath, reportHtml, "utf-8");
+  writeContainedTextAtomic(workspacePath, paths.reportJsonPath, reportJson, "utf-8");
+  writeContainedTextAtomic(workspacePath, paths.reportMarkdownPath, reportMarkdown, "utf-8");
+  writeContainedTextAtomic(workspacePath, paths.reportHtmlPath, reportHtml, "utf-8");
+  writeContainedTextAtomic(workspacePath, paths.latestReportJsonPath, reportJson, "utf-8");
+  writeContainedTextAtomic(workspacePath, paths.latestReportMarkdownPath, reportMarkdown, "utf-8");
+  writeContainedTextAtomic(workspacePath, paths.latestReportHtmlPath, reportHtml, "utf-8");
 
   const reportJsonPath = path.relative(workspacePath, paths.reportJsonPath).replace(/\\/g, "/");
   const reportMarkdownPath = path
