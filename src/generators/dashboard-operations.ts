@@ -233,8 +233,15 @@ function backfillSessionTraceability(state, workspaceId, workspaceName, purpose)
   const sessionLog = Array.isArray(state.sessionLog) ? state.sessionLog : [];
   const sourceSessions = governedSessions.length > 0 ? governedSessions : sessionLog;
   const entries = sourceSessions.length > 0
-    ? sourceSessions.slice(0, 10).map((session) => {
+      ? sourceSessions.slice(0, 10).map((session) => {
         const trace = isPlainObject(session.taskTrace) ? session.taskTrace : {};
+        const hasRecordedTrace =
+          typeof trace.originalRequest === "string" &&
+          typeof trace.processSummary === "string" &&
+          typeof trace.resultSummary === "string" &&
+          trace.traceDebt === false;
+        const traceSource = hasRecordedTrace ? String(trace.traceSource || "recorded-event") : "synthetic-backfill";
+        const traceDebt = traceSource !== "recorded-event";
         const evidenceRefs = Array.isArray(session.outputs) ? session.outputs.filter((entry) => typeof entry === "string") : ["legacy-dashboard-state"];
         return {
           sessionId: String(session.id || session.sessionId || "legacy-session"),
@@ -242,13 +249,19 @@ function backfillSessionTraceability(state, workspaceId, workspaceName, purpose)
           status: String(session.status || "legacy-backfill"),
           phase: String(session.phase || session.stage || "legacy-backfill"),
           originalRequest: String(trace.originalRequest || session.goal || purpose),
-          processSummary: String(trace.processSummary || session.note || "Legacy dashboard session was backfilled; process summary was not recorded in the old projection."),
-          resultSummary: String(trace.resultSummary || session.note || "Legacy dashboard session requires refresh before result claims are trusted."),
+          processSummary: String(hasRecordedTrace ? trace.processSummary : "Trace debt: process summary was not recorded as authoritative request/process/result evidence."),
+          resultSummary: String(hasRecordedTrace ? trace.resultSummary : "Trace debt: result summary was not recorded as authoritative request/process/result evidence."),
+          traceSource,
+          traceDebt,
+          traceConfidence: traceDebt ? "low" : "high",
           traceIntegrity: {
-            status: "legacy-fallback",
-            missingFields: isPlainObject(session.taskTrace) ? [] : ["taskTrace"],
-            source: "legacy-dashboard-state",
-            warning: "Backfilled traceability keeps validation migration-safe but is not verified request/process/result evidence."
+            status: traceDebt ? "legacy-fallback" : "complete",
+            missingFields: traceDebt ? ["taskTrace"] : [],
+            source: traceSource,
+            warning: traceDebt ? "Backfilled traceability keeps validation migration-safe but is not verified request/process/result evidence." : null,
+            traceSource,
+            traceDebt,
+            traceConfidence: traceDebt ? "low" : "high"
           },
           residualRisk: "Legacy projection may not preserve full request/process/result trace until refreshed.",
           evidenceRefs,
@@ -265,11 +278,17 @@ function backfillSessionTraceability(state, workspaceId, workspaceName, purpose)
         originalRequest: purpose,
         processSummary: "Legacy dashboard state was loaded without session traceability fields.",
         resultSummary: "Backfilled traceability enables validation and refresh, but real session trace evidence is still required.",
+        traceSource: "synthetic-backfill",
+        traceDebt: true,
+        traceConfidence: "low",
         traceIntegrity: {
           status: "legacy-fallback",
           missingFields: ["sessionTraceability"],
-          source: "legacy-dashboard-state",
-          warning: "No governed session trace was present in this legacy projection."
+          source: "synthetic-backfill",
+          warning: "No governed session trace was present in this legacy projection.",
+          traceSource: "synthetic-backfill",
+          traceDebt: true,
+          traceConfidence: "low"
         },
         residualRisk: "Legacy projection may not preserve full request/process/result trace until refreshed.",
         evidenceRefs: ["legacy-dashboard-state"],
@@ -283,6 +302,8 @@ function backfillSessionTraceability(state, workspaceId, workspaceName, purpose)
     purpose: "Backfilled compatibility projection for request/process/result traceability.",
     source: "legacy-dashboard-state",
     integrityPolicy: "Legacy backfills are migration aids only; refreshed governed sessions must record taskTrace directly.",
+    traceDebtCount: entries.filter((entry) => Boolean(entry.traceDebt)).length,
+    trustedTraceCount: entries.filter((entry) => entry.traceDebt === false).length,
     entries
   };
 }
@@ -549,6 +570,111 @@ function backfillUserRealityCheck(state, workspaceId, workspaceName, purpose) {
   };
 }
 
+function backfillUserPerspectiveAudit(state, workspaceId, workspaceName, purpose) {
+  const quality = isPlainObject(state.dashboardQualityScorecard) ? state.dashboardQualityScorecard : {};
+  const dashboardQualityPolicy = String((quality.scoringPolicy || "").trim() || "Keep UI/UX scoring conservative until user-facing outcomes and evidence routes are refreshed through governed projections.");
+  const conservativeScoreSource = Number(quality.projectEvidenceScore || quality.uiUxDesignScore || 1.2);
+  const conservativeDimension = {
+    id: "user-perspective-baseline",
+    label: "User perspective baseline support",
+    score: Math.max(1.2, Math.min(6.5, Number(conservativeScoreSource))),
+    status: "refresh-required",
+    negativeFinding: "User-facing outcome metrics are not yet tied to a refreshed evidence trail.",
+    userOutcome: "Dashboard trust posture is orientation-only until user-perspective evidence is refreshed.",
+    evidenceRefs: ["legacy-dashboard-state", "dashboardQualityScorecard", "worldModelImprovementContract"],
+    apiRouteChips: ["/api/harness-dashboard/v1/query?scope=evidence&q=userPerspectiveAudit", "/api/harness-dashboard/v1/query?scope=evidence&q=user%20support"],
+    nextAction: "Run dashboard-ops refresh and backfill user-perspective evidence routes after the next governed session."
+  };
+  const stringList = (value) => {
+    if (!Array.isArray(value)) return [];
+    return value.filter((entry) => typeof entry === "string");
+  };
+  const evidenceBackfillVerification = [
+    {
+      id: "refresh-user-perspective-audit",
+      title: "Refresh user perspective audit",
+      command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+      expectedEvidence: "Dashboard projections rebuild user-perspective support, blocker, and evidence-route fields from current state.",
+      apiRouteChips: ["/api/harness-dashboard/v1/query?scope=evidence&q=dashboardQualityScorecard"],
+      successSignal: "Legacy backfill is replaced by current user-perspective audit evidence."
+    },
+    {
+      id: "verify-user-perspective-routes",
+      title: "Verify user perspective route search",
+      command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections",
+      expectedEvidence: "Validation confirms userPerspectiveAudit dimensions and route chips are indexed.",
+      apiRouteChips: ["/api/harness-dashboard/v1/query?scope=all&q=userPerspectiveAudit"],
+      successSignal: "Query results include the audit and scored dimensions without raw JSON inspection."
+    }
+  ];
+  const evidenceBackfillRoutes = [
+    "/api/harness-dashboard/v1/query?scope=all&q=userPerspectiveAudit",
+    "/api/harness-dashboard/v1/query?scope=evidence&q=userPerspectiveAudit"
+  ];
+  const legacyDimensionFallback = [
+    Object.assign({}, conservativeDimension, {
+      score: Number(conservativeDimension.score || quality.targetScore || 6.5),
+      evidenceRefs: Array.isArray(conservativeDimension.evidenceRefs) ? conservativeDimension.evidenceRefs : ["legacy-dashboard-state"]
+    })
+  ];
+  const userPerspectiveAudit = isPlainObject(quality.userPerspectiveAudit) ? quality.userPerspectiveAudit : {};
+  const rawDimensions = Array.isArray(userPerspectiveAudit.dimensions) ? userPerspectiveAudit.dimensions.filter(isPlainObject) : [];
+  const normalizedDimensions = (rawDimensions.length > 0 ? rawDimensions : legacyDimensionFallback)
+    .map((dimension, index) => Object.assign({}, dimension, {
+      id: String(dimension.id || ("user-perspective-dimension-" + String(index + 1))),
+      label: String(dimension.label || "User perspective dimension"),
+      score: Number(dimension.score || userPerspectiveAudit.currentSupportScore || quality.projectEvidenceScore || conservativeDimension.score || 1.2),
+      status: String(dimension.status || "refresh-required"),
+      negativeFinding: String(dimension.negativeFinding || "Evidence trail for this user outcome has not been refreshed."),
+      userOutcome: String(dimension.userOutcome || "User perspective outcome is refresh-required and should not be used for operational claims."),
+      evidenceRefs: stringList(dimension.evidenceRefs).length > 0 ? stringList(dimension.evidenceRefs) : ["legacy-dashboard-state"],
+      apiRouteChips: stringList(dimension.apiRouteChips).length > 0
+        ? stringList(dimension.apiRouteChips)
+        : ["/api/harness-dashboard/v1/query?scope=evidence&q=userPerspectiveAudit", "/api/harness-dashboard/v1/query?scope=evidence&q=" + encodeURIComponent(String(dimension.id || "user-perspective-dimension"))],
+      nextAction: String(dimension.nextAction || "Run dashboard-ops refresh and capture a refreshed user-perspective evidence trail.")
+    }))
+    .sort((left, right) => String(left.id || "").localeCompare(String(right.id || "")));
+  const normalizeVerificationPath = (value) => {
+    if (!Array.isArray(value)) return [];
+    return value.map((entry, index) => {
+      if (isPlainObject(entry)) {
+        return {
+          id: String(entry.id || "user-perspective-verification-" + String(index + 1)),
+          title: String(entry.title || entry.id || "User perspective verification"),
+          command: String(entry.command || "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections"),
+          expectedEvidence: String(entry.expectedEvidence || "Verification evidence is declared for this user-facing dashboard outcome."),
+          apiRouteChips: stringList(entry.apiRouteChips).length > 0 ? stringList(entry.apiRouteChips) : ["/api/harness-dashboard/v1/query?scope=all&q=userPerspectiveAudit"],
+          successSignal: String(entry.successSignal || "User-perspective evidence is visible without reading raw JSON.")
+        };
+      }
+      return {
+        id: "user-perspective-verification-" + String(index + 1),
+        title: String(entry || "User perspective verification"),
+        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections",
+        expectedEvidence: String(entry || "Legacy verification marker is preserved as a structured audit step."),
+        apiRouteChips: ["/api/harness-dashboard/v1/query?scope=all&q=userPerspectiveAudit"],
+        successSignal: "Legacy verification marker is visible in the user-perspective audit."
+      };
+    });
+  };
+  const backfillVerificationPath = normalizeVerificationPath(userPerspectiveAudit.verificationPath);
+  const backfillApiRouteChips = stringList(userPerspectiveAudit.apiRouteChips);
+  quality.userPerspectiveAudit = Object.assign({}, userPerspectiveAudit, {
+    targetScore: Number(userPerspectiveAudit.targetScore || quality.targetScore || 9.5),
+    currentSupportScore: Number(userPerspectiveAudit.currentSupportScore || 1.2),
+    scoreStatus: String(userPerspectiveAudit.scoreStatus || "refresh-required"),
+    scorePolicy: String(userPerspectiveAudit.scorePolicy || dashboardQualityPolicy),
+    summary: String(userPerspectiveAudit.summary || "Backfill for " + workspaceName + ": user perspective audit was not explicitly declared."),
+    explicitBlocker: String(userPerspectiveAudit.explicitBlocker || "dashboard-ops refresh required"),
+    verificationPath: backfillVerificationPath.length > 0 ? backfillVerificationPath : evidenceBackfillVerification,
+    apiRouteChips: backfillApiRouteChips.length > 0 ? backfillApiRouteChips : evidenceBackfillRoutes,
+    dimensions: normalizedDimensions
+  });
+  state.dashboardQualityScorecard = Object.assign({}, quality, {
+    userPerspectiveAudit: quality.userPerspectiveAudit
+  });
+}
+
 function normalizeDashboardStateForValidation(state) {
   if (Array.isArray(state.entities)) {
     state.entities = state.entities.map((entity) => {
@@ -575,6 +701,7 @@ function normalizeDashboardStateForValidation(state) {
   backfillProjectionConfidence(state, workspaceId);
   backfillSessionTraceability(state, workspaceId, workspaceName, purpose);
   backfillUserRealityCheck(state, workspaceId, workspaceName, purpose);
+  backfillUserPerspectiveAudit(state, workspaceId, workspaceName, purpose);
   if (!isPlainObject(state.realityModel)) {
     state.realityModel = {
       schemaVersion: SCHEMA_VERSION,
@@ -821,6 +948,13 @@ function requireValidationNumber(errors, fieldPath, value) {
   }
 }
 
+function requireValidationNumberAtMostTen(errors, fieldPath, value) {
+  requireValidationNumber(errors, fieldPath, value);
+  if (typeof value === "number" && value > 10) {
+    errors.push(fieldPath + " must be <= 10");
+  }
+}
+
 function requireValidationBoolean(errors, fieldPath, value) {
   if (typeof value !== "boolean") {
     pushValidationTypeError(errors, fieldPath, "a boolean", value);
@@ -916,9 +1050,10 @@ function validateState(state) {
     const tracePath = "dashboardState.sessionTraceability.entries[" + index + "]";
     const item = requireValidationObject(errors, tracePath, traceEntry);
     if (!item) continue;
-    for (const field of ["sessionId", "status", "phase", "originalRequest", "processSummary", "resultSummary", "nextStep"]) {
+    for (const field of ["sessionId", "status", "phase", "originalRequest", "processSummary", "resultSummary", "traceSource", "traceConfidence", "nextStep"]) {
       requireValidationString(errors, tracePath + "." + field, item[field]);
     }
+    requireValidationBoolean(errors, tracePath + ".traceDebt", item.traceDebt);
     requireValidationObject(errors, tracePath + ".traceIntegrity", item.traceIntegrity);
     requireValidationStringArray(errors, tracePath + ".evidenceRefs", item.evidenceRefs);
   }
@@ -1356,6 +1491,39 @@ function validateState(state) {
   requireValidationNumber(errors, "dashboardState.dashboardQualityScorecard.targetScore", scorecard.targetScore);
   requireValidationNumber(errors, "dashboardState.dashboardQualityScorecard.uiUxDesignScore", scorecard.uiUxDesignScore);
   requireValidationNumber(errors, "dashboardState.dashboardQualityScorecard.projectEvidenceScore", scorecard.projectEvidenceScore);
+  const userPerspectiveAudit = requireValidationObject(
+    errors,
+    "dashboardState.dashboardQualityScorecard.userPerspectiveAudit",
+    scorecard.userPerspectiveAudit
+  ) || {};
+  requireValidationNumberAtMostTen(errors, "dashboardState.dashboardQualityScorecard.userPerspectiveAudit.targetScore", userPerspectiveAudit.targetScore);
+  requireValidationNumberAtMostTen(errors, "dashboardState.dashboardQualityScorecard.userPerspectiveAudit.currentSupportScore", userPerspectiveAudit.currentSupportScore);
+  requireValidationString(errors, "dashboardState.dashboardQualityScorecard.userPerspectiveAudit.scoreStatus", userPerspectiveAudit.scoreStatus);
+  requireValidationString(errors, "dashboardState.dashboardQualityScorecard.userPerspectiveAudit.scorePolicy", userPerspectiveAudit.scorePolicy);
+  requireValidationString(errors, "dashboardState.dashboardQualityScorecard.userPerspectiveAudit.summary", userPerspectiveAudit.summary);
+  requireValidationString(errors, "dashboardState.dashboardQualityScorecard.userPerspectiveAudit.explicitBlocker", userPerspectiveAudit.explicitBlocker);
+  requireValidationStringArray(errors, "dashboardState.dashboardQualityScorecard.userPerspectiveAudit.apiRouteChips", userPerspectiveAudit.apiRouteChips);
+  const userPerspectiveAuditVerificationPath = requireValidationArray(
+    errors,
+    "dashboardState.dashboardQualityScorecard.userPerspectiveAudit.verificationPath",
+    userPerspectiveAudit.verificationPath
+  );
+  const userPerspectiveAuditDimensions = requireValidationArray(
+    errors,
+    "dashboardState.dashboardQualityScorecard.userPerspectiveAudit.dimensions",
+    userPerspectiveAudit.dimensions
+  );
+  for (const [index, item] of (userPerspectiveAuditVerificationPath || []).entries()) {
+    const pathPrefix = "dashboardState.dashboardQualityScorecard.userPerspectiveAudit.verificationPath[" + index + "]";
+    const step = requireValidationObject(errors, pathPrefix, item);
+    if (!step) continue;
+    requireValidationString(errors, pathPrefix + ".id", step.id);
+    requireValidationString(errors, pathPrefix + ".title", step.title);
+    requireValidationString(errors, pathPrefix + ".command", step.command);
+    requireValidationString(errors, pathPrefix + ".expectedEvidence", step.expectedEvidence);
+    requireValidationStringArray(errors, pathPrefix + ".apiRouteChips", step.apiRouteChips);
+    requireValidationString(errors, pathPrefix + ".successSignal", step.successSignal);
+  }
   const qaEvidence = requireValidationObject(errors, "dashboardState.dashboardQualityScorecard.qaEvidence", scorecard.qaEvidence) || {};
   requireValidationStringArray(errors, "dashboardState.dashboardQualityScorecard.qaEvidence.requiredFor95", qaEvidence.requiredFor95);
   requireValidationString(errors, "dashboardState.dashboardQualityScorecard.qaEvidence.status", qaEvidence.status);
@@ -1380,6 +1548,20 @@ function validateState(state) {
     if (Number(item.score) >= Number(scorecard.targetScore || 9.5) && !qaStatusAllowsTargetScore(qaEvidence.status)) {
       errors.push(pathPrefix + ".score must stay below targetScore until qaEvidence.status is verified or passed");
     }
+  }
+  for (const [index, item] of (userPerspectiveAuditDimensions || []).entries()) {
+    const pathPrefix = "dashboardState.dashboardQualityScorecard.userPerspectiveAudit.dimensions[" + index + "]";
+    const dimension = requireValidationObject(errors, pathPrefix, item);
+    if (!dimension) continue;
+    requireValidationString(errors, pathPrefix + ".id", dimension.id);
+    requireValidationString(errors, pathPrefix + ".label", dimension.label);
+    requireValidationNumberAtMostTen(errors, pathPrefix + ".score", dimension.score);
+    requireValidationString(errors, pathPrefix + ".status", dimension.status);
+    requireValidationString(errors, pathPrefix + ".negativeFinding", dimension.negativeFinding);
+    requireValidationString(errors, pathPrefix + ".userOutcome", dimension.userOutcome);
+    requireValidationStringArray(errors, pathPrefix + ".evidenceRefs", dimension.evidenceRefs);
+    requireValidationStringArray(errors, pathPrefix + ".apiRouteChips", dimension.apiRouteChips);
+    requireValidationString(errors, pathPrefix + ".nextAction", dimension.nextAction);
   }
   const refs = new Set();
   for (const artifact of Array.isArray(state.artifacts) ? state.artifacts : []) {
@@ -3180,7 +3362,8 @@ function requestToken(request, url) {
   const header = String(request.headers["x-harness-dashboard-token"] || "");
   const auth = String(request.headers.authorization || "");
   const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7) : "";
-  const routeAllowsQueryToken = String(url.pathname || "").endsWith("/events");
+  const normalizedPath = String(url.pathname || "").replace(/\\/+$/, "");
+  const routeAllowsQueryToken = normalizedPath.endsWith("/events");
   const queryToken = routeAllowsQueryToken ? String(url.searchParams.get("token") || "") : "";
   return header || bearer || queryToken;
 }
@@ -3455,13 +3638,20 @@ function evidenceCollections(publicState) {
   const workTimeline = objectValue(publicState.workTimeline);
   const readinessMap = objectValue(publicState.workReadinessMap);
   const taskBoard = objectValue(publicState.userTaskBoard);
+  const qualityScorecard = objectValue(publicState.dashboardQualityScorecard);
+  const userPerspectiveAudit = objectValue(qualityScorecard.userPerspectiveAudit);
+  const userPerspectiveAuditDimensions = Array.isArray(userPerspectiveAudit.dimensions)
+    ? arrayValue(userPerspectiveAudit.dimensions)
+      .map((entry, index) => Object.assign({}, entry, { id: String((entry && entry.id) || ("user-perspective-dimension-" + String(index + 1))) }))
+      .sort((left, right) => String(left.id || "").localeCompare(String(right.id || "")))
+    : [];
   const collections = [
     { kind: "artifact", sourcePath: "artifacts", rows: arrayValue(publicState.artifacts), fields: ["id", "path", "label", "status", "owner"], scopes: ["all", "evidence"] },
     { kind: "evidence-source", sourcePath: "projectEvidenceInventory.sources", rows: arrayValue(evidence.sources), fields: ["id", "path", "summary", "status", "owner"], scopes: ["all", "evidence"] },
     { kind: "claim", sourcePath: "claimEvidenceMatrix.claims", rows: arrayValue(claimMatrix.claims), fields: ["claimId", "statement", "subjectRef", "claimStatus", "sign", "object", "interpretant", "evidenceRefs", "counterEvidenceRefs", "nextActionRef"], scopes: ["all", "evidence", "reality-check"] },
     { kind: "missing-evidence", sourcePath: "claimEvidenceMatrix.missingEvidenceItems", rows: arrayValue(claimMatrix.missingEvidenceItems), fields: ["id", "label", "requiredEvidenceType", "blocksClaimIds", "owner", "nextActionRef"], scopes: ["all", "evidence", "reality-check", "tasks"] },
     { kind: "decision", sourcePath: "decisionContracts", rows: arrayValue(publicState.decisionContracts), fields: ["id", "decision", "status", "owner", "evidence", "stakeholderImpact"], scopes: ["all", "decisions", "reality-check"] },
-    { kind: "trace", sourcePath: "sessionTraceability.entries", rows: arrayValue(traceability.entries), fields: ["sessionId", "title", "status", "phase", "originalRequest", "processSummary", "resultSummary", "residualRisk", "evidenceRefs", "nextStep"], scopes: ["all", "traceability", "evidence"] },
+    { kind: "trace", sourcePath: "sessionTraceability.entries", rows: arrayValue(traceability.entries), fields: ["sessionId", "title", "status", "phase", "originalRequest", "processSummary", "resultSummary", "traceSource", "traceDebt", "traceConfidence", "residualRisk", "evidenceRefs", "nextStep"], scopes: ["all", "traceability", "evidence", "reality-check"] },
     { kind: "reality-node", sourcePath: "realityModel.nodes", rows: arrayValue(reality.nodes), fields: ["id", "label", "type", "state", "evidenceRefs"], scopes: ["all", "reality-check"] },
     { kind: "reality-edge", sourcePath: "realityModel.edges", rows: arrayValue(reality.edges), fields: ["id", "from", "to", "relation", "evidenceRefs"], scopes: ["all", "reality-check"] },
     { kind: "goal", sourcePath: "goalCompass.goalGraph", rows: arrayValue(goal.goalGraph), fields: ["id", "statement", "status", "owner", "evidenceRefs"], scopes: ["all", "reality-check"] },
@@ -3472,6 +3662,8 @@ function evidenceCollections(publicState) {
     { kind: "listener-trust-card", sourcePath: "userRealityCheck.listenerTrustCard", rows: [listenerTrustCard], fields: ["title", "status", "connectionState", "tokenState", "lastHeartbeatAt", "snapshotFreshness", "snapshotAgePolicy", "healthRoute", "runtimeRoute", "startCommand", "statusCommand", "usefulness"], scopes: ["all", "reality-check", "evidence"] },
     { kind: "user-reality-answer", sourcePath: "userRealityCheck.answers", rows: arrayValue(userReality.answers), fields: ["question", "answer", "sourceRefs", "apiRoutes"], scopes: ["all", "reality-check", "evidence"] },
     { kind: "evidence-map", sourcePath: "userRealityCheck.evidenceMap", rows: arrayValue(userReality.evidenceMap), fields: ["id", "label", "sourceRefs", "missingRefs", "apiRoutes"], scopes: ["all", "reality-check", "evidence"] },
+    { kind: "quality-scorecard-audit", sourcePath: "dashboardQualityScorecard.userPerspectiveAudit", rows: [Object.assign({}, userPerspectiveAudit, { id: "dashboardQualityScorecard.userPerspectiveAudit" })], fields: ["id", "targetScore", "currentSupportScore", "scoreStatus", "scorePolicy", "summary", "explicitBlocker", "verificationPath", "apiRouteChips"], scopes: ["all", "evidence", "reality-check"] },
+    { kind: "quality-scorecard-audit-dimension", sourcePath: "dashboardQualityScorecard.userPerspectiveAudit.dimensions", rows: userPerspectiveAuditDimensions, fields: ["id", "label", "score", "status", "negativeFinding", "userOutcome", "evidenceRefs", "apiRouteChips", "nextAction"], scopes: ["all", "evidence", "reality-check"] },
     { kind: "trust-readiness-question", sourcePath: "userRealityCheck.trustReadinessBrief.questions", rows: arrayValue(trustReadiness.questions), fields: ["question", "answer", "decision", "confidence", "confidenceScore", "dimensionIds", "evidenceRefs", "unresolvedEvidenceRefs", "unresolvedEvidenceItems", "commands", "apiRouteChips"], scopes: ["all", "reality-check", "evidence"] },
     { kind: "trust-readiness-dimension", sourcePath: "userRealityCheck.trustReadinessBrief.scoreDimensions", rows: arrayValue(trustReadiness.scoreDimensions), fields: ["id", "label", "score", "status", "currentFinding", "passCriteria", "evidenceRefs", "apiRouteChips", "nextAction"], scopes: ["all", "reality-check", "evidence"] },
     { kind: "trust-readiness-unresolved-evidence", sourcePath: "userRealityCheck.trustReadinessBrief.evidenceChecks.unresolvedItems", rows: arrayValue(trustEvidenceChecks.unresolvedItems), fields: ["id", "label", "requiredEvidenceType", "owner", "sourceRefs", "apiRouteChips", "nextAction"], scopes: ["all", "reality-check", "evidence", "tasks"] },
@@ -3650,7 +3842,7 @@ function deterministicQuery(url) {
   const source = scope === "tasks" ? publicTasksPayload(state)
     : scope === "agent-tasks" ? sanitizePublic({ agentTaskQueues: state.agentTaskQueues, agentResumeBrief: state.agentResumeBrief })
     : scope === "traceability" ? sanitizePublic({ projectionConfidence: state.projectionConfidence, sessionTraceability: state.sessionTraceability })
-    : scope === "reality-check" ? sanitizePublic({ userRealityCheck: state.userRealityCheck, projectionConfidence: state.projectionConfidence })
+    : scope === "reality-check" ? sanitizePublic({ userRealityCheck: state.userRealityCheck, projectionConfidence: state.projectionConfidence, sessionTraceability: state.sessionTraceability, dashboardQualityScorecard: state.dashboardQualityScorecard })
     : scope === "decisions" ? { decisionContracts: publicState.decisionContracts }
     : scope === "evidence" ? { artifacts: publicState.artifacts, governanceEvidenceBrief: publicState.governanceEvidenceBrief, versionControl: publicState.versionControl }
     : publicState;
@@ -3730,7 +3922,7 @@ function makeServer(token) {
       sendJson(response, 401, envelope({ ok: false, error: "Token rejected" }));
       return;
     }
-    const routeName = url.pathname.replace("/api/harness-dashboard/v1/", "");
+    const routeName = url.pathname.replace("/api/harness-dashboard/v1/", "").replace(/\\/+$/, "");
     try {
       if (routeName === "events") {
         serveEvents(request, response, token);

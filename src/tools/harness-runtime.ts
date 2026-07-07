@@ -177,6 +177,9 @@ interface HarnessTaskTrace {
   resultSummary: string;
   recordedAt: string;
   source: string;
+  traceSource?: "recorded-event" | "legacy-fallback" | "synthetic-backfill";
+  traceDebt?: boolean;
+  traceConfidence?: "high" | "medium" | "low";
 }
 
 interface HarnessTaskTraceIntegrity {
@@ -184,6 +187,9 @@ interface HarnessTaskTraceIntegrity {
   missingFields: string[];
   source: string;
   warning: string | null;
+  traceSource?: "recorded-event" | "legacy-fallback" | "synthetic-backfill";
+  traceDebt?: boolean;
+  traceConfidence?: "high" | "medium" | "low";
 }
 
 interface HarnessRuntimeSessionState {
@@ -1969,6 +1975,9 @@ function buildTaskTrace(params: {
   recordedAt: string;
   source: string;
 }): HarnessTaskTrace {
+  const traceSource = params.source.includes("fallback") || params.source.includes("legacy")
+    ? "legacy-fallback"
+    : "recorded-event";
   return {
     originalRequest: normalizeTraceText(
       params.originalRequest,
@@ -1984,6 +1993,9 @@ function buildTaskTrace(params: {
     ),
     recordedAt: params.recordedAt,
     source: params.source,
+    traceSource,
+    traceDebt: traceSource !== "recorded-event",
+    traceConfidence: traceSource === "recorded-event" ? "high" : "low",
   };
 }
 
@@ -2004,6 +2016,9 @@ function requireTaskTrace(params: {
     resultSummary: requireTraceInput(params.resultSummary, "resultSummary"),
     recordedAt: params.recordedAt,
     source: params.source,
+    traceSource: "recorded-event",
+    traceDebt: false,
+    traceConfidence: "high",
   };
 }
 
@@ -4497,6 +4512,9 @@ function taskTraceIntegrity(event: HarnessRuntimeEvent): HarnessTaskTraceIntegri
       source: "legacy-event-fallback",
       warning:
         "This event predates strict taskTrace enforcement or was imported without taskTrace; request/process/result text is display fallback, not verified trace evidence.",
+      traceSource: "legacy-fallback",
+      traceDebt: true,
+      traceConfidence: "low",
     };
   }
   const missingFields = [
@@ -4512,6 +4530,9 @@ function taskTraceIntegrity(event: HarnessRuntimeEvent): HarnessTaskTraceIntegri
       missingFields.length > 0
         ? "Task trace exists but is missing required request/process/result fields."
         : null,
+    traceSource: missingFields.length > 0 ? "legacy-fallback" : "recorded-event",
+    traceDebt: missingFields.length > 0,
+    traceConfidence: missingFields.length > 0 ? "low" : "high",
   };
 }
 
@@ -4534,6 +4555,9 @@ function eventTraceRecord(
 ) {
   const taskTrace = displayTaskTrace(event, requestRecord);
   const traceIntegrity = taskTraceIntegrity(event);
+  const traceSource = traceIntegrity.traceSource ?? taskTrace.traceSource ?? "recorded-event";
+  const traceDebt = traceIntegrity.traceDebt ?? taskTrace.traceDebt ?? traceIntegrity.status !== "complete";
+  const traceConfidence = traceIntegrity.traceConfidence ?? taskTrace.traceConfidence ?? (traceDebt ? "low" : "high");
   return {
     at: event.at,
     phase: event.phase,
@@ -4543,6 +4567,9 @@ function eventTraceRecord(
     processSummary: taskTrace.processSummary,
     resultSummary: taskTrace.resultSummary,
     source: taskTrace.source,
+    traceSource,
+    traceDebt,
+    traceConfidence,
     traceIntegrity,
   };
 }
@@ -4999,15 +5026,23 @@ function syncDashboardFromSession(
     latestEvent == null
       ? {
           originalRequest: requestRecord.originalRequest,
-          processSummary: session.notes.current,
-          resultSummary: session.notes.lastOutcome,
-          source: "session-request-record",
+          processSummary:
+            "Trace debt: no runtime event recorded a process summary for this dashboard projection.",
+          resultSummary:
+            "Trace debt: no runtime event recorded a result summary for this dashboard projection.",
+          source: "no-runtime-event-synthetic-backfill",
+          traceSource: "synthetic-backfill",
+          traceDebt: true,
+          traceConfidence: "low",
           traceIntegrity: {
             status: "legacy-fallback",
             missingFields: ["event"],
-            source: "session-request-record",
+            source: "no-runtime-event-synthetic-backfill",
             warning:
-              "No runtime event was available for this dashboard projection; use the session request record as limited display context.",
+              "No runtime event was available for this dashboard projection; process/result summaries are non-authoritative placeholders until a governed event or receipt is recorded.",
+            traceSource: "synthetic-backfill",
+            traceDebt: true,
+            traceConfidence: "low",
           } satisfies HarnessTaskTraceIntegrity,
         }
       : eventTraceRecord(latestEvent, requestRecord);
@@ -5041,7 +5076,13 @@ function syncDashboardFromSession(
       resultSummary: latestTraceRecord.resultSummary,
       recordedAt: latestEvent?.at ?? updatedAt,
       source: latestTraceRecord.source,
+      traceSource: latestTraceRecord.traceSource,
+      traceDebt: latestTraceRecord.traceDebt,
+      traceConfidence: latestTraceRecord.traceConfidence,
     },
+    traceSource: latestTraceRecord.traceSource,
+    traceDebt: latestTraceRecord.traceDebt,
+    traceConfidence: latestTraceRecord.traceConfidence,
     traceIntegrity: latestTraceRecord.traceIntegrity,
     residualRisk,
     note: session.notes.current,
@@ -5123,7 +5164,13 @@ function syncDashboardFromSession(
       resultSummary: latestTraceRecord.resultSummary,
       recordedAt: latestEvent?.at ?? updatedAt,
       source: latestTraceRecord.source,
+      traceSource: latestTraceRecord.traceSource,
+      traceDebt: latestTraceRecord.traceDebt,
+      traceConfidence: latestTraceRecord.traceConfidence,
     },
+    traceSource: latestTraceRecord.traceSource,
+    traceDebt: latestTraceRecord.traceDebt,
+    traceConfidence: latestTraceRecord.traceConfidence,
     traceIntegrity: latestTraceRecord.traceIntegrity,
     residualRisk,
     reviewFindings,
@@ -5154,6 +5201,9 @@ function syncDashboardFromSession(
     originalRequest: latestTraceRecord.originalRequest,
     processSummary: latestTraceRecord.processSummary,
     resultSummary: latestTraceRecord.resultSummary,
+    traceSource: latestTraceRecord.traceSource,
+    traceDebt: latestTraceRecord.traceDebt,
+    traceConfidence: latestTraceRecord.traceConfidence,
     traceIntegrity: latestTraceRecord.traceIntegrity,
     residualRisk,
     findings: reviewFindings,
@@ -5190,6 +5240,22 @@ function syncDashboardFromSession(
     )
       ? "trace-debt"
       : "trace-complete",
+    traceDebtCount: traceEntries.filter((entry) =>
+      Boolean(entry.traceDebt) ||
+      String(
+        isPlainObject(entry.traceIntegrity)
+          ? entry.traceIntegrity.status
+          : "unknown"
+      ).includes("fallback")
+    ).length,
+    trustedTraceCount: traceEntries.filter((entry) =>
+      !Boolean(entry.traceDebt) &&
+      String(
+        isPlainObject(entry.traceIntegrity)
+          ? entry.traceIntegrity.status
+          : "unknown"
+      ) === "complete"
+    ).length,
     purpose:
       "Let users understand what was requested, what process ran, what result was recorded, what evidence backs it, and what should happen next without opening raw runtime JSON or chat history.",
     source:
@@ -5463,6 +5529,9 @@ function syncDashboardFromSession(
     ),
     missingEvidenceCount: missingEvidenceClaims.length,
     openDecisionCount: unresolvedDecisions.length,
+    traceDebtCount: Boolean(latestTraceRecord.traceDebt) ? 1 : 0,
+    traceSource: latestTraceRecord.traceSource,
+    traceConfidence: latestTraceRecord.traceConfidence,
     lastSuccessfulRefreshAt: updatedAt,
     lastSourceEventSequence: session.events.length,
     localListenerStatus: String(
@@ -5521,6 +5590,9 @@ function syncDashboardFromSession(
           : "trace-debt",
       missingEvidenceCount: missingEvidenceClaims.length,
       openDecisionCount: unresolvedDecisions.length,
+      traceDebtCount: Boolean(latestTraceRecord.traceDebt) ? 1 : 0,
+      traceSource: latestTraceRecord.traceSource,
+      traceConfidence: latestTraceRecord.traceConfidence,
       activeDomainStressProfiles: isPlainObject(dashboardState.domainStress) &&
         Array.isArray(dashboardState.domainStress.activeProfileIds)
         ? dashboardState.domainStress.activeProfileIds

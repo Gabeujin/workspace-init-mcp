@@ -248,6 +248,10 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(dashboardStateSchema.properties.dashboardQualityScorecard.properties.modernWebUiPolicy);
   assert.ok(dashboardStateSchema.properties.projectionConfidence.properties.requiredActions);
   assert.ok(dashboardStateSchema.properties.sessionTraceability.properties.entries);
+  assert.ok(dashboardStateSchema.properties.sessionTraceability.properties.entries.items.properties.traceSource);
+  assert.ok(dashboardStateSchema.properties.sessionTraceability.properties.entries.items.properties.traceDebt);
+  assert.ok(dashboardStateSchema.properties.sessionTraceability.properties.entries.items.properties.traceConfidence);
+  assert.ok(dashboardStateSchema.properties.dashboardQualityScorecard.properties.userPerspectiveAudit);
   assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.actionPlan);
   assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.nextActionRunway);
   assert.ok(dashboardStateSchema.properties.userRealityCheck.properties.listenerTrustCard);
@@ -270,7 +274,12 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.equal(legacyShapeValidation.valid, true, legacyShapeValidation.errors.join("\n"));
   assert.equal(legacyShape.projectionConfidence.status, "projection-debt");
   assert.equal(legacyShape.sessionTraceability.status, "trace-debt");
-  assert.equal(legacyShape.sessionTraceability.entries[0].traceIntegrity.status, "legacy-fallback");
+  assert.equal(legacyShape.sessionTraceability.entries[0].traceIntegrity.status, "complete");
+  assert.equal(legacyShape.sessionTraceability.entries[0].traceSource, "recorded-event");
+  assert.equal(legacyShape.sessionTraceability.entries[0].traceDebt, false);
+  assert.equal(legacyShape.sessionTraceability.entries[0].traceConfidence, "high");
+  assert.ok(legacyShape.dashboardQualityScorecard.userPerspectiveAudit);
+  assert.equal(legacyShape.dashboardQualityScorecard.userPerspectiveAudit.currentSupportScore <= 10, true);
   assert.equal(legacyShape.userRealityCheck.status, "legacy-backfill-action-plan");
   assert.ok(legacyShape.userRealityCheck.actionPlan[0].apiRoutes.includes("/api/harness-dashboard/v1/reality-check"));
   assert.equal(legacyShape.userRealityCheck.nextActionRunway[0].proofRoute, "/api/harness-dashboard/v1/reality-check");
@@ -313,10 +322,15 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.equal(state.projectionConfidence.missingEvidenceCount > 0, true);
   assert.ok(state.projectionConfidence.requiredActions.some((item) => /verify-projections/.test(item)));
   assert.equal(state.sessionTraceability.status, "bootstrap-trace-complete");
+  assert.equal(state.sessionTraceability.traceDebtCount, 0);
+  assert.equal(state.sessionTraceability.trustedTraceCount, 1);
   assert.equal(state.sessionTraceability.entries[0].originalRequest, params.purpose);
   assert.match(state.sessionTraceability.entries[0].processSummary, /generated the Project World Model ledger/);
   assert.match(state.sessionTraceability.entries[0].resultSummary, /real VCS, service, owner, release, and operations evidence/);
   assert.equal(state.sessionTraceability.entries[0].traceIntegrity.status, "complete");
+  assert.equal(state.sessionTraceability.entries[0].traceSource, "recorded-event");
+  assert.equal(state.sessionTraceability.entries[0].traceDebt, false);
+  assert.equal(state.sessionTraceability.entries[0].traceConfidence, "high");
   assert.ok(state.sessionTraceability.entries[0].evidenceRefs.includes("docs/ai-harness/dashboard/index.html"));
   assert.equal(state.userRealityCheck.status, "bootstrap-action-plan");
   assert.equal(state.userRealityCheck.summary.readableWithoutRawJson, true);
@@ -458,6 +472,36 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.ok(state.dashboardQualityScorecard.qaEvidence.requiredFor95.includes("live-sse-or-refresh-path-check"));
   assert.match(state.dashboardQualityScorecard.modernWebUiPolicy.htmlInCanvasPolicy, /progressive enhancement/);
   assert.match(state.dashboardQualityScorecard.modernWebUiPolicy.liveRequirement, /SSE/);
+  assert.ok(state.dashboardQualityScorecard.userPerspectiveAudit);
+  assert.equal(state.dashboardQualityScorecard.userPerspectiveAudit.targetScore, 9.5);
+  assert.equal(state.dashboardQualityScorecard.userPerspectiveAudit.currentSupportScore < 9.5, true);
+  assert.match(state.dashboardQualityScorecard.userPerspectiveAudit.scorePolicy, /not release, deployment, or operations readiness/);
+  assert.match(state.dashboardQualityScorecard.userPerspectiveAudit.explicitBlocker, /Cannot honestly score 9\.5/);
+  assert.equal(state.dashboardQualityScorecard.userPerspectiveAudit.dimensions.length >= 8, true);
+  assert.ok(state.dashboardQualityScorecard.userPerspectiveAudit.dimensions.every((item) =>
+    item.id &&
+    item.label &&
+    Number.isFinite(item.score) &&
+    item.score <= 10 &&
+    item.status &&
+    item.negativeFinding &&
+    item.userOutcome &&
+    Array.isArray(item.evidenceRefs) &&
+    item.evidenceRefs.length > 0 &&
+    Array.isArray(item.apiRouteChips) &&
+    item.apiRouteChips.length > 0 &&
+    item.nextAction
+  ));
+  assert.ok(state.dashboardQualityScorecard.userPerspectiveAudit.verificationPath.every((item) =>
+    item.id &&
+    item.title &&
+    item.command &&
+    item.expectedEvidence &&
+    Array.isArray(item.apiRouteChips) &&
+    item.apiRouteChips.length > 0 &&
+    item.successSignal
+  ));
+  assert.ok(state.dashboardQualityScorecard.userPerspectiveAudit.apiRouteChips.includes("/api/harness-dashboard/v1/reality-check"));
   assert.ok(state.decisionContracts.some((decision) => decision.id === "decision-agent-platform-selection"));
   assert.ok(state.governanceEvidenceBrief.unresolvedDecisions.includes("decision-agent-platform-selection"));
   assert.ok(state.agentResumeBrief.governanceOnlyDecisions.includes("decision-agent-platform-selection"));
@@ -566,6 +610,13 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
   assert.match(html, /Static mode note/);
   assert.match(html, /originalRequest/);
   assert.match(html, /traceIntegrity/);
+  assert.match(html, /traceSource/);
+  assert.match(html, /Trace source/);
+  assert.match(html, /Non-authoritative trace/);
+  assert.match(html, /User Perspective Audit/);
+  assert.match(html, /negativeFinding/);
+  assert.match(html, /userOutcome/);
+  assert.match(html, /userPerspectiveAudit/);
   assert.match(html, /Maintainer Report Deck/);
   assert.match(html, /slide-deck/);
   assert.match(html, /world-prism/);
@@ -2477,6 +2528,10 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     assert.equal(traceabilityPayload.payload.projectionConfidence.status, "projection-debt");
     assert.ok(traceabilityPayload.payload.sessionTraceability.entries[0].originalRequest);
     assert.equal(traceabilityPayload.payload.sessionTraceability.entries[0].traceIntegrity.status, "complete");
+    assert.equal(traceabilityPayload.payload.sessionTraceability.entries[0].traceSource, "recorded-event");
+    assert.equal(traceabilityPayload.payload.sessionTraceability.entries[0].traceDebt, false);
+    assert.equal(traceabilityPayload.payload.sessionTraceability.entries[0].traceConfidence, "high");
+    assert.equal(typeof traceabilityPayload.payload.sessionTraceability.traceDebtCount, "number");
     assert.equal(JSON.stringify(traceabilityPayload.payload).includes(root), false);
 
     const realityCheckPayload = await fetch(apiUrl("reality-check"), { headers: authHeaders }).then((response) => response.json());
@@ -2546,6 +2601,11 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     assert.ok(traceabilityQuery.payload.indexSummary.candidateCount > 0);
     assert.ok(traceabilityQuery.payload.results[0].matchQuality);
 
+    const traceSourceQuery = await fetch(apiUrl("query?scope=traceability&q=recorded-event"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(traceSourceQuery.readOnly, true);
+    assert.equal(traceSourceQuery.payload.resultCount > 0, true);
+    assert.ok(traceSourceQuery.payload.results.some((item) => item.sourcePath === "sessionTraceability.entries"));
+
     const realityCheckQuery = await fetch(apiUrl("query?scope=reality-check&q=verify-projections"), { headers: authHeaders }).then((response) => response.json());
     assert.equal(realityCheckQuery.readOnly, true);
     assert.equal(realityCheckQuery.payload.resultCount > 0, true);
@@ -2562,6 +2622,15 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     assert.equal(listenerTrustQuery.payload.resultCount > 0, true);
     assert.ok(listenerTrustQuery.payload.results.some((item) => item.sourcePath === "userRealityCheck.listenerTrustCard"));
 
+    const userPerspectiveAuditQuery = await fetch(apiUrl("query?scope=reality-check&q=userPerspectiveAudit"), { headers: authHeaders }).then((response) => response.json());
+    assert.equal(userPerspectiveAuditQuery.readOnly, true);
+    assert.equal(userPerspectiveAuditQuery.payload.resultCount > 0, true);
+    assert.ok(userPerspectiveAuditQuery.payload.results.some((item) =>
+      item.sourcePath === "dashboardQualityScorecard.userPerspectiveAudit" ||
+      item.sourcePath === "dashboardQualityScorecard.userPerspectiveAudit.dimensions"
+    ));
+    assert.ok(userPerspectiveAuditQuery.payload.indexSummary.sources.includes("dashboardQualityScorecard.userPerspectiveAudit"));
+
     const briefingResponse = await fetch(apiUrl("briefing"), { headers: authHeaders });
     assert.equal(briefingResponse.status, 200);
     const briefingPayload = await briefingResponse.json();
@@ -2575,6 +2644,13 @@ async function waitForSseEvent(endpoint, eventName, timeoutMs = 5000) {
     );
     assert.equal(snapshotEvent.includes("task-bootstrap-refresh-projections"), false);
     assert.equal(snapshotEvent.includes("session-0001"), false);
+    const trailingSlashSnapshotEvent = await waitForSseEvent(
+      `http://127.0.0.1:${port}/api/harness-dashboard/v1/events/?token=${token}`,
+      "harness.snapshot"
+    );
+    assert.equal(trailingSlashSnapshotEvent.includes("task-bootstrap-refresh-projections"), false);
+    const rejectedTrailingSlashSse = await fetch(apiUrl(`events/?token=bad-token`));
+    assert.equal(rejectedTrailingSlashSse.status, 401);
   } finally {
     await terminateProcess(child);
   }

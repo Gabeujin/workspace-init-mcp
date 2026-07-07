@@ -1058,6 +1058,15 @@ function backfillDashboardSessionTraceability(state: Record<string, unknown>): v
     ? sourceSessions.slice(0, 10).map((entry) => {
         const session = isPlainObject(entry) ? entry : {};
         const trace = isPlainObject(session.taskTrace) ? session.taskTrace : {};
+        const hasRecordedTrace =
+          typeof trace.originalRequest === "string" &&
+          typeof trace.processSummary === "string" &&
+          typeof trace.resultSummary === "string" &&
+          trace.traceDebt === false;
+        const traceSource = hasRecordedTrace
+          ? String(trace.traceSource || "recorded-event")
+          : "synthetic-backfill";
+        const traceDebt = traceSource !== "recorded-event";
         const evidenceRefs = Array.isArray(session.outputs)
           ? session.outputs.filter((output): output is string => typeof output === "string")
           : ["legacy-dashboard-state"];
@@ -1068,21 +1077,28 @@ function backfillDashboardSessionTraceability(state: Record<string, unknown>): v
           phase: String(session.phase || session.stage || "legacy-backfill"),
           originalRequest: String(trace.originalRequest || session.goal || purpose),
           processSummary: String(
-            trace.processSummary ||
-              session.note ||
-              "Legacy dashboard session was backfilled; process summary was not recorded in the old projection."
+            hasRecordedTrace
+              ? trace.processSummary
+              : "Trace debt: process summary was not recorded as authoritative request/process/result evidence."
           ),
           resultSummary: String(
-            trace.resultSummary ||
-              session.note ||
-              "Legacy dashboard session requires refresh before result claims are trusted."
+            hasRecordedTrace
+              ? trace.resultSummary
+              : "Trace debt: result summary was not recorded as authoritative request/process/result evidence."
           ),
+          traceSource,
+          traceDebt,
+          traceConfidence: traceDebt ? "low" : "high",
           traceIntegrity: {
-            status: "legacy-fallback",
-            missingFields: isPlainObject(session.taskTrace) ? [] : ["taskTrace"],
-            source: "legacy-dashboard-state",
-            warning:
-              "Backfilled traceability keeps validation migration-safe but is not verified request/process/result evidence.",
+            status: traceDebt ? "legacy-fallback" : "complete",
+            missingFields: traceDebt ? ["taskTrace"] : [],
+            source: traceSource,
+            warning: traceDebt
+              ? "Backfilled traceability keeps validation migration-safe but is not verified request/process/result evidence."
+              : null,
+            traceSource,
+            traceDebt,
+            traceConfidence: traceDebt ? "low" : "high",
           },
           residualRisk:
             "Legacy projection may not preserve full request/process/result trace until refreshed.",
@@ -1105,11 +1121,17 @@ function backfillDashboardSessionTraceability(state: Record<string, unknown>): v
             "Legacy dashboard state was loaded without session traceability fields.",
           resultSummary:
             "Backfilled traceability enables validation and refresh, but real session trace evidence is still required.",
+          traceSource: "synthetic-backfill",
+          traceDebt: true,
+          traceConfidence: "low",
           traceIntegrity: {
             status: "legacy-fallback",
             missingFields: ["sessionTraceability"],
-            source: "legacy-dashboard-state",
+            source: "synthetic-backfill",
             warning: "No governed session trace was present in this legacy projection.",
+            traceSource: "synthetic-backfill",
+            traceDebt: true,
+            traceConfidence: "low",
           },
           residualRisk:
             "Legacy projection may not preserve full request/process/result trace until refreshed.",
@@ -1130,6 +1152,8 @@ function backfillDashboardSessionTraceability(state: Record<string, unknown>): v
     source: "legacy-dashboard-state",
     integrityPolicy:
       "Legacy backfills are migration aids only; refreshed governed sessions must record taskTrace directly.",
+    traceDebtCount: entries.filter((entry) => Boolean((entry as Record<string, unknown>).traceDebt)).length,
+    trustedTraceCount: entries.filter((entry) => (entry as Record<string, unknown>).traceDebt === false).length,
     entries,
   };
 }
@@ -1292,6 +1316,75 @@ function backfillDashboardUserRealityCheck(state: Record<string, unknown>): void
       queryExamples: ["/api/harness-dashboard/v1/query?scope=reality-check&q=refresh"],
       security: "Loopback-only, token-protected, no shell execution, no file writes, no LLM calls.",
     },
+  };
+}
+
+function backfillDashboardUserPerspectiveAudit(state: Record<string, unknown>): void {
+  const scorecard = isPlainObject(state.dashboardQualityScorecard)
+    ? state.dashboardQualityScorecard
+    : null;
+  if (scorecard == null || isPlainObject(scorecard.userPerspectiveAudit)) {
+    return;
+  }
+  const evidence = isPlainObject(state.governanceEvidenceBrief)
+    ? state.governanceEvidenceBrief
+    : {};
+  const missingEvidenceCount = Array.isArray(evidence.missingEvidenceClaims)
+    ? evidence.missingEvidenceClaims.length
+    : 0;
+  const openDecisionCount = Array.isArray(evidence.unresolvedDecisions)
+    ? evidence.unresolvedDecisions.length
+    : 0;
+  scorecard.userPerspectiveAudit = {
+    schemaVersion: String(
+      isPlainObject(state.meta)
+        ? state.meta.schemaVersion || WORKSPACE_INIT_MCP_VERSION
+        : WORKSPACE_INIT_MCP_VERSION
+    ),
+    targetScore: 9.5,
+    currentSupportScore: 8.0,
+    scoreStatus: "legacy-backfill-below-target",
+    scorePolicy:
+      "This score measures user comprehension and dashboard trust support, not release, deployment, or operations readiness.",
+    summary:
+      "Legacy dashboard state was backfilled with a conservative user-perspective audit so missing quality evidence stays visible.",
+    explicitBlocker:
+      "Cannot honestly score 9.5+ until current browser QA, listener health/runtime checks, and real project evidence are attached or waived.",
+    missingEvidenceCount,
+    openDecisionCount,
+    dimensions: [
+      {
+        id: "legacy-user-perspective-baseline",
+        label: "Legacy user perspective baseline",
+        score: 8.0,
+        status: "legacy-backfill",
+        negativeFinding:
+          "Legacy projection predates the explicit user-perspective audit and must be refreshed before target-level support is trusted.",
+        userOutcome:
+          "Users see an explicit migration warning instead of a silently missing dashboard-quality audit.",
+        evidenceRefs: ["legacy-dashboard-state", "dashboardQualityScorecard"],
+        apiRouteChips: ["/api/harness-dashboard/v1/reality-check"],
+        nextAction:
+          "Run dashboard-ops refresh to rebuild the full user-perspective audit from current state.",
+      },
+    ],
+    verificationPath: [
+      {
+        id: "refresh-audit",
+        title: "Refresh user-perspective audit",
+        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+        expectedEvidence:
+          "Dashboard projections rebuild the full user-perspective audit from current state.",
+        apiRouteChips: ["/api/harness-dashboard/v1/reality-check"],
+        successSignal:
+          "The legacy-backfill audit is replaced by current scored dimensions.",
+      },
+    ],
+    apiRouteChips: [
+      "/api/harness-dashboard/v1/reality-check",
+      "/api/harness-dashboard/v1/traceability",
+      "/api/harness-dashboard/v1/health",
+    ],
   };
 }
 
@@ -1542,6 +1635,7 @@ function normalizeMergedDashboardState(value: unknown): unknown {
   backfillDashboardProjectionConfidence(state);
   backfillDashboardSessionTraceability(state);
   backfillDashboardUserRealityCheck(state);
+  backfillDashboardUserPerspectiveAudit(state);
 
   return state;
 }

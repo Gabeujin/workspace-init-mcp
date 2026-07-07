@@ -238,6 +238,15 @@ function backfillSessionTraceability(root: Record<string, unknown>): void {
     ? sourceSessions.slice(0, 10).map((entry) => {
         const session = isPlainObject(entry) ? entry : {};
         const trace = isPlainObject(session.taskTrace) ? session.taskTrace : {};
+        const hasRecordedTrace =
+          isString(trace.originalRequest) &&
+          isString(trace.processSummary) &&
+          isString(trace.resultSummary) &&
+          trace.traceDebt === false;
+        const traceSource = hasRecordedTrace
+          ? String(trace.traceSource || "recorded-event")
+          : "synthetic-backfill";
+        const traceDebt = traceSource !== "recorded-event";
         const evidenceRefs = Array.isArray(session.outputs)
           ? session.outputs.filter(isString)
           : ["legacy-dashboard-state"];
@@ -248,21 +257,29 @@ function backfillSessionTraceability(root: Record<string, unknown>): void {
           phase: String(session.phase || session.stage || "legacy-backfill"),
           originalRequest: String(trace.originalRequest || session.goal || purpose),
           processSummary: String(
-            trace.processSummary ||
-              session.note ||
-              "Legacy dashboard session was backfilled; process summary was not recorded in the old projection."
+            hasRecordedTrace
+              ? trace.processSummary
+              : "Trace debt: process summary was not recorded as authoritative request/process/result evidence."
           ),
           resultSummary: String(
-            trace.resultSummary ||
-              session.note ||
-              "Legacy dashboard session requires refresh before result claims are trusted."
+            hasRecordedTrace
+              ? trace.resultSummary
+              : "Trace debt: result summary was not recorded as authoritative request/process/result evidence."
           ),
+          traceSource,
+          traceDebt,
+          traceConfidence: traceDebt ? "low" : "high",
           traceIntegrity: {
-            status: "legacy-fallback",
-            missingFields: isPlainObject(session.taskTrace) ? [] : ["taskTrace"],
-            source: "legacy-dashboard-state",
+            status: traceDebt ? "legacy-fallback" : "complete",
+            missingFields: traceDebt ? ["taskTrace"] : [],
+            source: traceSource,
             warning:
-              "Backfilled traceability keeps validation migration-safe but is not verified request/process/result evidence.",
+              traceDebt
+                ? "Backfilled traceability keeps validation migration-safe but is not verified request/process/result evidence."
+                : null,
+            traceSource,
+            traceDebt,
+            traceConfidence: traceDebt ? "low" : "high",
           },
           residualRisk:
             "Legacy projection may not preserve full request/process/result trace until refreshed.",
@@ -285,11 +302,17 @@ function backfillSessionTraceability(root: Record<string, unknown>): void {
             "Legacy dashboard state was loaded without session traceability fields.",
           resultSummary:
             "Backfilled traceability enables validation and refresh, but real session trace evidence is still required.",
+          traceSource: "synthetic-backfill",
+          traceDebt: true,
+          traceConfidence: "low",
           traceIntegrity: {
             status: "legacy-fallback",
             missingFields: ["sessionTraceability"],
-            source: "legacy-dashboard-state",
+            source: "synthetic-backfill",
             warning: "No governed session trace was present in this legacy projection.",
+            traceSource: "synthetic-backfill",
+            traceDebt: true,
+            traceConfidence: "low",
           },
           residualRisk:
             "Legacy projection may not preserve full request/process/result trace until refreshed.",
@@ -308,6 +331,8 @@ function backfillSessionTraceability(root: Record<string, unknown>): void {
     source: "legacy-dashboard-state",
     integrityPolicy:
       "Legacy backfills are migration aids only; refreshed governed sessions must record taskTrace directly.",
+    traceDebtCount: entries.filter((entry) => Boolean((entry as Record<string, unknown>).traceDebt)).length,
+    trustedTraceCount: entries.filter((entry) => (entry as Record<string, unknown>).traceDebt === false).length,
     entries,
   };
 }
@@ -623,6 +648,100 @@ function backfillUserRealityCheck(root: Record<string, unknown>): void {
   };
 }
 
+function backfillUserPerspectiveAudit(root: Record<string, unknown>): void {
+  const scorecard = isPlainObject(root.dashboardQualityScorecard)
+    ? root.dashboardQualityScorecard
+    : null;
+  if (scorecard == null || isPlainObject(scorecard.userPerspectiveAudit)) {
+    return;
+  }
+  const evidence = isPlainObject(root.governanceEvidenceBrief)
+    ? root.governanceEvidenceBrief
+    : {};
+  const missingEvidenceCount = Array.isArray(evidence.missingEvidenceClaims)
+    ? evidence.missingEvidenceClaims.length
+    : 0;
+  const openDecisionCount = Array.isArray(evidence.unresolvedDecisions)
+    ? evidence.unresolvedDecisions.length
+    : 0;
+  const dimensions = [
+    {
+      id: "information-architecture",
+      label: "Information architecture",
+      score: 8.4,
+      status: "legacy-backfill",
+      negativeFinding:
+        "Legacy projection predates the explicit user-perspective audit and needs refresh before information architecture quality is trusted.",
+      userOutcome:
+        "Users get a conservative migration warning instead of a silently missing dashboard audit.",
+      evidenceRefs: ["legacy-dashboard-state", "userRealityCheck"],
+      apiRouteChips: ["/api/harness-dashboard/v1/reality-check"],
+      nextAction: "Run dashboard-ops refresh to rebuild the current user-perspective audit.",
+    },
+    {
+      id: "evidence-visibility",
+      label: "Evidence visibility",
+      score: 8.0,
+      status: "legacy-backfill",
+      negativeFinding:
+        "Legacy scorecards may not connect missing evidence to user-visible outcomes.",
+      userOutcome:
+        "Users can still see that evidence and decision debt block target-level trust.",
+      evidenceRefs: ["governanceEvidenceBrief", "claimEvidenceMatrix"],
+      apiRouteChips: ["/api/harness-dashboard/v1/query?scope=evidence&q=missing"],
+      nextAction: "Attach or waive missing service, VCS, release, owner, and operations evidence.",
+    },
+    {
+      id: "listener-api-usefulness",
+      label: "Local listener and API usefulness",
+      score: 7.8,
+      status: "legacy-backfill",
+      negativeFinding:
+        "Legacy projections cannot prove local listener health or route-chip payload usefulness until the listener is started.",
+      userOutcome:
+        "Users get a concrete listener health check instead of relying on static JSON paths.",
+      evidenceRefs: ["listener", "dashboard-runtime"],
+      apiRouteChips: ["/api/harness-dashboard/v1/health", "/api/harness-dashboard/v1/runtime"],
+      nextAction: "Start the read-only loopback listener and verify health/runtime routes.",
+    },
+  ];
+  const currentSupportScore = Number(
+    (dimensions.reduce((sum, item) => sum + item.score, 0) / dimensions.length).toFixed(1)
+  );
+  scorecard.userPerspectiveAudit = {
+    schemaVersion: String(
+      isPlainObject(root.meta) ? root.meta.schemaVersion || "legacy-backfill" : "legacy-backfill"
+    ),
+    targetScore: 9.5,
+    currentSupportScore,
+    scoreStatus: "legacy-backfill-below-target",
+    scorePolicy:
+      "This score measures user comprehension and dashboard trust support, not release, deployment, or operations readiness.",
+    summary:
+      "Legacy dashboard state was backfilled with a conservative user-perspective audit so missing quality evidence stays visible.",
+    explicitBlocker:
+      "Cannot honestly score 9.5+ until current browser QA, listener health/runtime checks, and real project evidence are attached or waived.",
+    missingEvidenceCount,
+    openDecisionCount,
+    dimensions,
+    verificationPath: [
+      {
+        id: "refresh-audit",
+        title: "Refresh user-perspective audit",
+        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+        expectedEvidence: "Dashboard projections rebuild the full user-perspective audit from current state.",
+        apiRouteChips: ["/api/harness-dashboard/v1/reality-check"],
+        successSignal: "The legacy-backfill audit is replaced by current scored dimensions.",
+      },
+    ],
+    apiRouteChips: [
+      "/api/harness-dashboard/v1/reality-check",
+      "/api/harness-dashboard/v1/traceability",
+      "/api/harness-dashboard/v1/health",
+    ],
+  };
+}
+
 export function validateDashboardStateShape(
   value: unknown
 ): DashboardStateValidationResult {
@@ -636,6 +755,7 @@ export function validateDashboardStateShape(
   backfillProjectionConfidence(root);
   backfillSessionTraceability(root);
   backfillUserRealityCheck(root);
+  backfillUserPerspectiveAudit(root);
 
   const requiredTopLevelKeys = DASHBOARD_STATE_REQUIRED_TOP_LEVEL_KEYS;
 
@@ -1425,10 +1545,13 @@ export function validateDashboardStateShape(
         "originalRequest",
         "processSummary",
         "resultSummary",
+        "traceSource",
+        "traceConfidence",
         "nextStep",
       ]) {
         requireStringField(errors, pathPrefix, traceEntry, field);
       }
+      requireBooleanField(errors, pathPrefix, traceEntry, "traceDebt");
       requireObject(errors, `${pathPrefix}.traceIntegrity`, traceEntry.traceIntegrity);
       requireStringArrayField(errors, pathPrefix, traceEntry, "evidenceRefs");
     }
@@ -2843,6 +2966,128 @@ export function validateDashboardStateShape(
         modernWebUiPolicy,
         "qaGate"
       );
+    }
+
+    const userPerspectiveAudit = requireObject(
+      errors,
+      "dashboardState.dashboardQualityScorecard.userPerspectiveAudit",
+      dashboardQualityScorecard.userPerspectiveAudit
+    );
+    if (userPerspectiveAudit != null) {
+      for (const field of ["targetScore", "currentSupportScore"]) {
+        requireNumberField(
+          errors,
+          "dashboardState.dashboardQualityScorecard.userPerspectiveAudit",
+          userPerspectiveAudit,
+          field
+        );
+        const value = userPerspectiveAudit[field];
+        if (isFiniteNumber(value) && value > 10) {
+          errors.push(
+            `dashboardState.dashboardQualityScorecard.userPerspectiveAudit.${field} must be <= 10`
+          );
+        }
+      }
+      for (const field of ["scoreStatus", "scorePolicy", "summary", "explicitBlocker"]) {
+        requireStringField(
+          errors,
+          "dashboardState.dashboardQualityScorecard.userPerspectiveAudit",
+          userPerspectiveAudit,
+          field
+        );
+      }
+      requireStringArrayField(
+        errors,
+        "dashboardState.dashboardQualityScorecard.userPerspectiveAudit",
+        userPerspectiveAudit,
+        "apiRouteChips"
+      );
+      const auditDimensions = requireArray(
+        errors,
+        "dashboardState.dashboardQualityScorecard.userPerspectiveAudit.dimensions",
+        userPerspectiveAudit.dimensions
+      );
+      if (auditDimensions != null) {
+        for (const [index, item] of auditDimensions.entries()) {
+          const dimension = requireObject(
+            errors,
+            `dashboardState.dashboardQualityScorecard.userPerspectiveAudit.dimensions[${index}]`,
+            item
+          );
+          if (dimension == null) {
+            continue;
+          }
+          for (const field of [
+            "id",
+            "label",
+            "status",
+            "negativeFinding",
+            "userOutcome",
+            "nextAction",
+          ]) {
+            requireStringField(
+              errors,
+              `dashboardState.dashboardQualityScorecard.userPerspectiveAudit.dimensions[${index}]`,
+              dimension,
+              field
+            );
+          }
+          requireNumberField(
+            errors,
+            `dashboardState.dashboardQualityScorecard.userPerspectiveAudit.dimensions[${index}]`,
+            dimension,
+            "score"
+          );
+          if (isFiniteNumber(dimension.score) && dimension.score > 10) {
+            errors.push(
+              `dashboardState.dashboardQualityScorecard.userPerspectiveAudit.dimensions[${index}].score must be <= 10`
+            );
+          }
+          requireStringArrayField(
+            errors,
+            `dashboardState.dashboardQualityScorecard.userPerspectiveAudit.dimensions[${index}]`,
+            dimension,
+            "evidenceRefs"
+          );
+          requireStringArrayField(
+            errors,
+            `dashboardState.dashboardQualityScorecard.userPerspectiveAudit.dimensions[${index}]`,
+            dimension,
+            "apiRouteChips"
+          );
+        }
+      }
+      const verificationPath = requireArray(
+        errors,
+        "dashboardState.dashboardQualityScorecard.userPerspectiveAudit.verificationPath",
+        userPerspectiveAudit.verificationPath
+      );
+      if (verificationPath != null) {
+        for (const [index, item] of verificationPath.entries()) {
+          const step = requireObject(
+            errors,
+            `dashboardState.dashboardQualityScorecard.userPerspectiveAudit.verificationPath[${index}]`,
+            item
+          );
+          if (step == null) {
+            continue;
+          }
+          for (const field of ["id", "title", "command", "expectedEvidence", "successSignal"]) {
+            requireStringField(
+              errors,
+              `dashboardState.dashboardQualityScorecard.userPerspectiveAudit.verificationPath[${index}]`,
+              step,
+              field
+            );
+          }
+          requireStringArrayField(
+            errors,
+            `dashboardState.dashboardQualityScorecard.userPerspectiveAudit.verificationPath[${index}]`,
+            step,
+            "apiRouteChips"
+          );
+        }
+      }
     }
 
     const dimensions = requireArray(

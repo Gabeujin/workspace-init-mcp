@@ -2383,12 +2383,19 @@ function buildDashboardState(params: WorkspaceInitParams) {
       "Bootstrap dashboard and harness state are installed, but real VCS, service, owner, release, and operations evidence still need to be connected.",
     recordedAt: BOOTSTRAP_TIME,
     source: "initialize_workspace bootstrap projection",
+    traceSource: "recorded-event",
+    traceDebt: false,
+    traceConfidence: "high",
   };
   const bootstrapTraceIntegrity = {
     status: "complete",
     missingFields: [],
     policy:
       "Dashboard session trace cards must show missing taskTrace fields explicitly instead of silently reconstructing them from notes or chat history.",
+    source: "initialize_workspace bootstrap projection",
+    traceSource: "recorded-event",
+    traceDebt: false,
+    traceConfidence: "high",
   };
   const userRealityCheck = buildUserRealityCheck(
     params,
@@ -2401,6 +2408,189 @@ function buildDashboardState(params: WorkspaceInitParams) {
     baselineUnresolvedDecisions,
     bootstrapSessionEvidenceRefs
   );
+  const userPerspectiveAuditDimensions = [
+    {
+      id: "information-architecture",
+      label: "Information architecture",
+      score: 9.2,
+      status: "strong-with-density-risk",
+      negativeFinding:
+        "The dashboard has a clear Overview, Work, Evidence, Governance, System, and Tech Stack split, but first-time users can still confuse orientation confidence with release readiness if the score policy is not read.",
+      userOutcome:
+        "A user can find reality, goals, risks, next actions, and proof surfaces from the Overview without opening dashboard-state JSON.",
+      evidenceRefs: ["userRealityCheck", "projectionConfidence", "audienceLens"],
+      apiRouteChips: ["/api/harness-dashboard/v1/reality-check"],
+      nextAction:
+        "Keep the User Reality Check and audit cards above lower-priority detail panels when adding future dashboard sections.",
+    },
+    {
+      id: "visual-clarity",
+      label: "Visual clarity",
+      score: 9.0,
+      status: "usable-but-qa-pending",
+      negativeFinding:
+        "The UI exposes score bars, badges, tables, and proof chips, but generated code cannot prove viewport fit, console cleanliness, or keyboard flow until a browser QA artifact is attached.",
+      userOutcome:
+        "Status, confidence, missing evidence, and next actions are visible, but UI quality remains capped until rendered QA passes.",
+      evidenceRefs: ["dashboardQualityScorecard.qaEvidence", "docs/ai-harness/dashboard/index.html"],
+      apiRouteChips: ["/api/harness-dashboard/v1/health"],
+      nextAction:
+        "Run rendered browser QA and attach the result before raising UI quality to the 9.5 target.",
+    },
+    {
+      id: "workflow-fit",
+      label: "User workflow fit",
+      score: 9.1,
+      status: "next-action-oriented",
+      negativeFinding:
+        "The Next Action Runway names owners, proof routes, blockers, and visible success signals, but the first real governed goal remains a user decision.",
+      userOutcome:
+        "Users can move from question to action to expected dashboard change without reconstructing the chat history.",
+      evidenceRefs: ["userRealityCheck.nextActionRunway", "decision-first-governed-goal"],
+      apiRouteChips: ["/api/harness-dashboard/v1/tasks", "/api/harness-dashboard/v1/sessions"],
+      nextAction:
+        "Confirm the first governed goal so progress can be judged against a real target instead of bootstrap intent.",
+    },
+    {
+      id: "evidence-visibility",
+      label: "Evidence visibility",
+      score: 9.2,
+      status: "missing-proof-visible",
+      negativeFinding:
+        "Evidence gaps are explicit and searchable, but service, release, VCS, operations, and owner evidence are still bootstrap-level.",
+      userOutcome:
+        "Users can see what is proven, what is missing, who owns it, and which proof route should resolve it.",
+      evidenceRefs: ["claimEvidenceMatrix", "governanceEvidenceBrief", "projectEvidenceInventory"],
+      apiRouteChips: [
+        "/api/harness-dashboard/v1/evidence-ref?ref=missing.service-health",
+        "/api/harness-dashboard/v1/query?scope=evidence&q=missing",
+      ],
+      nextAction:
+        "Attach real artifacts or explicit not-applicable decisions for each missing evidence item.",
+    },
+    {
+      id: "projection-quality",
+      label: "Projection quality",
+      score: 8.9,
+      status: "bootstrap-projection-debt",
+      negativeFinding:
+        "The projection is schema-backed and ledger-linked, but it is still a disposable bootstrap projection until verify-projections and refresh run on the real workspace.",
+      userOutcome:
+        "The dashboard says when it is orientation-only and what must happen before users treat it as operational truth.",
+      evidenceRefs: ["projectionConfidence", "trustBoundary", "docs/ai-harness/dashboard/events/harness-events.jsonl"],
+      apiRouteChips: ["/api/harness-dashboard/v1/traceability"],
+      nextAction:
+        "Run verify-projections and refresh after any material VCS, evidence, session, or decision change.",
+    },
+    {
+      id: "listener-api-usefulness",
+      label: "Local listener and API usefulness",
+      score: 8.9,
+      status: "useful-when-listening",
+      negativeFinding:
+        "Route chips are helpful in local-live mode, but static mode can only name proof paths and users still need token-authenticated listener health to avoid stale reads.",
+      userOutcome:
+        "Users can inspect structured read-only payloads for reality, traceability, evidence lookup, tasks, runtime, health, and deterministic query once the listener is started.",
+      evidenceRefs: ["listener", "userRealityCheck.listenerTrustCard", "docs/ai-harness/dashboard/state/dashboard-runtime.json"],
+      apiRouteChips: ["/api/harness-dashboard/v1/health", "/api/harness-dashboard/v1/runtime"],
+      nextAction:
+        "Start the loopback listener and verify health/runtime route chips before relying on live local previews.",
+    },
+    {
+      id: "accessibility",
+      label: "Accessibility",
+      score: 8.8,
+      status: "semantic-contract-present",
+      negativeFinding:
+        "Semantic tabs, buttons, reduced motion, and table alternatives are generated, but accessibility-tree evidence is still pending.",
+      userOutcome:
+        "Keyboard and assistive technology support is designed into the dashboard, with final trust blocked on current QA evidence.",
+      evidenceRefs: ["dashboardQualityScorecard.modernWebUiPolicy", "docs/ai-harness/dashboard/index.html"],
+      apiRouteChips: ["/api/harness-dashboard/v1/query?scope=reality-check&q=accessibility"],
+      nextAction:
+        "Attach accessibility-tree, keyboard, and responsive viewport QA artifacts.",
+    },
+    {
+      id: "project-reality-comprehension",
+      label: "Project reality comprehension",
+      score: 9.1,
+      status: "plain-language-brief-present",
+      negativeFinding:
+        "Reality, goals, risks, next actions, and progress are explained in plain language, but real project evidence must replace bootstrap assumptions before the dashboard can claim reality completeness.",
+      userOutcome:
+        "A user can understand what is real, what is risky, what happens next, what proves progress, and why the project is not release-ready yet.",
+      evidenceRefs: ["userRealityCheck.trustReadinessBrief", "goalCompass", "contextRotMonitor"],
+      apiRouteChips: ["/api/harness-dashboard/v1/reality-check"],
+      nextAction:
+        "Refresh project evidence and close the first governed session with request, process, result, residual risk, and next step.",
+    },
+  ];
+  const userPerspectiveAuditScore = Number(
+    (
+      userPerspectiveAuditDimensions.reduce((sum, item) => sum + item.score, 0) /
+      userPerspectiveAuditDimensions.length
+    ).toFixed(1)
+  );
+  const userPerspectiveAudit = {
+    schemaVersion: DASHBOARD_SCHEMA_VERSION,
+    targetScore: 9.5,
+    currentSupportScore: userPerspectiveAuditScore,
+    scoreStatus: "below-target-until-verified",
+    scorePolicy:
+      "This score measures whether the dashboard helps a user understand project reality, goals, risks, next actions, evidence, progress, and local API usefulness. It is not release, deployment, or operations readiness.",
+    summary:
+      "The generated dashboard is strong for orientation and guided evidence collection, but target-level trust requires current browser QA, live listener/API verification, and real project evidence.",
+    explicitBlocker:
+      "Cannot honestly score 9.5+ until browser QA evidence, local listener health/runtime checks, and real service/VCS/release/operations evidence are attached or explicitly waived.",
+    missingEvidenceCount:
+      baselineMissingEvidenceClaims.length + domainStress.missingEvidenceItems.length,
+    openDecisionCount:
+      baselineUnresolvedDecisions.length + domainStress.decisionContracts.length,
+    dimensions: userPerspectiveAuditDimensions,
+    verificationPath: [
+      {
+        id: "verify-projections",
+        title: "Verify projection integrity",
+        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs verify-projections",
+        expectedEvidence: "Validation output shows dashboard-state, references, and required user-perspective audit fields are valid.",
+        apiRouteChips: ["/api/harness-dashboard/v1/traceability"],
+        successSignal: "Projection confidence remains explicit or moves from debt to verified state after refresh.",
+      },
+      {
+        id: "start-listener",
+        title: "Start local read-only listener",
+        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs ensure-listening",
+        expectedEvidence: "Health and runtime routes return token-authenticated read-only payloads.",
+        apiRouteChips: ["/api/harness-dashboard/v1/health", "/api/harness-dashboard/v1/runtime"],
+        successSignal: "Route chips preview structured payloads instead of static fallback text.",
+      },
+      {
+        id: "browser-qa",
+        title: "Attach rendered dashboard QA",
+        command: "Run browser smoke, console, keyboard, responsive, and accessibility checks against index.html.",
+        expectedEvidence: "QA artifact covers render, console, keyboard, modal/deck, route chips, responsive layout, and accessibility tree.",
+        apiRouteChips: ["/api/harness-dashboard/v1/query?scope=reality-check&q=qa"],
+        successSignal: "dashboardQualityScorecard.qaEvidence can move from pending-run to verified.",
+      },
+      {
+        id: "replace-bootstrap-evidence",
+        title: "Replace bootstrap assumptions",
+        command: "node docs/ai-harness/dashboard/scripts/dashboard-ops.mjs refresh",
+        expectedEvidence: "Real VCS, service health, owner, release, and operations records are linked or explicitly marked not applicable.",
+        apiRouteChips: [
+          "/api/harness-dashboard/v1/version-control",
+          "/api/harness-dashboard/v1/evidence-ref?ref=missing.service-health",
+        ],
+        successSignal: "Missing evidence and open decision counts shrink without hiding unresolved gaps.",
+      },
+    ],
+    apiRouteChips: [
+      "/api/harness-dashboard/v1/reality-check",
+      "/api/harness-dashboard/v1/traceability",
+      "/api/harness-dashboard/v1/query?scope=reality-check&q=userPerspectiveAudit",
+      "/api/harness-dashboard/v1/health",
+    ],
+  };
   return {
     meta: {
       schemaVersion: DASHBOARD_SCHEMA_VERSION,
@@ -3019,6 +3209,7 @@ function buildDashboardState(params: WorkspaceInitParams) {
         qaGate:
           "If Playwright, accessibility, keyboard, console, responsive, or canvas fallback checks fail, prefer stable DOM/CSS over experimental API usage.",
       },
+      userPerspectiveAudit,
       dimensions: [
         {
           id: "executive-judgment",
@@ -3351,6 +3542,8 @@ function buildDashboardState(params: WorkspaceInitParams) {
     sessionTraceability: {
       schemaVersion: DASHBOARD_SCHEMA_VERSION,
       status: "bootstrap-trace-complete",
+      traceDebtCount: 0,
+      trustedTraceCount: 1,
       purpose:
         "Let users understand what was requested, what process ran, what result was recorded, what evidence backs it, and what should happen next without opening raw runtime JSON or chat history.",
       source:
@@ -3366,6 +3559,9 @@ function buildDashboardState(params: WorkspaceInitParams) {
           originalRequest: bootstrapTaskTrace.originalRequest,
           processSummary: bootstrapTaskTrace.processSummary,
           resultSummary: bootstrapTaskTrace.resultSummary,
+          traceSource: bootstrapTaskTrace.traceSource,
+          traceDebt: bootstrapTaskTrace.traceDebt,
+          traceConfidence: bootstrapTaskTrace.traceConfidence,
           traceIntegrity: bootstrapTraceIntegrity,
           residualRisk:
             "Bootstrap projections are not real service, VCS, release, owner, or operations evidence.",
@@ -3912,6 +4108,9 @@ function buildDashboardState(params: WorkspaceInitParams) {
         owner: "workspace-init-mcp",
         outputs: bootstrapSessionEvidenceRefs,
         taskTrace: bootstrapTaskTrace,
+        traceSource: bootstrapTaskTrace.traceSource,
+        traceDebt: bootstrapTaskTrace.traceDebt,
+        traceConfidence: bootstrapTaskTrace.traceConfidence,
         traceIntegrity: bootstrapTraceIntegrity,
         note: "Initial project world model, ledger, projections, and dashboard generated.",
       },
@@ -3950,6 +4149,9 @@ function buildDashboardState(params: WorkspaceInitParams) {
         },
         outputs: bootstrapSessionEvidenceRefs,
         taskTrace: bootstrapTaskTrace,
+        traceSource: bootstrapTaskTrace.traceSource,
+        traceDebt: bootstrapTaskTrace.traceDebt,
+        traceConfidence: bootstrapTaskTrace.traceConfidence,
         traceIntegrity: bootstrapTraceIntegrity,
         residualRisk:
           "Bootstrap projections are not real service, VCS, release, owner, or operations evidence.",
@@ -4589,6 +4791,9 @@ function buildDashboardStateSchema(): string {
             "originalRequest",
             "processSummary",
             "resultSummary",
+            "traceSource",
+            "traceDebt",
+            "traceConfidence",
             "traceIntegrity",
             "evidenceRefs",
             "nextStep",
@@ -4601,6 +4806,9 @@ function buildDashboardStateSchema(): string {
             originalRequest: { type: "string" },
             processSummary: { type: "string" },
             resultSummary: { type: "string" },
+            traceSource: { type: "string" },
+            traceDebt: { type: "boolean" },
+            traceConfidence: { type: "string" },
             traceIntegrity: { type: "object" },
             residualRisk: { type: "string" },
             evidenceRefs: { type: "array", items: { type: "string" } },
@@ -4810,7 +5018,7 @@ function buildDashboardStateSchema(): string {
   };
   properties.dashboardQualityScorecard = {
     type: "object",
-    required: ["targetScore", "uiUxDesignScore", "projectEvidenceScore", "qaEvidence", "modernWebUiPolicy"],
+    required: ["targetScore", "uiUxDesignScore", "projectEvidenceScore", "qaEvidence", "modernWebUiPolicy", "userPerspectiveAudit"],
     additionalProperties: true,
     properties: {
       targetScore: { type: "number" },
@@ -4827,6 +5035,69 @@ function buildDashboardStateSchema(): string {
         },
       },
       modernWebUiPolicy: { type: "object" },
+      userPerspectiveAudit: {
+        type: "object",
+        required: [
+          "targetScore",
+          "currentSupportScore",
+          "scoreStatus",
+          "scorePolicy",
+          "summary",
+          "explicitBlocker",
+          "dimensions",
+          "verificationPath",
+          "apiRouteChips",
+        ],
+        additionalProperties: true,
+        properties: {
+          targetScore: { type: "number" },
+          currentSupportScore: { type: "number" },
+          scoreStatus: { type: "string" },
+          scorePolicy: { type: "string" },
+          summary: { type: "string" },
+          explicitBlocker: { type: "string" },
+          missingEvidenceCount: { type: "number" },
+          openDecisionCount: { type: "number" },
+          apiRouteChips: { type: "array", items: { type: "string" } },
+          dimensions: {
+            type: "array",
+            items: {
+              type: "object",
+              required: [
+                "id",
+                "label",
+                "score",
+                "status",
+                "negativeFinding",
+                "userOutcome",
+                "evidenceRefs",
+                "apiRouteChips",
+                "nextAction",
+              ],
+              additionalProperties: true,
+              properties: {
+                id: { type: "string" },
+                label: { type: "string" },
+                score: { type: "number" },
+                status: { type: "string" },
+                negativeFinding: { type: "string" },
+                userOutcome: { type: "string" },
+                evidenceRefs: { type: "array", items: { type: "string" } },
+                apiRouteChips: { type: "array", items: { type: "string" } },
+                nextAction: { type: "string" },
+              },
+            },
+          },
+          verificationPath: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["id", "title", "command", "expectedEvidence", "apiRouteChips", "successSignal"],
+              additionalProperties: true,
+            },
+          },
+        },
+      },
     },
   };
   return `${JSON.stringify(
@@ -6747,26 +7018,72 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const whyNot = (scorecard.whyNot95Yet || []).map((item) => '<li>' + esc(item) + '</li>').join("");
         const qa = scorecard.qaEvidence || {};
         const qaRows = (qa.requiredFor95 || []).map((item) => '<li>' + esc(item) + '</li>').join("");
+        const audit = scorecard.userPerspectiveAudit || {};
+        const auditDimensions = Array.isArray(audit.dimensions) ? audit.dimensions : [];
+        const auditDimensionRows = auditDimensions.map((item) =>
+          '<article class="hub-item ' + (/blocked|pending|debt|required|risk|bootstrap/i.test(String(item.status || "")) ? "warn" : "") + '">' +
+            '<span class="rail-label">' + esc(item.id || t("notDeclared")) + '</span>' +
+            '<strong>' + esc(item.label || item.id || t("notDeclared")) + ' · ' + esc((Number(item.score || 0)).toFixed(1)) + '/10</strong>' +
+            '<span>' + badge(item.status || "unknown") + '</span>' +
+            '<p><strong>Negative finding:</strong> ' + esc(item.negativeFinding || "") + '</p>' +
+            '<p><strong>User outcome:</strong> ' + esc(item.userOutcome || "") + '</p>' +
+            '<span class="source"><strong>' + esc(t("evidence")) + ':</strong> ' + evidenceRefList(item.evidenceRefs, 4) + '</span>' +
+            '<div class="api-route-list">' + apiRouteList((item.apiRouteChips || []).slice(0, 3)) + '</div>' +
+            '<span class="source"><strong>' + esc(t("whatNext")) + ':</strong> ' + esc(item.nextAction || "") + '</span>' +
+          '</article>'
+        ).join("");
+        const auditVerificationRows = (audit.verificationPath || []).map((item) =>
+          '<article class="hub-item">' +
+            '<span class="rail-label">' + esc(item.id || t("notDeclared")) + '</span>' +
+            '<strong>' + esc(item.title || item.id || t("notDeclared")) + '</strong>' +
+            '<code class="command-line">' + esc(item.command || "") + '</code>' +
+            '<p>' + esc(item.expectedEvidence || "") + '</p>' +
+            '<span class="source"><strong>' + esc(t("expectedVisibleChange")) + ':</strong> ' + esc(item.successSignal || "") + '</span>' +
+            '<div class="api-route-list">' + apiRouteList((item.apiRouteChips || []).slice(0, 3)) + '</div>' +
+          '</article>'
+        ).join("");
+        const auditBlock = audit.targetScore
+          ? '<h3>User Perspective Audit</h3>' +
+            metricGrid([
+              ["Support", (Number(audit.currentSupportScore || 0)).toFixed(1) + "/10", "target " + audit.targetScore],
+              ["Status", audit.scoreStatus || "unknown", "negative review"],
+              ["Evidence Gaps", audit.missingEvidenceCount ?? 0, "still visible"],
+              ["Open Decisions", audit.openDecisionCount ?? 0, "still visible"],
+            ]) +
+            '<p class="muted">' + esc(audit.scorePolicy || "") + '</p>' +
+            '<div class="hub-item warn"><strong>Concrete blocker</strong><p>' + esc(audit.explicitBlocker || "") + '</p><div class="api-route-list">' + apiRouteList((audit.apiRouteChips || []).slice(0, 6)) + '</div></div>' +
+            '<div class="hub-grid"><section class="hub-list"><h3>Dimension Review</h3>' + (auditDimensionRows || '<p class="muted">' + esc(t("notDeclared")) + '</p>') + '</section><section class="hub-list"><h3>Verification Path</h3>' + (auditVerificationRows || '<p class="muted">' + esc(t("notDeclared")) + '</p>') + '</section></div>'
+          : "";
         return metricGrid([
           ["UI/UX", (Number(scorecard.uiUxDesignScore || 0)).toFixed(1) + "/10", "target " + (scorecard.targetScore || 9.5)],
           ["Project Evidence", (Number(scorecard.projectEvidenceScore || 0)).toFixed(1) + "/10", "truth score, not beautified"],
           ["Dimensions", dimensions.length, "scorecard rows"],
           ["QA Evidence", qa.status || "not-declared", "browser gate"],
-        ]) + '<p class="muted">' + esc(scorecard.scoringPolicy || "") + '</p><div class="quality-meter">' + rows + '</div><h3>QA contract</h3><p class="muted">' + esc(qa.note || "") + '</p><ul>' + qaRows + '</ul><h3>Evaluator provenance</h3><ul>' + provenance + '</ul><h3>Why not 9.5 yet</h3><ul>' + whyNot + '</ul>';
+        ]) + '<p class="muted">' + esc(scorecard.scoringPolicy || "") + '</p><div class="quality-meter">' + rows + '</div>' + auditBlock + '<h3>QA contract</h3><p class="muted">' + esc(qa.note || "") + '</p><ul>' + qaRows + '</ul><h3>Evaluator provenance</h3><ul>' + provenance + '</ul><h3>Why not 9.5 yet</h3><ul>' + whyNot + '</ul>';
       }
       function normalizeTraceEntry(entry) {
         const trace = entry.taskTrace || entry;
         const integrity = entry.traceIntegrity || trace.traceIntegrity || {};
+        const integrityStatus = integrity.status || trace.integrityStatus || "unknown";
+        const traceSource = entry.traceSource || trace.traceSource || integrity.traceSource || trace.source || entry.source || "synthetic-backfill";
+        const explicitDebt = entry.traceDebt ?? trace.traceDebt ?? integrity.traceDebt;
+        const missingFields = integrity.missingFields || trace.missingFields || [];
+        const traceDebt = Boolean(explicitDebt) || (missingFields || []).length > 0 || /missing|fallback|unknown|synthetic/i.test(String(integrityStatus + " " + traceSource));
+        const traceConfidence = entry.traceConfidence || trace.traceConfidence || integrity.traceConfidence || (traceDebt ? "low" : "high");
+        const fallbackTraceText = (fieldLabel) => "Trace debt: " + fieldLabel + " was not recorded as authoritative request/process/result evidence.";
         return {
           sessionId: entry.sessionId || entry.id || "session",
           title: entry.title || entry.goal || entry.sessionId || entry.id || "Session",
           status: entry.status || "unknown",
           phase: entry.phase || entry.stage || entry.currentPhase || "unknown",
-          originalRequest: trace.originalRequest || entry.originalRequest || entry.goal || t("notDeclared"),
-          processSummary: trace.processSummary || entry.processSummary || entry.note || t("notDeclared"),
-          resultSummary: trace.resultSummary || entry.resultSummary || entry.note || t("notDeclared"),
-          integrityStatus: integrity.status || trace.integrityStatus || "unknown",
-          missingFields: integrity.missingFields || trace.missingFields || [],
+          originalRequest: trace.originalRequest || entry.originalRequest || (traceDebt ? fallbackTraceText("Original request") : entry.goal) || t("notDeclared"),
+          processSummary: trace.processSummary || entry.processSummary || (traceDebt ? fallbackTraceText("Process summary") : t("notDeclared")),
+          resultSummary: trace.resultSummary || entry.resultSummary || (traceDebt ? fallbackTraceText("Result summary") : t("notDeclared")),
+          integrityStatus,
+          missingFields,
+          traceSource,
+          traceDebt,
+          traceConfidence,
           residualRisk: entry.residualRisk || trace.residualRisk || "",
           evidenceRefs: entry.evidenceRefs || entry.outputs || [],
           nextStep: entry.nextStep || entry.nextAction || t("notDeclared"),
@@ -6794,10 +7111,18 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
           })
           .slice(0, rowLimit(8));
         const cards = entries.map((entry) => {
-          const hasMissing = (entry.missingFields || []).length > 0 || /missing|fallback|unknown/i.test(String(entry.integrityStatus));
+          const hasMissing = Boolean(entry.traceDebt) || (entry.missingFields || []).length > 0 || /missing|fallback|unknown/i.test(String(entry.integrityStatus));
+          const provenanceStrip =
+            '<div class="evidence-rank-strip">' +
+              '<span class="source"><strong>Trace source:</strong> ' + esc(entry.traceSource || "unknown") + '</span>' +
+              '<span class="source"><strong>Trace confidence:</strong> ' + esc(entry.traceConfidence || "unknown") + '</span>' +
+              '<span class="source"><strong>Trace debt:</strong> ' + esc(entry.traceDebt ? "yes" : "no") + '</span>' +
+            '</div>';
           return '<article class="trace-card ' + (hasMissing ? 'warn' : '') + '"><div class="trace-meta">' +
             badge(entry.status) + badge(entry.phase) + '<span class="source">' + esc(entry.sessionId) + '</span><span class="source">' + esc(t("traceIntegrity")) + ': ' + esc(entry.integrityStatus) + '</span></div>' +
             '<h3>' + esc(entry.title) + '</h3>' +
+            provenanceStrip +
+            (entry.traceDebt ? '<p class="projection-warning"><strong>Non-authoritative trace:</strong> This entry contains fallback or synthetic request/process/result text. Record a governed event or execution receipt before treating it as trusted progress.</p>' : '') +
             '<div class="trace-flow">' +
             '<div class="trace-step"><strong>' + esc(t("originalRequest")) + '</strong><p>' + esc(entry.originalRequest) + '</p></div>' +
             '<div class="trace-step"><strong>' + esc(t("processSummary")) + '</strong><p>' + esc(entry.processSummary) + '</p></div>' +
