@@ -1122,6 +1122,7 @@ function buildAgentCommandBridge(params: WorkspaceInitParams) {
       {
         id: "agent-refresh-dashboard",
         label: "Draft request: refresh dashboard projections",
+        displayLabel: "Refresh projections",
         targetTool: "dashboard-ops refresh",
         payload: {
           command:
@@ -1137,6 +1138,7 @@ function buildAgentCommandBridge(params: WorkspaceInitParams) {
       {
         id: "agent-run-semantic-gate",
         label: "Draft request: semantic governance gate",
+        displayLabel: "Semantic gate",
         targetTool: "enforce_architecture_governance",
         payload: {
           workspacePath: params.workspacePath,
@@ -1154,6 +1156,7 @@ function buildAgentCommandBridge(params: WorkspaceInitParams) {
       {
         id: "agent-open-governed-session",
         label: "Draft request: governed work session",
+        displayLabel: "Governed session",
         targetTool: "start_harness_session",
         payload: {
           goal: params.purpose,
@@ -8736,7 +8739,7 @@ function buildDashboardHtml(params: WorkspaceInitParams, embeddedStateJson: stri
         const bridge = agentBridgeState();
         const commands = Array.isArray(bridge.suggestedCommands) ? bridge.suggestedCommands : [];
         const command = selectedAgentCommand() || {};
-        const options = commands.map((item) => '<option value="' + esc(item.id) + '">' + esc(item.label || item.id) + '</option>').join("");
+        const options = commands.map((item) => '<option value="' + esc(item.id) + '">' + esc(item.displayLabel || item.label || item.id) + '</option>').join("");
         const packet = app.agentCommandPacket || {
           commandId: command.id || app.agentCommandType,
           executionMode: bridge.executionMode || "draft-only",
